@@ -1914,6 +1914,10 @@ static NSUInteger modifierDeviceMask(int code) {
     return count;
 }
 
+- (BOOL) providesWindowTitleBar {
+    return YES;
+}
+
 - (CGRect) insetRect: (CGRect) frame
         forNativeWindowBorderWithStyle: (NSUInteger) styleMask
 {

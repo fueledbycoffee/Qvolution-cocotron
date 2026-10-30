@@ -117,6 +117,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 - (CGRect) insetRect: (CGRect) frame
         forNativeWindowBorderWithStyle: (NSUInteger) styleMask;
+- (BOOL) providesWindowTitleBar;
 - (CGRect) outsetRect: (CGRect) frame
         forNativeWindowBorderWithStyle: (NSUInteger) styleMask;
 

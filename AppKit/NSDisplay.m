@@ -400,6 +400,10 @@ static void eventPosted(void *info) {}
     return nil;
 }
 
+- (BOOL) providesWindowTitleBar {
+    return NO;
+}
+
 - (CGRect) insetRect: (CGRect) frame
         forNativeWindowBorderWithStyle: (NSUInteger) styleMask
 {

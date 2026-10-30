@@ -18,6 +18,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSBezierPath.h>
 #import <AppKit/NSColor.h>
+#import <AppKit/NSDisplay.h>
 #import <AppKit/NSFont.h>
 #import <AppKit/NSStringDrawing.h>
 #import <AppKit/NSGraphics.h>
@@ -63,7 +64,8 @@ static const CGFloat kTitleBarHeight = 28.0;
 @implementation NSThemeFrame
 
 + (CGFloat) titleBarHeightForStyleMask: (NSUInteger) styleMask {
-    if (styleMask & NSWindowStyleMaskTitled)
+    if ((styleMask & NSWindowStyleMaskTitled) &&
+        ![[NSDisplay currentDisplay] providesWindowTitleBar])
         return kTitleBarHeight;
     return 0.0;
 }
