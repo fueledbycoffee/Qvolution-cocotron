@@ -43,15 +43,15 @@
     if (url == nil) {
         return _rootItems;
     }
-    NSArray *items = [_fileManager contentsOfDirectoryAtURL: url
-                                 includingPropertiesForKeys: nil
-                                                    options: 0
-                                                      error: nil];
-    if (items == nil)
+    NSString *path = [url path];
+    NSArray *names = [_fileManager contentsOfDirectoryAtPath: path error: NULL];
+    if (names == nil)
         return [NSArray array];
-    return [items sortedArrayUsingComparator: ^(id u1, id u2) {
-        return [[(NSURL *)u1 lastPathComponent] caseInsensitiveCompare: [(NSURL *)u2 lastPathComponent]];
-    }];
+    names = [names sortedArrayUsingSelector: @selector(caseInsensitiveCompare:)];
+    NSMutableArray *items = [NSMutableArray arrayWithCapacity: [names count]];
+    for (NSString *name in names)
+        [items addObject: [NSURL fileURLWithPath: [path stringByAppendingPathComponent: name]]];
+    return items;
 }
 
 - (NSInteger) outlineView: (NSOutlineView *) outlineView

@@ -56,6 +56,8 @@ static NSString *defaultDirectory(void) {
     [self setNameFieldStringValue: @""];
     [self _setFilename: @""];
     [self setDirectory: defaultDirectory()];
+    // Measuring every filename on expansion blocks large-directory navigation.
+    [_outlineView setAutoresizesOutlineColumn: NO];
     [self setRequiredFileType: @""];
     // Content types also derive the legacy filename-extension filter.
     [self setAllowedContentTypes: nil];
