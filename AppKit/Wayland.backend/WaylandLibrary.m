@@ -69,19 +69,23 @@ bool WaylandBackendSelected(void) {
     if (waylandDisplay == NULL || *waylandDisplay == '\0')
         return false;
 
+    // libwayland uses absolute WAYLAND_DISPLAY paths without XDG qualification.
+    if (waylandDisplay[0] == '/')
+        return access(waylandDisplay, R_OK | W_OK) == 0;
+
     const char *runtimeDir = getenv("XDG_RUNTIME_DIR");
     char sockPath[1024];
+    int length;
     if (runtimeDir && *runtimeDir != '\0') {
-        snprintf(sockPath, sizeof(sockPath), "%s/%s", runtimeDir, waylandDisplay);
+        length = snprintf(sockPath, sizeof(sockPath), "%s/%s", runtimeDir, waylandDisplay);
     } else {
-        snprintf(sockPath, sizeof(sockPath), "/run/user/%d/%s", getuid(), waylandDisplay);
+        length = snprintf(sockPath, sizeof(sockPath), "/run/user/%d/%s", getuid(), waylandDisplay);
     }
 
-    if (access(sockPath, R_OK | W_OK) != 0) {
+    if (length < 0 || (size_t)length >= sizeof(sockPath))
         return false;
-    }
 
-    return true;
+    return access(sockPath, R_OK | W_OK) == 0;
 }
 
 bool WaylandLibraryLoad(void) {

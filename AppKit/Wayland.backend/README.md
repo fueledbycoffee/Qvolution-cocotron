@@ -1,7 +1,8 @@
 # Darling AppKit Wayland backend
 
 This backend draws Cocotron AppKit windows directly on a Wayland compositor.
-It is opt-in; X11 remains the default. This combined branch includes the reviewed
+It is selected automatically when an accessible `WAYLAND_DISPLAY` socket is
+advertised; X11 remains the fallback. This combined branch includes the reviewed
 input, drag-and-drop and EGL milestones, with the integration limits below.
 
 ## Selecting it
@@ -15,10 +16,15 @@ darling shell env DARLING_APPKIT_BACKEND=wayland \
 ```
 
 The socket path is a **host** path, not a `/Volumes/SystemRoot` guest path:
-native libwayland opens it. Without the selector, AppKit uses X11. Missing native
-libraries, unavailable compositor or required globals cause a logged fallback
+native libwayland opens it. Autodetection accepts both absolute paths and names
+relative to `XDG_RUNTIME_DIR`. Set `DARLING_APPKIT_BACKEND=x11` to force X11.
+Missing native libraries, unavailable compositor or required globals cause a logged fallback
 to the next backend. An older OpenGL runtime without the explicit Wayland EGL
 registration API still permits CPU drawing and reports unavailable EGL support.
+
+`python3 tests/wayland-backend-selection.py` runs the production selector against
+isolated host sockets, including absolute and relative names and explicit backend
+overrides. It does not establish successful compositor connection or guest launch.
 
 CMake requires wayland-client >= 1.20, wayland-cursor, xkbcommon,
 wayland-protocols headers and wayland-scanner. It skips this backend when build
