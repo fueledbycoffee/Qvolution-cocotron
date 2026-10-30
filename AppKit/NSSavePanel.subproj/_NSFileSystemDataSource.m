@@ -7,6 +7,7 @@
 - (id) init {
     self = [super init];
     _cachedPaths = [[NSMutableSet alloc] init];
+    _directoryContents = [[NSMutableDictionary alloc] init];
     _fileManager = [[NSFileManager defaultManager] retain];
 
     NSMutableArray *roots = [NSMutableArray array];
@@ -32,6 +33,7 @@
 
 - (void) dealloc {
     [_cachedPaths release];
+    [_directoryContents release];
     [_fileManager release];
     [_rootItems release];
     [super dealloc];
@@ -55,7 +57,10 @@
 - (NSInteger) outlineView: (NSOutlineView *) outlineView
         numberOfChildrenOfItem: (NSURL *) url
 {
-    return [[self _contentsOfDirectory: url] count];
+    NSArray *items = [self _contentsOfDirectory: url];
+    if (url != nil)
+        [_directoryContents setObject: items forKey: url];
+    return [items count];
 }
 
 - (BOOL) outlineView: (NSOutlineView *) outlineView
@@ -78,8 +83,12 @@
                   child: (NSInteger) index
                  ofItem: (NSURL *) url
 {
-    NSArray *items = [self _contentsOfDirectory: url];
-    if (index >= [items count])
+    NSArray *items = url == nil ? _rootItems : [_directoryContents objectForKey: url];
+    if (items == nil) {
+        items = [self _contentsOfDirectory: url];
+        [_directoryContents setObject: items forKey: url];
+    }
+    if (index < 0 || (NSUInteger)index >= [items count])
         return nil;
     NSURL *preRes = [items objectAtIndex: index];
     NSURL *res = [_cachedPaths member: preRes];
