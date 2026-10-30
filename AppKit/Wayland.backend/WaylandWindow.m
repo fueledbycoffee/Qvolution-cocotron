@@ -885,7 +885,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 // Copies the current content into a shm buffer and commits it, at most once
 // per frame callback.
 - (void) presentIfPossible {
-    if (!_needsPresent || !_mapped || !_configured || _configureUpdatePending || _frameCallback != NULL ||
+    if ([_delegate isFlushWindowDisabled] || !_needsPresent || !_mapped || !_configured || _configureUpdatePending || _frameCallback != NULL ||
         _context == nil)
         return;
 

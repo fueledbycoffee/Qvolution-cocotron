@@ -711,7 +711,7 @@ static BOOL _allowsAutomaticWindowTabbing;
 }
 
 - (BOOL) isFlushWindowDisabled {
-    return _isFlushWindowDisabled;
+    return _flushDisabled > 0;
 }
 
 - (NSString *) frameAutosaveName {
