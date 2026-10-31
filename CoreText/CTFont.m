@@ -360,10 +360,46 @@ CTFontRef CTFontCreateForStringWithLanguage(CTFontRef currentFont, CFStringRef s
     return result;
 }
 
+static void setCopiedDescriptorAttribute(NSMutableDictionary *attributes,
+                                         CFStringRef key, CFTypeRef value) {
+    if (value == NULL)
+        return;
+    @try {
+        [attributes setObject:(id)value forKey:(id)key];
+    } @finally {
+        CFRelease(value);
+    }
+}
+
 CTFontDescriptorRef CTFontCopyFontDescriptor(CTFontRef font)
 {
-    printf("STUB %s\n", __PRETTY_FUNCTION__);
-    return nil;
+    if (font == NULL)
+        return NULL;
+    CFStringRef name = CGFontCopyPostScriptName(graphicsFont(font));
+    if (name == NULL)
+        return NULL;
+    NSMutableDictionary *attributes = nil;
+    CTFontDescriptorRef result = NULL;
+    @try {
+        attributes = [[NSMutableDictionary alloc] init];
+        [attributes setObject:(id)name forKey:(id)kCTFontNameAttribute];
+        [attributes setObject:(id)name forKey:(id)kCTFontPostScriptNameAttribute];
+        const CFStringRef keys[] = {kCTFontFamilyNameAttribute,
+                                   kCTFontSizeAttribute,
+                                   kCTFontCascadeListAttribute};
+        for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
+            setCopiedDescriptorAttribute(attributes, keys[i],
+                                         CTFontCopyAttribute(font, keys[i]));
+        setCopiedDescriptorAttribute(attributes, kCTFontDisplayNameAttribute,
+                                     CTFontCopyDisplayName(font));
+        setCopiedDescriptorAttribute(attributes, kCTFontTraitsAttribute,
+                                     CTFontCopyTraits(font));
+        result = CTFontDescriptorCreateWithAttributes((CFDictionaryRef)attributes);
+    } @finally {
+        CFRelease(name);
+        [attributes release];
+    }
+    return result;
 }
 
 CFTypeRef CTFontCopyAttribute(CTFontRef font, CFStringRef attribute)
