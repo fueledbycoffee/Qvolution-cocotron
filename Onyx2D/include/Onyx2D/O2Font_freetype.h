@@ -48,6 +48,10 @@ O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
 
 - (O2FreeTypeCachedGlyph *) rasterizeGlyph: (O2Glyph) glyph
                                   pointSize: (O2Float) pointSize;
+- (O2FreeTypeCachedGlyph *) rasterizeGlyph: (O2Glyph) glyph
+                                  pointSize: (O2Float) pointSize
+                                    phaseX: (uint8_t) phaseX
+                                    phaseY: (uint8_t) phaseY;
 
 @end
 

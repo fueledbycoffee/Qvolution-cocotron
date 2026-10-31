@@ -560,8 +560,8 @@ FT_Face O2FontFreeTypeFace(O2Font_freetype *self) {
     }
 
     @synchronized(self) {
-        uint64_t keyValue = ((uint64_t)(uint32_t)((long)(pointSize * 64)) << 32) |
-                            glyph;
+        uint64_t keyValue = ((uint64_t)(uint32_t)((long)(pointSize * 64)) << 28) |
+                            ((uint64_t)glyph << 12);
         NSNumber *key = [NSNumber numberWithUnsignedLongLong: keyValue];
 
         O2FreeTypeCachedGlyph *cached = [_glyphCache objectForKey: key];
@@ -589,6 +589,55 @@ FT_Face O2FontFreeTypeFace(O2Font_freetype *self) {
         }
 
         [_glyphCache setObject: cached forKey: key];
+        return [cached autorelease];
+    }
+}
+
+- (O2FreeTypeCachedGlyph *) rasterizeGlyph: (O2Glyph) glyph
+                                  pointSize: (O2Float) pointSize
+                                    phaseX: (uint8_t) phaseX
+                                    phaseY: (uint8_t) phaseY
+{
+    if (_face == NULL || phaseX >= 64 || phaseY >= 64 ||
+        !isfinite(pointSize) || pointSize <= 0 || pointSize * 64 > UINT32_MAX)
+        return nil;
+
+    if ((phaseX == 0 && phaseY == 0) || !FT_IS_SCALABLE(_face))
+        return [self rasterizeGlyph: glyph pointSize: pointSize];
+
+    @synchronized(self) {
+        FT_Matrix matrix;
+        FT_Vector delta;
+        FT_Get_Transform(_face, &matrix, &delta);
+        BOOL cacheable = matrix.xx == 0x10000 && matrix.xy == 0 &&
+                matrix.yx == 0 && matrix.yy == 0x10000 && delta.x == 0 && delta.y == 0;
+        uint64_t keyValue = ((uint64_t)(uint32_t)(pointSize * 64) << 28) |
+                ((uint64_t)glyph << 12) | ((uint64_t)phaseX << 6) | phaseY;
+        NSNumber *key = [NSNumber numberWithUnsignedLongLong: keyValue];
+        O2FreeTypeCachedGlyph *cached = cacheable ? [_glyphCache objectForKey: key] : nil;
+        if (cached != nil)
+            return [[cached retain] autorelease];
+
+        if (delta.x > LONG_MAX - phaseX || delta.y < LONG_MIN + phaseY)
+            return nil;
+        FT_Vector shifted = {delta.x + phaseX, delta.y - phaseY};
+        FT_Set_Transform(_face, &matrix, &shifted);
+        FT_Error error = FT_Load_Glyph(_face, glyph, FT_LOAD_NO_BITMAP);
+        if (error == 0)
+            error = FT_Render_Glyph(_face->glyph, FT_RENDER_MODE_NORMAL);
+        FT_Set_Transform(_face, &matrix, &delta);
+        if (error != 0)
+            return nil;
+
+        FT_GlyphSlot slot = _face->glyph;
+        cached = [[O2FreeTypeCachedGlyph alloc]
+                initWithBitmap: &slot->bitmap left: slot->bitmap_left
+                           top: slot->bitmap_top advance: slot->advance.x];
+        if (cacheable) {
+            if ([_glyphCache count] >= O2FONT_GLYPH_CACHE_LIMIT)
+                [_glyphCache removeAllObjects];
+            [_glyphCache setObject: cached forKey: key];
+        }
         return [cached autorelease];
     }
 }

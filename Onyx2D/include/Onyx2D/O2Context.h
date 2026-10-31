@@ -136,9 +136,7 @@ typedef void (*O2ContextShowGlyphsFunction)(O2ContextRef, SEL, const O2Glyph *,
     BOOL _allowsAntialiasing;
     BOOL _allowsFontSmoothing;
     BOOL _allowsFontSubpixelQuantization;
-    BOOL _shouldSubpixelQuantizeFonts;
     BOOL _allowsFontSubpixelPositioning;
-    BOOL _shouldSubpixelPositionFonts;
     O2AffineTransform _textMatrix;
     O2AffineTransform _textLineMatrix;
 

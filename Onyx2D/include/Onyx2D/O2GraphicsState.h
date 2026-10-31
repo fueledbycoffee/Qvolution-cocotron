@@ -54,6 +54,8 @@ extern "C" {
     O2Size _patternPhase;
     int _textDrawingMode;
     BOOL _shouldSmoothFonts;
+    BOOL _shouldSubpixelQuantizeFonts;
+    BOOL _shouldSubpixelPositionFonts;
     O2Float _lineWidth;
     O2LineCap _lineCap;
     O2LineJoin _lineJoin;

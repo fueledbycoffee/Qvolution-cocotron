@@ -182,6 +182,19 @@ static void renderFreeTypeBitmap(O2Context_builtin_FT *self, O2Surface *surface,
     }
 }
 
+// FreeType delta precision is 26.6; retain the integer carry at phase wrap.
+static BOOL splitGlyphOrigin(O2Float value, NSInteger *anchor, uint8_t *phase) {
+    if (!isfinite(value) || (double)value <= (double)NSIntegerMin + (double)UINT_MAX ||
+        (double)value >= (double)NSIntegerMax - (double)UINT_MAX)
+        return NO;
+    O2Float integral = floor(value);
+    long fraction = lround((value - integral) * 64);
+    if (fraction == 64) { integral += 1; fraction = 0; }
+    *anchor = (NSInteger)integral;
+    *phase = (uint8_t)fraction;
+    return YES;
+}
+
 - (void) showGlyphs: (const O2Glyph *) glyphs
            advances: (const O2Size *) advances
               count: (NSUInteger) count
@@ -244,14 +257,23 @@ static void renderFreeTypeBitmap(O2Context_builtin_FT *self, O2Surface *surface,
 
     const O2Size *useAdvances = (advances != NULL) ? advances : defaultAdvances;
 
+    BOOL position = _allowsFontSubpixelPositioning &&
+            gState->_shouldSubpixelPositionFonts && FT_IS_SCALABLE(face) &&
+            !(_allowsFontSubpixelQuantization && gState->_shouldSubpixelQuantizeFonts);
     for (i = 0; i < count; i++) {
-        O2FreeTypeCachedGlyph *cached =
-                [font rasterizeGlyph: glyphs[i] pointSize: fontSize.height];
+        uint8_t phaseX = 0, phaseY = 0;
+        NSInteger anchorX = 0, anchorY = 0;
+        BOOL valid = !position ||
+                (splitGlyphOrigin(point.x, &anchorX, &phaseX) &&
+                 splitGlyphOrigin(point.y, &anchorY, &phaseY));
+        O2FreeTypeCachedGlyph *cached = valid
+                ? [font rasterizeGlyph: glyphs[i] pointSize: fontSize.height
+                                phaseX: phaseX phaseY: phaseY] : nil;
 
         if (cached != nil)
             renderFreeTypeBitmap(self, _surface, &cached->bitmap,
-                                 point.x + cached->left,
-                                 point.y - cached->top, paint);
+                    position ? anchorX + cached->left : point.x + cached->left,
+                    position ? anchorY - cached->top : point.y - cached->top, paint);
 
         if (advances != NULL) {
             // Advances are in text space, so only the linear part of Trm

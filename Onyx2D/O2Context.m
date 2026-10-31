@@ -1557,7 +1557,7 @@ void O2ContextSetAllowsFontSubpixelQuantization(
 void O2ContextSetShouldSubpixelQuantizeFonts(O2ContextRef self,
                                              BOOL shouldSubpixelQuantizeFonts)
 {
-    self->_shouldSubpixelQuantizeFonts = shouldSubpixelQuantizeFonts;
+    O2ContextCurrentGState(self)->_shouldSubpixelQuantizeFonts = shouldSubpixelQuantizeFonts;
 }
 
 void O2ContextSetAllowsFontSubpixelPositioning(
@@ -1569,7 +1569,7 @@ void O2ContextSetAllowsFontSubpixelPositioning(
 void O2ContextSetShouldSubpixelPositionFonts(O2ContextRef self,
                                              BOOL shouldSubpixelPositionFonts)
 {
-    self->_shouldSubpixelPositionFonts = shouldSubpixelPositionFonts;
+    O2ContextCurrentGState(self)->_shouldSubpixelPositionFonts = shouldSubpixelPositionFonts;
 }
 
 @end
