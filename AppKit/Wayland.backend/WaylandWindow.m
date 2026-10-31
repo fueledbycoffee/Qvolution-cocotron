@@ -270,6 +270,32 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     [_display flush];
 }
 
+- (CGSize) maximumPopupSize {
+    WaylandWindow *parent = _popupParent ?: [_display popupParentForWindow: self];
+    if (parent == nil)
+        return CGSizeZero;
+    WaylandFullscreenOutput outputs[32];
+    struct wl_proxy *proxies[32];
+    size_t count = [_display fullscreenOutputs: outputs proxies: proxies max: 32
+                                      entered: parent->_surfaceOutputs];
+    BOOL hasEntered = NO;
+    for (size_t i = 0; i < count; ++i)
+        hasEntered |= outputs[i].entered;
+    CGSize limit = CGSizeZero;
+    for (size_t i = 0; i < count; ++i) {
+        if ((hasEntered && !outputs[i].entered) ||
+                outputs[i].width <= 0 || outputs[i].height <= 0)
+            continue;
+        if (limit.width == 0) {
+            limit = CGSizeMake(outputs[i].width, outputs[i].height);
+        } else {
+            limit.width = MIN(limit.width, outputs[i].width);
+            limit.height = MIN(limit.height, outputs[i].height);
+        }
+    }
+    return limit;
+}
+
 - (struct wl_proxy *) newPopupPositioner {
     union wl_argument args[4] = {{.o = NULL}};
     struct wl_proxy *positioner = WaylandCreateObject(_display->_wmBase,
@@ -298,6 +324,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     WaylandMarshal(positioner, WP_POSITIONER_SET_GRAVITY, NULL, 0, args);
     args[0].u = WP_POSITIONER_SLIDE_X | WP_POSITIONER_SLIDE_Y |
                 WP_POSITIONER_FLIP_X | WP_POSITIONER_FLIP_Y;
+    if ([_delegate isKindOfClass: NSClassFromString(@"NSPopUpWindow")])
+        args[0].u |= WP_POSITIONER_RESIZE_Y;
     WaylandMarshal(positioner, WP_POSITIONER_SET_CONSTRAINT_ADJUSTMENT, NULL, 0, args);
     return positioner;
 }

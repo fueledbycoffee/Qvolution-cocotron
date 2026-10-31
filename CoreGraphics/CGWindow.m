@@ -31,6 +31,10 @@ const CFStringRef kCGWindowIsOnscreen = CFSTR("kCGWindowIsOnscreen");
 
 @implementation CGWindow
 
+- (CGSize) maximumPopupSize {
+    return CGSizeZero;
+}
+
 - (CGFloat) backingScaleFactor { return 0; }
 
 - (void) setDelegate: delegate {

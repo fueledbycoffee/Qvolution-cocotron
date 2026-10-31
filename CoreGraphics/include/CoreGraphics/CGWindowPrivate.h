@@ -58,6 +58,9 @@ typedef enum {
 // Per-window rendering scale, or zero to use the screen scale.
 - (CGFloat) backingScaleFactor;
 
+// Logical popup bounds from the native parent output; zero means unavailable.
+- (CGSize) maximumPopupSize;
+
 - (NSUInteger) styleMask;
 
 - (void) setLevel: (int) value;

@@ -18,6 +18,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSPopUpView.h>
 #import <AppKit/NSPopUpWindow.h>
+#import <CoreGraphics/CGWindowPrivate.h>
 
 @implementation NSPopUpWindow
 
@@ -58,6 +59,17 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     [_view selectItemAtIndex: index];
 }
 
+- (void) platformWindow: (CGWindow *) window
+           frameChanged: (NSRect) frame
+                didSize: (BOOL) didSize {
+    [super platformWindow: window frameChanged: frame didSize: didSize];
+    if (didSize) {
+        [_view setFrameSize: [[self contentView] bounds].size];
+        [_view scrollBy: 0];
+        [_view scrollSelectedItemToVisible];
+    }
+}
+
 - (NSInteger) runTrackingWithEvent: (NSEvent *) event {
     NSSize size = [_view sizeForContents];
     NSRect selectedRect = [_view rectForSelectedItem];
@@ -68,8 +80,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     frame.origin.y -=
             (size.height - selectedRect.origin.y) - selectedRect.size.height;
     CGFloat contentTop = NSMaxY(frame);
+    CGSize nativeLimit = [[self platformWindow] maximumPopupSize];
     NSRect visible = [[self screen] visibleFrame];
-    if (visible.size.width > 0 && visible.size.height > 0) {
+    if (nativeLimit.width > 0 && nativeLimit.height > 0) {
+        frame.size.width = MIN(frame.size.width, nativeLimit.width);
+        frame.size.height = MIN(frame.size.height, nativeLimit.height);
+        CGFloat offset = MAX(0, MIN(size.height - frame.size.height,
+                selectedRect.origin.y - frame.size.height / 2));
+        frame.origin.y = contentTop - offset - frame.size.height;
+    } else if (visible.size.width > 0 && visible.size.height > 0) {
         frame.size.width = MIN(frame.size.width, visible.size.width);
         frame.size.height = MIN(frame.size.height, visible.size.height);
         frame.origin.x = MAX(NSMinX(visible), MIN(frame.origin.x,

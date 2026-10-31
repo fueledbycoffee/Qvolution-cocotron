@@ -261,6 +261,7 @@ enum {
     WP_POSITIONER_SLIDE_Y = 2,
     WP_POSITIONER_FLIP_X = 4,
     WP_POSITIONER_FLIP_Y = 8,
+    WP_POSITIONER_RESIZE_Y = 32,
 };
 
 // Linux input event codes (linux/input-event-codes.h) carried by wl_pointer.button.
