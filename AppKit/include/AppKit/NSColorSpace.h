@@ -20,6 +20,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <ApplicationServices/ApplicationServices.h>
 #import <Foundation/NSObject.h>
 
+@class NSData;
+
 @interface NSColorSpace : NSObject {
     CGColorSpaceRef _cgColorSpace;
 }
@@ -38,6 +40,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 + (NSColorSpace *) adobeRGB1998ColorSpace;
 
 - initWithCGColorSpace: (CGColorSpaceRef) cgColorSpace;
+
+@property(readonly, copy) NSData *ICCProfileData;
 
 - (CGColorSpaceRef) CGColorSpace;
 

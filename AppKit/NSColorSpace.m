@@ -86,6 +86,11 @@ NSString *const _NSColorCoreUICatalogNamePrefix =
     [super dealloc];
 }
 
+- (NSData *) ICCProfileData {
+    // O2ColorSpace currently stores models/names, not an imported ICC profile.
+    return nil;
+}
+
 - (CGColorSpaceRef) CGColorSpace {
     return _cgColorSpace;
 }

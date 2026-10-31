@@ -1,0 +1,9 @@
+# Optional ICC profile query
+
+[Apple NSColorSpace.ICCProfileData](https://developer.apple.com/documentation/appkit/nscolorspace/iccprofiledata) documents optional NSData containing the source ICC profile and permits nil when profile computation is unavailable (clean-room rung3). It does not require manufacturing bytes for a profileless device space.
+
+Current NSColorSpace only wraps an existing CGColorSpace. Current O2ColorSpace stores model, a platform-RGB flag and optional name; its constructors do not import or retain ICC profile data. No functioning CGColorSpaceCopyICCData/CopyICCProfile API exists here to reuse. Named spaces record names, not ICC bytes. This lane handles the truthful no-profile result for that existing representation. It does not implement an ICC-backed initializer, profile serialization, a physical display ICC profile, or color management. Future actual ICC storage/import must be paired with returning that stored profile; nil must not discard supported profile data.
+
+Original `appkit-colorspace-icc-profile.m` links AppKit+CoreGraphics, needs no NSApplication/window/arguments, and checks public selector availability, repeated absent-profile results for current device and named spaces, no model/components/name mutation, and CG wrapper ownership after an autorelease pool. Named-space nil assertions are explicitly current representation checks, not claims about native Apple named spaces. Parent/candidate runs and the unchanged application retake remain separate gates.
+
+Coordinator parent baseline: stage7 exit1 at selector availability,1.5672s, exact-prefix shutdown0; local evidence logs/colorspace-icc-before.json. Candidate source and original fixture compile isolated; candidate guest and unchanged-app retakes remain pending. Root independently reviewed the narrow source/header/representation fixture before commit.
