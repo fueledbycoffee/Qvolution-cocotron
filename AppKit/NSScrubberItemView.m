@@ -18,33 +18,52 @@
  */
 
 #import <AppKit/NSScrubberItemView.h>
+#import <AppKit/NSScrubberLayoutAttributes.h>
 
 @implementation NSScrubberArrangedView
 
-- (NSMethodSignature *)methodSignatureForSelector:(SEL)aSelector
-{
-    return [NSMethodSignature signatureWithObjCTypes: "v@:"];
+- (BOOL)isSelected { return _selected; }
+- (BOOL)isHighlighted { return _highlighted; }
+
+- (void)setSelected:(BOOL)value {
+    if (_selected != value) {
+        _selected = value;
+        [self setNeedsDisplay:YES];
+    }
 }
 
-- (void)forwardInvocation:(NSInvocation *)anInvocation
-{
-    NSLog(@"Stub called: %@ in %@", NSStringFromSelector([anInvocation selector]), [self class]);
+- (void)setHighlighted:(BOOL)value {
+    if (_highlighted != value) {
+        _highlighted = value;
+        [self setNeedsDisplay:YES];
+    }
 }
 
+- (void)applyLayoutAttributes:(NSScrubberLayoutAttributes *)attributes {
+    if (![attributes isKindOfClass:[NSScrubberLayoutAttributes class]])
+        [NSException raise:NSInvalidArgumentException format:@"Expected scrubber layout attributes"];
+    [self setFrame:[attributes frame]];
+    [self setAlphaValue:[attributes alpha]];
+    [self setNeedsDisplay:YES];
+}
+
+- (instancetype)initWithCoder:(NSCoder *)coder {
+    self = [super initWithCoder:coder];
+    if (self != nil && [coder allowsKeyedCoding]) {
+        _selected = [coder decodeBoolForKey:@"QvolutionScrubberSelected"];
+        _highlighted = [coder decodeBoolForKey:@"QvolutionScrubberHighlighted"];
+    }
+    return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)coder {
+    [super encodeWithCoder:coder];
+    [coder encodeBool:_selected forKey:@"QvolutionScrubberSelected"];
+    [coder encodeBool:_highlighted forKey:@"QvolutionScrubberHighlighted"];
+}
 @end
 
 @implementation NSScrubberItemView
-
-- (NSMethodSignature *)methodSignatureForSelector:(SEL)aSelector
-{
-    return [NSMethodSignature signatureWithObjCTypes: "v@:"];
-}
-
-- (void)forwardInvocation:(NSInvocation *)anInvocation
-{
-    NSLog(@"Stub called: %@ in %@", NSStringFromSelector([anInvocation selector]), [self class]);
-}
-
 @end
 
 @implementation NSScrubberTextItemView
