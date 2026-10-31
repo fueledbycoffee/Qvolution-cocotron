@@ -707,8 +707,7 @@ unsigned char *stbi_png_load_from_memory(const unsigned char *buffer, int len, i
     if (pixels == NULL)
         return nil;
 
-    // clamp premultiplied data, this should probably be moved into the O2Image
-    // init
+    // PNG samples are unassociated; the image below advertises premultiplied RGBA.
     int i;
     for (i = 0; i < bytesPerRow * height; i += 4) {
         unsigned char a = pixels[i + 3];
@@ -717,9 +716,9 @@ unsigned char *stbi_png_load_from_memory(const unsigned char *buffer, int len, i
             unsigned char g = pixels[i + 1];
             unsigned char b = pixels[i + 2];
 
-            pixels[i + 0] = MIN(r, a);
-            pixels[i + 1] = MIN(g, a);
-            pixels[i + 2] = MIN(b, a);
+            pixels[i + 0] = (r * a + 127) / 255;
+            pixels[i + 1] = (g * a + 127) / 255;
+            pixels[i + 2] = (b * a + 127) / 255;
         }
     }
 
