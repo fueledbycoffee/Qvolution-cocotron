@@ -1001,6 +1001,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                                            wl_fixed_to_double(args[3].f));
         [_pointerWindow setLastKnownCursorPosition:
                                 [_pointerWindow transformPoint: _pointerSurfacePoint]];
+        [_pointerWindow decorationPointerMoved: _pointerSurfacePoint];
         [self performAfterDispatch: ^{ [self applyCursor]; }];
         break;
 
@@ -1009,6 +1010,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         [self consumeDragPress];
         [_buttonClickCounts removeAllObjects];
         _lastMouseLocation = [self mouseLocation];
+        [_pointerWindow decorationPointerLeft];
         _pointerWindow = nil;
         _pointerEnterSerial = 0;
         _pendingScrollX = _pendingScrollY = 0;
@@ -1075,6 +1077,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     NSPoint location = [window transformPoint: _pointerSurfacePoint];
     NSPoint last = [window mouseLocationOutsideOfEventStream];
     [window setLastKnownCursorPosition: location];
+    [window decorationPointerMoved: _pointerSurfacePoint];
 
     if (_pressedButtons == 0 && [window isDecorationPoint: _pointerSurfacePoint]) {
         [self performAfterDispatch: ^{ [self applyCursor]; }];

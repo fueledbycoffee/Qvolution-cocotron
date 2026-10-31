@@ -22,6 +22,7 @@
 
 #import "WaylandDisplay.h"
 #import "WaylandFullscreen.h"
+#import <AppKit/NSTitlebarRenderer.h>
 
 @class WaylandClientCapture;
 @class NSWindow, O2Context, WaylandSubWindow, CAWindowOpenGLContext;
@@ -84,6 +85,14 @@ struct WaylandBuffer {
     BOOL _clientDecorated, _pendingClientDecorated;
     BOOL _decorationsDirty;
     BOOL _maximized, _pendingMaximized;
+    BOOL _pendingTiled;
+    // Logical shadow margin around the visible window; 0 when undecorated,
+    // maximized or tiled.
+    CGFloat _margin;
+    O2Rect _sentGeometry;
+    NSTitlebarTracker _buttonTracker;
+    NSTitlebarButton _shownPressed;
+    BOOL _buttonHover;
     // Whether the current xdg_toplevel was asked for fullscreen, what the last
     // configure said, and the size to go back to.
     BOOL _fullscreenRequested, _pendingFullscreen, _fullscreenRecheckPending;
@@ -130,6 +139,12 @@ struct WaylandBuffer {
 - (NSDictionary *) eglPresentationStatistics;
 - (NSPoint) contentOffset;
 - (BOOL) isDecorationPoint: (CGPoint) point;
+// The content origin relative to the xdg window geometry (the visible window),
+// which is what popup positioners and popup configures are relative to.
+- (NSPoint) geometryContentOffset;
+// Surface-local pointer position, for traffic-light hover feedback.
+- (void) decorationPointerMoved: (CGPoint) point;
+- (void) decorationPointerLeft;
 - (BOOL) decorationButton: (uint32_t) button pressed: (BOOL) pressed
                    serial: (uint32_t) serial atPoint: (CGPoint) point;
 
