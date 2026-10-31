@@ -372,7 +372,7 @@ CFTypeRef CTFontCopyAttribute(CTFontRef font, CFStringRef attribute)
     if (CFEqual(attribute, kCTFontCascadeListAttribute))
         return (CFTypeRef)[fontCascade(font) copy];
     if (CFEqual(attribute, kCTFontNameAttribute)) {
-        return CTFontCopyName(font, kCTFontFullNameKey);
+        return CTFontCopyPostScriptName(font);
     }
     if (CFEqual(attribute, kCTFontFamilyNameAttribute)) {
         return CTFontCopyFamilyName(font);
