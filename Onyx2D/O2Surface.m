@@ -749,6 +749,27 @@ void O2SurfaceWriteSpan_largb32f_PRE(O2Surface *self, int x, int y,
     if (length == 0)
         return;
 
+    BOOL byteWriter = self->_writeargb32f == O2SurfaceWrite_argb32f_to_argb8u ||
+            self->_writeargb32f == O2SurfaceWrite_argb32f_to_ABGR8888 ||
+            (self->_writeargb32f == O2SurfaceWrite_argb32f_to_argb8u_to_ANY &&
+             (self->_writeargb8u == O2SurfaceWrite_argb8u_to_BGRA8888 ||
+              self->_writeargb8u == O2SurfaceWrite_argb8u_to_ARGB8888));
+    if (length > 1 && byteWriter) {
+        int i = 1;
+        while (i < length && memcmp(span, span + i, sizeof(*span)) == 0)
+            i++;
+        if (i == length) {
+            // Convert once through the selected writer, preserving its byte
+            // layout and rounding, then repeat the identical stored pixel.
+            self->_writeargb32f(self, x, y, span, 1);
+            uint8_t *pixel = self->_pixelBytes + y * self->_bytesPerRow + x * 4;
+            uint32_t packed;
+            memcpy(&packed, pixel, sizeof(packed));
+            for (i = 1; i < length; i++)
+                memcpy(pixel + i * 4, &packed, sizeof(packed));
+            return;
+        }
+    }
     self->_writeargb32f(self, x, y, span, length);
 }
 
