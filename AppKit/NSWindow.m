@@ -226,6 +226,10 @@ NSInteger NSBitsPerPixelFromDepth(NSWindowDepth depth) {
 }
 @end
 
+@interface NSObject (QVDesktopSettingsPlatformWindow)
+- (void)desktopSettingsDidChange;
+@end
+
 @implementation NSWindowSheetCompletion
 
 - initWithHandler: (void (^)(NSInteger returnCode)) handler {
@@ -284,6 +288,14 @@ static BOOL _allowsAutomaticWindowTabbing;
             [_backgroundView _appearanceDidChangeFrom:previous];
         [self setViewsNeedDisplay:YES];
     } @finally { [self release]; }
+}
+
+- (void)_desktopSettingsDidChange {
+    [self setViewsNeedDisplay:YES];
+    [_backgroundView setNeedsDisplay:YES];
+    if ([_platformWindow respondsToSelector:@selector(desktopSettingsDidChange)])
+        [(id)_platformWindow desktopSettingsDidChange];
+    [self displayIfNeeded];
 }
 
 - (void)_applicationAppearanceDidChangeFrom:(NSAppearance *)previous {

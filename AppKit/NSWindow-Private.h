@@ -25,6 +25,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #define NSAppKitPrivateWindow 0x8000000
 
 @interface NSWindow (NSWindow_private)
+- (void)_desktopSettingsDidChange;
 - (NSResponder *)_qvolutionProposedFirstResponder;
 - (CGWindow *) platformWindow;
 - (BOOL) titleChangedRecently;

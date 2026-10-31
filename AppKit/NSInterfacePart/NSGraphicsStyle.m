@@ -393,16 +393,16 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 
 - (void) drawUnborderedButtonInRect: (NSRect) rect defaulted: (BOOL) defaulted {
     if (defaulted) {
-        [[NSColor blackColor] setFill];
+        [[NSColor controlAccentColor] setFill];
         NSRectFill(rect);
     }
 }
 
 - (void) drawPushButtonNormalInRect: (NSRect) rect defaulted: (BOOL) defaulted {
     if (defaulted) {
-        [[NSColor blackColor] setFill];
-        NSRectFill(rect);
-        rect = NSInsetRect(rect, 1, 1);
+        [[NSColor controlAccentColor] setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:rect xRadius:4 yRadius:4] fill];
+        return;
     }
 
     [[NSColor colorWithCalibratedWhite: 0.78 alpha: 1.0] set];

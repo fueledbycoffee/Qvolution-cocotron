@@ -386,9 +386,8 @@ NSNotificationName const NSSystemColorsDidChangeNotification = @"NSSystemColorsD
     return [NSColor colorWithCatalogName: @"System" colorName: @"gridColor"];
 }
 
-// macOS 10.14+; approximation: opaque gray instead of semitransparent
 + (NSColor *) separatorColor {
-    return [NSColor colorWithCalibratedWhite: 0.85 alpha: 1.0];
+    return [NSColor colorWithCatalogName:@"System" colorName:@"separatorColor"];
 }
 
 + (NSColor *) textInsertionPointColor {
@@ -503,7 +502,7 @@ NSNotificationName const NSSystemColorsDidChangeNotification = @"NSSystemColorsD
 }
 
 + (NSColor *) windowBackgroundColor {
-    return [NSColor controlColor];
+    return [NSColor colorWithCatalogName:@"System" colorName:@"windowBackgroundColor"];
 }
 
 + (NSColor *) windowFrameColor {
@@ -563,7 +562,7 @@ static NSColor *systemCatalogColor(NSColorName name, NSColor *fallback) {
 }
 
 + (NSColor *) controlAccentColor {
-    return systemCatalogColor(@"controlAccentColor", [NSColor selectedControlColor]);
+    return [NSColor colorWithCatalogName:@"System" colorName:@"controlAccentColor"];
 }
 
 // Label text at decreasing emphasis: black with less alpha than labelColor.
