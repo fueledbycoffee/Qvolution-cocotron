@@ -5,6 +5,7 @@ Only repository source is read. No guest, installed runtime or desktop is touche
 Pass --baseline REV to extract the same methods from that component revision.
 """
 import argparse
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -46,6 +47,9 @@ layout = block(global_menu, '    if (strcmp(member, "GetLayout") == 0)')
 # supplies an empty menu tree; canonical item serialization has its own fixture.
 implementation.append(handler + layout + 'return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;\n}')
 helpers = block(global_menu, 'static void appendBasic(')
+if 'static void orbitDiagnostic(' in global_menu:
+    helpers += '\n' + block(global_menu, 'static const char *orbitText(')
+    helpers += '\n' + block(global_menu, 'static void orbitDiagnostic(')
 if 'static BOOL orbitExtensionIsActive(' in global_menu:
     begin = global_menu.index('static BOOL orbitExtensionIsActive(')
     end = global_menu.index('static void dbusSocketCallback', begin)
@@ -71,4 +75,21 @@ with tempfile.TemporaryDirectory(prefix='orbit-presentation-host-') as directory
     subprocess.run(['clang', '-x', 'objective-c', '-fblocks', '-Wno-objc-root-class', '-Wno-objc-method-access',
                     '-Wno-incompatible-pointer-types', '-I' + objc_include, str(path / 'fixture.m'),
                     '-o', str(path / 'fixture'), '-lobjc', '-lm', *flags], check=True)
-    subprocess.run(['dbus-run-session', '--', str(path / 'fixture')], check=True)
+    diagnostic = path / 'diagnostic.log'
+    env = dict(os.environ, DARLING_ORBIT_MENU_DIAGNOSTICS='0')
+    subprocess.run(['dbus-run-session', '--', str(path / 'fixture')], env=env, check=True)
+    assert not diagnostic.exists()
+    if 'static void orbitDiagnostic(' in global_menu:
+        # The same original assertions run with diagnostics on and off.
+        env['DARLING_ORBIT_MENU_DIAGNOSTICS'] = str(diagnostic)
+        subprocess.run(['dbus-run-session', '--', str(path / 'fixture')], env=env, check=True)
+        log = diagnostic.read_text()
+        for token in ['event=query-request', 'event=query-authentication',
+                      'event=query-rejected', 'reason=stale-generation',
+                      'event=layout-request', 'sender-valid=0', 'qualified=1',
+                      'event=layout-reply', 'queued=0', 'queued=1',
+                      'delivery=queue-only', 'event=decision hide=1',
+                      'reason=progress-failed', 'reason=disconnect']:
+            assert token in log, token
+        assert all('pid=' in line and 'event=' in line for line in log.splitlines())
+        print('PASS: opt-in diagnostics record authenticated gates and failure controls')

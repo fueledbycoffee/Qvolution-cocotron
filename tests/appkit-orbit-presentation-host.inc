@@ -8,6 +8,9 @@
 #include <unistd.h>
 #include <time.h>
 #include <poll.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <sys/time.h>
 #define NSLog(...) ((void)0)
 void *_NSConcreteStackBlock[32], *_NSConcreteGlobalBlock[32];
 void _Block_object_assign(void *d, const void *s, int flags) {}
