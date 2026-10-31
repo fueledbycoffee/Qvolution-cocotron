@@ -80,6 +80,7 @@ typedef NS_ENUM(NSInteger, NSColorType) {
 @property(class, strong, readonly) NSColor *systemCyanColor;
 
 @property(class, strong, readonly) NSColor *textColor;
+@property(class, strong, readonly) NSColor *placeholderTextColor;
 @property(class, strong, readonly) NSColor *selectedTextColor;
 @property(class, strong, readonly) NSColor *textBackgroundColor;
 @property(class, strong, readonly) NSColor *selectedTextBackgroundColor;
@@ -100,6 +101,7 @@ typedef NS_ENUM(NSInteger, NSColorType) {
 @property(class, strong, readonly) NSArray<NSColor *> *alternatingContentBackgroundColors;
 
 @property(class, strong, readonly) NSColor *controlColor;
+@property(class, strong, readonly) NSColor *controlAccentColor;
 @property(class, strong, readonly) NSColor *controlBackgroundColor;
 @property(class, strong, readonly) NSColor *controlTextColor;
 @property(class, strong, readonly) NSColor *disabledControlTextColor;

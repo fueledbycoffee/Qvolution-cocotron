@@ -41,6 +41,8 @@ static NSColor *systemAppearanceColor(NSColorName name, NSColor *light) {
         white = 0.12;
     else if ([name isEqualToString:@"controlColor"])
         white = 0.18;
+    else if ([name isEqualToString:@"placeholderTextColor"])
+        white = 0.60;
     else if ([name isEqualToString:@"textColor"] ||
              [name isEqualToString:@"controlTextColor"] ||
              [name isEqualToString:@"labelColor"])
