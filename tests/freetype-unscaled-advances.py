@@ -21,7 +21,9 @@ program = r'''
 #include <time.h>
 #include <limits.h>
 #include <setjmp.h>
+#include <string.h>
 typedef long NSInteger;
+typedef int BOOL;
 typedef double O2Float;
 typedef uint16_t O2Glyph;
 #define MIN(a,b) ((a)<(b)?(a):(b))
@@ -31,6 +33,7 @@ static FT_Face _face;
 static long _numberOfGlyphs;
 static double _unitsPerEm;
 static NSInteger *_advances;
+static unsigned char *_advanceIsValid;
 static jmp_buf failure;
 static int expecting_error;
 static void fail_error(FT_Error e) { if(expecting_error)longjmp(failure,1);fprintf(stderr,"FreeType error %d\n",e); exit(1); }
@@ -39,7 +42,7 @@ static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); 
 static void actual(void) { ACTUAL_BODY }
 int main(int argc,char **argv) {
  FT_Library library; if(argc<2||FT_Init_FreeType(&library)) return 1;
- expecting_error=1;if(setjmp(failure)==0){copyUnscaledAdvances(NULL,0);return 1;}expecting_error=0;
+ expecting_error=1;if(setjmp(failure)==0){copyUnscaledAdvances(NULL,0,&_advanceIsValid);return 1;}expecting_error=0;
  puts("PASS: actual helper rejects null/zero cache");
  for(int f=1;f<argc;f++) {
   if(FT_New_Face(library,argv[f],0,&_face))return 1;
@@ -56,17 +59,18 @@ int main(int argc,char **argv) {
    }
   }
   double reference=now()-start;
-  expecting_error=1;if(setjmp(failure)==0){copyUnscaledAdvances(_face,0);return 1;}expecting_error=0;
+  expecting_error=1;if(setjmp(failure)==0){copyUnscaledAdvances(_face,0,&_advanceIsValid);return 1;}expecting_error=0;
   for(NSInteger count=255;count<=257;count++)if(count<=_numberOfGlyphs){
-   NSInteger *prefix=copyUnscaledAdvances(_face,count);
+   unsigned char *validity=NULL;
+   NSInteger *prefix=copyUnscaledAdvances(_face,count,&validity);
    for(NSInteger index=0;index<count;index++)if(prefix[index]!=_advances[index])return 1;
-   free(prefix);
+   free(prefix);free(validity);
   }
   NSInteger *published=_advances;actual();if(published!=_advances){fputs("FAIL: fetch is not idempotent\n",stderr);return 1;}
-  // Exercise the actual FT failure path just past the final glyph, across the final batch boundary.
-  expecting_error=1;if(setjmp(failure)==0){copyUnscaledAdvances(_face,_numberOfGlyphs+1);return 1;}expecting_error=0;
+  // Reject a request beyond the actual face bounds without publishing state.
+  expecting_error=1;if(setjmp(failure)==0){copyUnscaledAdvances(_face,_numberOfGlyphs+1,&_advanceIsValid);return 1;}expecting_error=0;
   printf("PASS: %s glyphs=%ld fill=%.6fs outline_reference=%.6fs live_ppem=%u\n",_face->family_name,_numberOfGlyphs,fill,reference,_face->size->metrics.y_ppem);
-  free(_advances);FT_Done_Face(_face);
+  free(_advances);free(_advanceIsValid);_advanceIsValid=NULL;FT_Done_Face(_face);
  }
  FT_Done_FreeType(library); return 0;
 }
