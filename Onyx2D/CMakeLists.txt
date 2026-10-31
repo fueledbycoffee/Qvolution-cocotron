@@ -22,6 +22,7 @@ find_package(GIF REQUIRED)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PC_FONTCONFIG fontconfig)
+pkg_check_modules(DBUS REQUIRED dbus-1)
 
 include_directories(
 	${CMAKE_SOURCE_DIR}/src/external/icu/icuSources/i18n
@@ -37,6 +38,7 @@ include_directories(
 	${JPEG_INCLUDE_DIRS}
 	${GIF_INCLUDE_DIRS}
 	${PC_FONTCONFIG_INCLUDE_DIRS}
+	${DBUS_INCLUDE_DIRS}
 )
 
 set(Onyx2D_sources
@@ -160,6 +162,6 @@ add_framework(Onyx2D
 		z
 		# native libraries
 		FreeType
-		fontconfig
+		fontconfig dbus
 		jpeg png tiff gif
 )

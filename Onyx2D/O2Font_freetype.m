@@ -2,6 +2,10 @@
 #ifdef FREETYPE_PRESENT
 #import <Onyx2D/O2Encoding.h>
 #import <string.h>
+#include "O2UIFontPolicy.h"
+
+static char *uiFontFamily;
+static char *fixedFontFamily;
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -101,7 +105,7 @@ static void addAppFont(FcConfig *config, NSString *path) {
     }
 }
 
-FcConfig *O2FontSharedFontConfig() {
+static FcConfig *sharedFontConfigWithLockHeld() {
     static FcConfig *fontConfig = NULL;
 
     if (fontConfig == NULL) {
@@ -116,9 +120,25 @@ FcConfig *O2FontSharedFontConfig() {
                 addAppFont(fontConfig, path);
             }
         }
+        if (fontConfig) {
+            char *description = O2UIFontPortalDescription();
+            uiFontFamily = O2UIFontChooseFamily(fontConfig, description, 0);
+            fixedFontFamily = O2UIFontChooseFamily(fontConfig, NULL, 1);
+            free(description);
+            if (!uiFontFamily || !fixedFontFamily ||
+                !O2UIFontInstallAliases(fontConfig, uiFontFamily, 0) ||
+                !O2UIFontInstallAliases(fontConfig, fixedFontFamily, 1))
+                NSLog(@"Cannot initialize desktop UI font aliases");
+        }
     }
 
     return fontConfig;
+}
+
+FcConfig *O2FontSharedFontConfig() {
+    @synchronized([O2Font_freetype class]) {
+        return sharedFontConfigWithLockHeld();
+    }
 }
 
 static FT_Face createFaceForMatchInLibrary(FcPattern *match, BOOL requireUnicode,
@@ -254,11 +274,14 @@ O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
 
 static FT_Face createUserInterfaceFace(BOOL fixedPitch, BOOL emphasized,
                                       const char *language) {
+    FcConfig *config = O2FontSharedFontConfig();
+    if (config == NULL || (fixedPitch ? fixedFontFamily : uiFontFamily) == NULL)
+        return NULL;
     FcPattern *pattern = FcPatternCreate();
     if (pattern == NULL)
         return NULL;
     FcBool added = FcPatternAddString(pattern, FC_FAMILY,
-            (const FcChar8 *)(fixedPitch ? "monospace" : "sans-serif")) &&
+            (const FcChar8 *)(fixedPitch ? fixedFontFamily : uiFontFamily)) &&
             FcPatternAddInteger(pattern, FC_WEIGHT,
                     emphasized ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
     if (fixedPitch)
@@ -273,7 +296,6 @@ static FT_Face createUserInterfaceFace(BOOL fixedPitch, BOOL emphasized,
                 FcPatternAddLangSet(pattern, FC_LANG, languages);
         FcLangSetDestroy(languages);
     }
-    FcConfig *config = O2FontSharedFontConfig();
     if (!added || config == NULL || !FcConfigSubstitute(config, pattern, FcMatchPattern)) {
         FcPatternDestroy(pattern);
         return NULL;
@@ -285,8 +307,12 @@ static FT_Face createUserInterfaceFace(BOOL fixedPitch, BOOL emphasized,
     FcPatternDestroy(pattern);
     if (candidates == NULL)
         return NULL;
+    const char *family = fixedPitch ? fixedFontFamily : uiFontFamily;
+    BOOL exactFamily = strcmp(family, "sans-serif") != 0 && strcmp(family, "monospace") != 0;
     FT_Face face = NULL;
     for (int index = 0; index < candidates->nfont; ++index) {
+        if (exactFamily && !O2UIFontPatternHasFamily(candidates->fonts[index], family))
+            continue;
         face = createFaceForMatch(candidates->fonts[index], YES);
         if (face == NULL)
             continue;
@@ -444,7 +470,7 @@ static char *copyFontNameUTF8(CFStringRef name) {
         return nil;
     }
     FT_Face face;
-    int exact = createExactPostScriptFace(requested, &face);
+    int exact = O2UIFontIsAlias(requested) ? 0 : createExactPostScriptFace(requested, &face);
     if (exact == 0)
         face = createPatternFace(requested);
     free(requested);

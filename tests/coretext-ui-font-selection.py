@@ -3,9 +3,9 @@
 from pathlib import Path
 import subprocess,shlex,tempfile
 repo=Path(__file__).resolve().parents[1]
-s=(repo/'Onyx2D/O2Font_freetype.m').read_text()
+s=(repo/'Onyx2D/O2Font_freetype.m').read_text()+(repo/'Onyx2D/O2UIFontPolicy.h').read_text()
 def body(name):
- start=s.index(('BOOL ' if name=='O2FontGetFaceStyleFlags' else 'static FT_Face ')+name+'(');opening=s.index('{',start);depth=1;end=opening+1
+ start=s.index(('BOOL ' if name=='O2FontGetFaceStyleFlags' else 'static int ' if name=='O2UIFontPatternHasFamily' else 'static FT_Face ')+name+'(');opening=s.index('{',start);depth=1;end=opening+1
  while depth:
   if s[end]=='{':depth+=1
   elif s[end]=='}':depth-=1
@@ -20,11 +20,13 @@ pre='''#include <fontconfig/fontconfig.h>
 #include <math.h>
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 typedef int BOOL;
 #define YES 1
 #define NO 0
 static FT_Library library;
 static FcConfig *config;
+static const char *uiFontFamily="sans-serif", *fixedFontFamily="monospace";
 static FT_Library O2FontSharedFreeTypeLibrary(void){return library;}
 static FcConfig *O2FontSharedFontConfig(void){return config;}
 '''
@@ -44,6 +46,11 @@ int main(void){
   for(int i=0;i<3;i++){unsigned glyph=FT_Get_Char_Index(face,cp[i]);assert(glyph&&FT_Load_Glyph(face,glyph,FT_LOAD_DEFAULT)==0);advance[i]=face->glyph->advance.x;assert(advance[i]>0);}
   assert(!mono||advance[1]==advance[2]);FT_Done_Face(face);
  }
+ uiFontFamily="DejaVu Sans";fixedFontFamily="DejaVu Sans Mono";
+ for(int mono=0;mono<2;mono++)for(int bold=0;bold<2;bold++){
+  FT_Face exact=createUserInterfaceFace(mono,bold,NULL);assert(exact);
+  assert(!strcmp(exact->family_name,mono?"DejaVu Sans Mono":"DejaVu Sans"));FT_Done_Face(exact);
+ }
  // The common actual loader also receives the unchanged coverage caller's typed charset.
  FcPattern *pattern=FcPatternCreate();FcCharSet *set=FcCharSetCreate();assert(pattern&&set);
  assert(FcCharSetAddChar(set,'A')&&FcCharSetAddChar(set,0x03a9)&&FcPatternAddCharSet(pattern,FC_CHARSET,set));
@@ -56,7 +63,7 @@ int main(void){
 }
 '''
 with tempfile.TemporaryDirectory(prefix='qv-ui-face-') as d:
- f=Path(d)/'test.c';out=Path(d)/'test';f.write_text(pre+body('O2FontGetFaceStyleFlags')+'\n'+body('createFaceForMatchInLibrary')+'\n'+body('createFaceForMatch')+'\n'+body('createMatchingFaceWithEncodingRequirement')+'\n'+body('createMatchingFace')+'\n'+body('createUserInterfaceFace')+test)
+ f=Path(d)/'test.c';out=Path(d)/'test';f.write_text(pre+body('O2FontGetFaceStyleFlags')+'\n'+body('createFaceForMatchInLibrary')+'\n'+body('createFaceForMatch')+'\n'+body('createMatchingFaceWithEncodingRequirement')+'\n'+body('createMatchingFace')+'\n'+body('O2UIFontPatternHasFamily')+'\n'+body('createUserInterfaceFace')+test)
  flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','fontconfig','freetype2'],text=True))
  subprocess.run(['clang','-std=c11','-UNDEBUG','-fsanitize=address,undefined',str(f),'-o',str(out),*flags],check=True)
  import os

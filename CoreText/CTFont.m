@@ -190,27 +190,34 @@ CTFontRef CTFontCreateUIFontForLanguage(CTFontUIFontType uiFontType,
         return NULL;
     BOOL fixedPitch = NO, emphasized = NO;
     CGFloat defaultSize;
-    // Existing project UI sizes, not measured native Mac defaults.
+    // Qvolution typography classes (visual theme spec section 6).
     switch (uiFontType) {
     case kCTFontUIFontUserFixedPitch:
         fixedPitch = YES;
-        defaultSize = 12.0;
+        defaultSize = 13.0;
         break;
     case kCTFontUIFontEmphasizedSystem:
         emphasized = YES;
-        defaultSize = 12.0;
+        defaultSize = 13.0;
         break;
+    case kCTFontUIFontUser:
+    case kCTFontUIFontControlContent:
+    case kCTFontUIFontPalette:
+    case kCTFontUIFontMessage:
     case kCTFontUIFontSystem:
     case kCTFontUIFontViews:
     case kCTFontUIFontMenuTitle:
     case kCTFontUIFontMenuItem:
     case kCTFontUIFontWindowTitle:
     case kCTFontUIFontPushButton:
-        defaultSize = 12.0;
+        defaultSize = 13.0;
         break;
     case kCTFontUIFontSmallSystem:
     case kCTFontUIFontSmallToolbar:
     case kCTFontUIFontToolTip:
+        defaultSize = 11.0;
+        break;
+    case kCTFontUIFontLabel:
         defaultSize = 10.0;
         break;
     case kCTFontUIFontMiniSystem:
