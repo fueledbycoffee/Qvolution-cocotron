@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <AppKit/NSPopUpWindow.h>
 #import <AppKit/NSPopUpView.h>
+#import <CoreGraphics/CGWindowPrivate.h>
 #import <objc/runtime.h>
 #include <assert.h>
 #include <stdio.h>
@@ -23,10 +24,18 @@
 @implementation ProbeView
 - (NSInteger)runTrackingWithEvent:(NSEvent *)event { return 0; }
 @end
+@interface UnavailablePopupBounds : CGWindow
+@end
+@implementation UnavailablePopupBounds
+- (CGSize)maximumPopupSize { return CGSizeZero; }
+@end
 @interface ProbeWindow : NSPopUpWindow
 - (NSPopUpView *)popupView;
 @end
 @implementation ProbeWindow
+- (CGWindow *)platformWindow {
+    return [[[UnavailablePopupBounds alloc] init] autorelease];
+}
 - (void)orderFront:(id)sender {}
 - (NSScreen *)screen {
     return [[[NSScreen alloc] initWithFrame:NSMakeRect(-1280, 100, 1280, 900)
@@ -43,6 +52,8 @@ static void assertSelectionVisible(NSPopUpView *view) {
 }
 int main(void) {
     @autoreleasepool {
+        setbuf(stdout,NULL);
+        puts("ENTER synthetic popup fallback fixture");
         [NSApplication sharedApplication];
         NSMenu *menu = [[NSMenu alloc] initWithTitle:@"Many fonts"];
         [menu setAutoenablesItems:NO];

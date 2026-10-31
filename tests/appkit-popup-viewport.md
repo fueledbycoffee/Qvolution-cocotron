@@ -6,7 +6,10 @@ then shut down that exact prefix. The parent should fail its frame-containment
 assertion on the first 400-item menu.
 
 The fixture executes production popup preparation and view scrolling using a
-synthetic screen whose usable area has a nonzero/negative origin. Window ordering
+synthetic screen whose usable area has a nonzero/negative origin. ProbeWindow
+explicitly returns a no-native-bounds CGWindow test object so this exercises the
+backend-unavailable/visibleFrame fallback even when run on Wayland. Actual native
+output bounds are covered separately by appkit-popup-parent-output.m. Window ordering
 and modal tracking are overridden to return immediately; this is not a native
 input or compositor test. It verifies first/middle/last selection visibility,
 scroll clamps, keyboard action visibility and unchanged short-menu height.
