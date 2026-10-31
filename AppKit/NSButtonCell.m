@@ -19,6 +19,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSAttributedString.h>
+#import <AppKit/NSBezierPath.h>
 #import <AppKit/NSButtonCell.h>
 #import <AppKit/NSButtonImageSource.h>
 #import <AppKit/NSColor.h>
@@ -36,6 +37,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSSound.h>
 #import <AppKit/NSStringDrawer.h>
 #import <AppKit/NSStringDrawing.h>
+#import <AppKit/NSText.h>
 #import <AppKit/NSWindow.h>
 #import <Foundation/NSKeyedArchiver.h>
 
@@ -985,102 +987,45 @@ static const CGFloat kImageMargin = 2.;
 }
 
 - (void) _drawTexturedBezelWithFrame: (NSRect) frame {
-    BOOL highlighted = [self isHighlighted];
-    BOOL pressed =
-            [self state] && ([self showsStateBy] & NSChangeBackgroundCellMask);
+    BOOL selected = [self isHighlighted] ||
+            ([self state] && ([self showsStateBy] & NSChangeBackgroundCellMask));
+    CGFloat radius = [self _bezelRadius];
+    NSGraphicsStyle *style = [_controlView graphicsStyle];
 
-    BOOL renderDarkenBg = NO, renderOutlineShadow = NO;
-    // CGFloat topGray=0.76, bottomGray=0.98, strokeGray=0.4;
-    CGFloat topGray = 0.98, bottomGray = 0.76, strokeGray = 0.4;
-    if (pressed) {
-        topGray = 0.4;
-        bottomGray = 0.30;
+    [style drawControlFaceInRect: frame radius: radius fill: [NSColor controlColor]];
+    if (selected) {
+        NSRect face = NSInsetRect(frame, 1, 1);
+        face.size.height -= 1;
+        if (![_controlView isFlipped])
+            face.origin.y += 1;
+        [[style segmentSelectedColor] setFill];
+        [[NSBezierPath bezierPathWithRoundedRect: face
+                                         xRadius: radius - 1
+                                         yRadius: radius - 1] fill];
     }
-    renderDarkenBg = highlighted;
-    renderOutlineShadow = highlighted || pressed;
+}
 
-    CGContextRef ctx = [[NSGraphicsContext currentContext] graphicsPort];
-    CGContextSaveGState(ctx);
-
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGContextSetFillColorSpace(ctx, colorSpace);
-    CGContextSetStrokeColorSpace(ctx, colorSpace);
-    CGColorSpaceRelease(colorSpace);
-
-    frame = NSInsetRect(frame, 1.5, 1.5);
-    const CGFloat rounding = 1.5;
-
-    const CGFloat baseY = floor(frame.origin.y);
-    const CGFloat maxY = baseY + frame.size.height - 1.0;
-    CGRect r = CGRectMake(floor(frame.origin.x), baseY, ceil(frame.size.width),
-                          1.0);
-    while (r.origin.y <= maxY) {
-        CGFloat g =
-                bottomGray + (topGray - bottomGray) *
-                                     ((r.origin.y - baseY) / (maxY - baseY));
-        CGFloat components[4] = {g, g, g, 1.0};
-        CGContextSetFillColor(ctx, components);
-
-        if (r.origin.y < baseY + 1.0f || r.origin.y > maxY - 1.0f) {
-            CGContextFillRect(ctx,
-                              CGRectMake(r.origin.x + 1.0f, r.origin.y,
-                                         r.size.width - 2.0f, r.size.height));
-        } else {
-            CGContextFillRect(ctx, r);
-        }
-        r.origin.y += 1.0f;
+- (CGFloat) _bezelRadius {
+    switch (_controlSize) {
+    case NSSmallControlSize:
+        return NSControlBezelRadius * 0.85;
+    case NSMiniControlSize:
+        return NSControlBezelRadius * 0.7;
+    default:
+        return NSControlBezelRadius;
     }
+}
 
-    const CGFloat lx = floor(frame.origin.x) + 0.5f;
-    const CGFloat rx = floor(frame.origin.x + frame.size.width) + 0.5f;
-    const CGFloat ty = floor(frame.origin.y) + 0.5f;
-    const CGFloat by = floor(frame.origin.y + frame.size.height) + 0.5f;
-    const CGFloat rlx = lx + rounding;
-    const CGFloat rrx = rx - rounding;
-    const CGFloat rty = ty + rounding;
-    const CGFloat rby = by - rounding;
-    CGContextBeginPath(ctx);
-    CGContextMoveToPoint(ctx, rlx, ty);
-    CGContextAddLineToPoint(ctx, rrx, ty);
-    CGContextAddLineToPoint(ctx, rx, rty);
-    CGContextAddLineToPoint(ctx, rx, rby);
-    CGContextAddLineToPoint(ctx, rrx, by);
-    CGContextAddLineToPoint(ctx, rlx, by);
-    CGContextAddLineToPoint(ctx, lx, rby);
-    CGContextAddLineToPoint(ctx, lx, rty);
-    CGContextClosePath(ctx);
+- (BOOL) _drawsFocusRingInView: (NSView *) controlView {
+    NSWindow *window = [controlView window];
+    id responder = [window firstResponder];
 
-    CGFloat components[4] = {strokeGray, strokeGray, strokeGray, 1.0};
-    CGContextSetStrokeColor(ctx, components);
-    CGContextSetLineWidth(ctx, 1.0);
-
-    if (renderDarkenBg) {
-        components[0] = components[1] = components[2] = 0.0;
-        components[3] = 0.15;
-        CGContextSetFillColor(ctx, components);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-    } else {
-        CGContextStrokePath(ctx);
-    }
-
-    if (renderOutlineShadow) { // a small interior shadow within the button's
-                               // outline
-        const CGFloat ins = 0.4f;
-        CGContextBeginPath(ctx);
-        CGContextMoveToPoint(ctx, lx + ins, ty + ins);
-        CGContextAddLineToPoint(ctx, rx - ins, ty + ins);
-        CGContextAddLineToPoint(ctx, rx - ins, by - ins);
-        CGContextAddLineToPoint(ctx, lx + ins, by - ins);
-        CGContextClosePath(ctx);
-
-        components[0] = components[1] = components[2] = 0.0;
-        components[3] = 0.3;
-        CGContextSetStrokeColor(ctx, components);
-        CGContextSetLineWidth(ctx, 0.9);
-        CGContextStrokePath(ctx);
-    }
-
-    CGContextRestoreGState(ctx);
+    if ([self focusRingType] == NSFocusRingTypeNone || ![window isKeyWindow])
+        return NO;
+    if ([self showsFirstResponder] || responder == controlView)
+        return YES;
+    return [responder isKindOfClass: [NSText class]] &&
+           [(NSText *) responder delegate] == controlView;
 }
 
 static void drawRoundedBezel(CGContextRef context, CGRect frame) {
@@ -1097,8 +1042,14 @@ static void drawRoundedBezel(CGContextRef context, CGRect frame) {
     CGContextFillPath(context);
 }
 
+// A default button in an inactive window draws as an ordinary push button.
+- (BOOL) _isActiveDefaultButtonInView: (NSView *) controlView {
+    NSWindow *window = [controlView window];
+    return [window defaultButtonCell] == self && [window isKeyWindow];
+}
+
 - (void) drawBezelWithFrame: (NSRect) frame inView: (NSView *) controlView {
-    BOOL defaulted = ([[controlView window] defaultButtonCell] == self);
+    BOOL defaulted = [self _isActiveDefaultButtonInView: controlView];
 
     NSRect adjustment =
             [self getControlSizeAdjustment: [controlView isFlipped]];
@@ -1174,17 +1125,28 @@ static void drawRoundedBezel(CGContextRef context, CGRect frame) {
                     drawUnborderedButtonInRect: frame
                                      defaulted: defaulted];
         } else {
+            NSGraphicsStyle *style = [_controlView graphicsStyle];
+            CGContextRef context =
+                    [[NSGraphicsContext currentContext] graphicsPort];
+
+            CGContextSaveGState(context);
+            if (![self isEnabled])
+                CGContextSetAlpha(context, 0.5);
             if (([self highlightsBy] & NSPushInCellMask) &&
-                [self isHighlighted])
-                [[_controlView graphicsStyle]
-                        drawPushButtonPressedInRect: frame];
-            else if ([self isVisuallyHighlighted])
-                [[_controlView graphicsStyle]
-                        drawPushButtonHighlightedInRect: frame];
+                [self isHighlighted]) {
+                if (defaulted)
+                    [style drawDefaultButtonFaceInRect: frame pressed: YES];
+                else
+                    [style drawPushButtonPressedInRect: frame];
+            } else if ([self isVisuallyHighlighted])
+                [style drawPushButtonHighlightedInRect: frame];
             else
-                [[_controlView graphicsStyle]
-                        drawPushButtonNormalInRect: frame
-                                         defaulted: defaulted];
+                [style drawPushButtonNormalInRect: frame defaulted: defaulted];
+            CGContextRestoreGState(context);
+
+            if ([self _drawsFocusRingInView: controlView])
+                [style drawFocusRingAroundRect: frame
+                                        radius: [self _bezelRadius]];
         }
         break;
     }
@@ -1282,7 +1244,7 @@ static NSSize scaledImageSizeInFrameSize(NSSize imageSize, NSSize frameSize,
        borders. There is some duplication of rect calculation which can be split
        out
      */
-    BOOL defaulted = ([[controlView window] defaultButtonCell] == self);
+    BOOL defaulted = [self _isActiveDefaultButtonInView: controlView];
     NSRect adjustment =
             [self getControlSizeAdjustment: [controlView isFlipped]];
     frame.size.width -= adjustment.size.width;
@@ -1300,6 +1262,14 @@ static NSSize scaledImageSizeInFrameSize(NSSize imageSize, NSSize frameSize,
     }
 
     NSAttributedString *title = [self titleForHighlight];
+    if (defaulted && [self isBordered] && [self isEnabled] && [title length]) {
+        NSMutableAttributedString *onAccent =
+                [[title mutableCopy] autorelease];
+        [onAccent addAttribute: NSForegroundColorAttributeName
+                         value: [NSColor alternateSelectedControlTextColor]
+                         range: NSMakeRange(0, [title length])];
+        title = onAccent;
+    }
     NSImage *image = [self imageForHighlight];
     BOOL enabled = [self isEnabled] ? YES : ![self imageDimsWhenDisabled];
     BOOL mixed = ([self state] == NSMixedState) ? YES : NO;
@@ -1398,57 +1368,6 @@ static NSSize scaledImageSizeInFrameSize(NSSize imageSize, NSSize frameSize,
     }
 
     if (drawTitle) {
-        if (isTextured && [title length]) {
-            // FIXME: use shadow in attributed string and implement shadow text
-            // drawing
-            const BOOL pressed = [self state] && ([self showsStateBy] &
-                                                  NSChangeBackgroundCellMask);
-            const CGFloat fgGray = (pressed) ? 0.98 : 0.0;
-            const CGFloat fgGrayDisabled = 0.5;
-            const CGFloat shadowGray = (pressed) ? 0.07 : 0.93;
-            const CGFloat shadowAlpha = ([self isHighlighted]) ? 0.15 : 0.25;
-            NSString *baseTitle = [NSString stringWithString: [title string]];
-            NSMutableDictionary *shadowAttrs =
-                    [[[title attributesAtIndex: 0
-                                effectiveRange: NULL] mutableCopy] autorelease];
-
-            if (titleRect.origin.y >
-                frame.origin.y + 1) { // only draw the shadow if it doesn't come
-                                      // too close to the edge
-                [shadowAttrs
-                        setObject: [NSColor colorWithDeviceRed: shadowGray
-                                                         green: shadowGray
-                                                          blue: shadowGray
-                                                         alpha: shadowAlpha]
-                           forKey: NSForegroundColorAttributeName];
-
-                NSAttributedString *shadowTitle = [[[NSAttributedString alloc]
-                        initWithString: baseTitle
-                            attributes: shadowAttrs] autorelease];
-                NSRect shadowRect = NSOffsetRect(titleRect, 0, 1);
-
-                [shadowTitle _clipAndDrawInRect: shadowRect];
-            }
-
-            NSMutableDictionary *fgAttrs =
-                    [[shadowAttrs mutableCopy] autorelease];
-            if ([self isEnabled])
-                [fgAttrs setObject: [NSColor colorWithDeviceRed: fgGray
-                                                          green: fgGray
-                                                           blue: fgGray
-                                                          alpha: 1.0]
-                            forKey: NSForegroundColorAttributeName];
-            else
-                [fgAttrs setObject: [NSColor colorWithDeviceRed: fgGrayDisabled
-                                                          green: fgGrayDisabled
-                                                           blue: fgGrayDisabled
-                                                          alpha: 1.0]
-                            forKey: NSForegroundColorAttributeName];
-            title = [[[NSAttributedString alloc] initWithString: baseTitle
-                                                     attributes: fgAttrs]
-                    autorelease];
-        }
-
         [self drawTitle: title withFrame: titleRect inView: controlView];
     }
 }
