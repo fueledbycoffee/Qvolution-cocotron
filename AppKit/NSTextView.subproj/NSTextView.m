@@ -3096,26 +3096,33 @@ static NSTextView *s_targetTextView = nil;
 
 - (void) underline: sender {
     NSRange range = [self rangeForUserCharacterAttributeChange];
-
-    if (range.location == NSNotFound) {
+    if (range.location == NSNotFound ||
+        ![self shouldChangeTextInRange: range replacementString: nil])
         return;
+
+    NSNumber *current = range.length > 0
+            ? [_textStorage attribute: NSUnderlineStyleAttributeName
+                              atIndex: range.location effectiveRange: NULL]
+            : [[self typingAttributes] objectForKey: NSUnderlineStyleAttributeName];
+    BOOL remove = [current integerValue] != NSUnderlineStyleNone;
+    if (range.length > 0) {
+        if (remove)
+            [self _removeAttribute: NSUnderlineStyleAttributeName range: range];
+        else
+            [self _addAttribute: NSUnderlineStyleAttributeName
+                         value: [NSNumber numberWithInt: NSUnderlineStyleSingle]
+                         range: range];
+        [self setSelectedRange: range];
+        [self didChangeText];
     }
-    id underline = [_textStorage attribute: NSUnderlineStyleAttributeName
-                                   atIndex: range.location
-                            effectiveRange: NULL];
-    if (underline) {
-        [self _removeAttribute: NSUnderlineStyleAttributeName range: range];
-    } else {
-        [self _addAttribute: NSUnderlineStyleAttributeName
-                      value: [NSNumber numberWithInt: NSUnderlineStyleSingle]
-                      range: range];
-    }
-    [self setSelectedRange: range];
 
     NSMutableDictionary *attributes =
             [[[self typingAttributes] mutableCopy] autorelease];
-    [attributes setObject: [NSNumber numberWithInt: NSUnderlineStyleSingle]
-                   forKey: NSUnderlineStyleAttributeName];
+    if (remove)
+        [attributes removeObjectForKey: NSUnderlineStyleAttributeName];
+    else
+        [attributes setObject: [NSNumber numberWithInt: NSUnderlineStyleSingle]
+                       forKey: NSUnderlineStyleAttributeName];
     [self setTypingAttributes: attributes];
 }
 
