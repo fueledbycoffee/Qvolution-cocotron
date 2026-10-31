@@ -1361,6 +1361,29 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
 
     int ylimit = self->_vpy + self->_vpheight;
     int xlimit = self->_vpx + self->_vpwidth;
+    int firstY = self->_vpy;
+
+    // Partial-row edges otherwise propagate winding to the viewport's right
+    // edge, even for a one-pixel ruler tick. Closed geometry has no coverage
+    // beyond its last edge. Keep the original pixel sample coordinates.
+    double minY = ylimit, maxY = firstY, maxX = self->_vpx;
+    BOOL finiteBounds = YES;
+    for (int i = 0; i < edgeCount; i++) {
+        Edge *edge = edges[i];
+        if (!isfinite(edge->v0.x) || !isfinite(edge->v1.x) ||
+                !isfinite(edge->v0.y) || !isfinite(edge->v1.y)) {
+            finiteBounds = NO;
+            break;
+        }
+        minY = MIN(minY, edge->v0.y);
+        maxY = MAX(maxY, edge->v1.y);
+        maxX = MAX(maxX, MAX(edge->v0.x, edge->v1.x));
+    }
+    if (finiteBounds) {
+        firstY = MAX(firstY, floor(MAX((double)firstY, minY)));
+        ylimit = MIN(ylimit, ceil(MIN((double)ylimit, maxY)));
+        xlimit = MIN(xlimit, ceil(MIN((double)xlimit, maxX)));
+    }
 
     Edge *activeRoot = NULL;
     int nextAvailableEdge = 0;
@@ -1373,7 +1396,7 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
     int totalActiveEdges = 0;
     int totalActiveVerticalEdgesFullCoverage = 0;
 
-    for (scany = self->_vpy; scany < ylimit; scany++) {
+    for (scany = firstY; scany < ylimit; scany++) {
         Edge *edge, *previous = NULL;
         int unchangedActiveEdges = 1;
 
