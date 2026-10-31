@@ -34,6 +34,12 @@
 - initWithAttributedString: (NSAttributedString *) attributedString
                      range: (NSRange) range
 {
+    NSUInteger length = [attributedString length];
+    if (range.location > length || range.length > length - range.location) {
+        [self release];
+        [NSException raise: NSRangeException format: @"RTF attributed range is out of bounds"];
+        return nil;
+    }
     _attributedString = [attributedString retain];
     _string = [[_attributedString string] retain];
     _range = range;
@@ -77,41 +83,43 @@
 }
 
 - (void) appendStringFromRange: (NSRange) range {
-    unichar buffer[range.length];
-    unsigned char *ansi;
-    int i, ansiLength = 0;
-
-    [_string getCharacters: buffer range: range];
-    for (i = 0; i < range.length; i++) {
-        if (buffer[i] == '\n' || buffer[i] == '\\')
-            ansiLength += 2;
-        else if (buffer[i] > 127)
-            ansiLength += 9; // unicode is encoded as '\uXXXXXX?'
+    NSUInteger length = [_string length];
+    if (range.location > length || range.length > length - range.location) {
+        [NSException raise: NSRangeException format: @"RTF string range is out of bounds"];
+        return;
     }
-
-    ansi = alloca(sizeof(unsigned char) * ansiLength);
-    ansiLength = 0;
-    for (i = 0; i < range.length; i++) {
-        unichar code = buffer[i];
-
-        if (code == '\n') {
-            ansi[ansiLength++] = '\\';
-            ansi[ansiLength++] = '\n';
-        } else if (code == '\\') {
-            ansi[ansiLength++] = '\\';
-            ansi[ansiLength++] = '\\';
-        } else if (code > 127) {
-            // "= \u<code>?" where "?" is a substitution char for readers not
-            // supporting
-
-            int len = sprintf((char *) ansi + ansiLength, "\\u%d?", code);
-            ansiLength += len;
-        } else {
-            ansi[ansiLength++] = code;
+    unichar input[256];
+    // A signed UTF16 escape plus fallback occupies at most nine ASCII bytes.
+    char output[256 * 9];
+    for (NSUInteger offset = 0; offset < range.length;) {
+        NSUInteger count = MIN((NSUInteger)256, range.length - offset);
+        [_string getCharacters: input range: NSMakeRange(range.location + offset, count)];
+        NSUInteger used = 0;
+        for (NSUInteger index = 0; index < count; index++) {
+            unichar code = input[index];
+            if (code == '\\' || code == '{' || code == '}') {
+                output[used++] = '\\';
+                output[used++] = (char)code;
+            } else if (code == '\n') {
+                memcpy(output + used, "\\par ", 5);
+                used += 5;
+            } else if (code == '\t') {
+                memcpy(output + used, "\\tab ", 5);
+                used += 5;
+            } else if (code < 32 || code > 126) {
+                // RTF Unicode arguments are signed16 values, including surrogate units.
+                int value = code >= 32768 ? (int)code - 65536 : (int)code;
+                char escaped[16];
+                int bytes = snprintf(escaped, sizeof(escaped), "\\u%d?", value);
+                memcpy(output + used, escaped, (size_t)bytes);
+                used += (NSUInteger)bytes;
+            } else {
+                output[used++] = (char)code;
+            }
         }
+        [_data appendBytes: output length: used];
+        offset += count;
     }
-
-    [_data appendBytes: ansi length: ansiLength];
 }
 
 // The name the attachment's file got in the RTFD directory, or nil when it
