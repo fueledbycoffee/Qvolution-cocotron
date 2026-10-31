@@ -34,8 +34,46 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <Foundation/NSKeyedArchiver.h>
 
 @interface NSImageSymbolConfiguration (Private)
-- (CGFloat) _placeholderSide;
+- (CGFloat) _symbolSide;
+- (BOOL) _drawPortableSymbol: (NSUInteger) symbol inRect: (NSRect) rect;
+- (BOOL) _hasSymbolPalette;
 @end
+
+typedef NS_ENUM(NSUInteger, QVSymbol) {
+    QVSymbolUnknown, QVSymbolPlus, QVSymbolMinus, QVSymbolGear, QVSymbolGears,
+    QVSymbolFolder, QVSymbolPerson, QVSymbolList, QVSymbolX, QVSymbolCheck,
+    QVSymbolSearch, QVSymbolTrash, QVSymbolFolderPlus, QVSymbolMultiplyCircle,
+    QVSymbolBack
+};
+
+static QVSymbol portableSymbol(NSString *name) {
+    static NSString *names[] = {@"plus", @"minus", @"gearshape", @"gearshape.2",
+        @"folder", @"person", @"list.bullet", @"xmark", @"checkmark",
+        @"magnifyingglass", @"trash", @"folder.badge.plus",
+        @"multiply.circle.fill", @"chevron.backward"};
+    for (NSUInteger i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if ([name isEqualToString: names[i]])
+            return (QVSymbol)(i + 1);
+    return QVSymbolUnknown;
+}
+
+static void symbolLine(NSBezierPath *path, CGFloat x, CGFloat y,
+                       CGFloat endX, CGFloat endY) {
+    [path moveToPoint: NSMakePoint(x, y)];
+    [path lineToPoint: NSMakePoint(endX, endY)];
+}
+
+static void symbolGear(NSBezierPath *path, CGFloat x, CGFloat y, CGFloat radius) {
+    for (NSUInteger i = 0; i < 48; i++) {
+        CGFloat angle = i * (2.0 * M_PI / 48.0);
+        CGFloat r = radius * ((i % 6 == 0 || i % 6 == 5) ? 0.78 : 1.0);
+        NSPoint point = NSMakePoint(x + cos(angle) * r, y + sin(angle) * r);
+        if (i == 0) [path moveToPoint: point]; else [path lineToPoint: point];
+    }
+    [path closePath];
+    [path appendBezierPathWithOvalInRect:
+            NSMakeRect(x - radius * .3, y - radius * .3, radius * .6, radius * .6)];
+}
 
 NSImageName const NSImageNameActionTemplate = @"NSActionTemplate";
 NSImageName const NSImageNameAddTemplate = @"NSAddTemplate";
@@ -672,6 +710,7 @@ NSImageName const NSImageNameTouchBarVolumeUpTemplate =
     [_representations release];
     [_accessibilityDescription release];
     [_symbolConfiguration release];
+    [_systemSymbolName release];
     [_scaledRepCache release];
     [_drawingHandlerRepCache release];
     [super dealloc];
@@ -685,6 +724,7 @@ NSImageName const NSImageNameTouchBarVolumeUpTemplate =
     result->_representations = [_representations mutableCopy];
     result->_accessibilityDescription = [_accessibilityDescription copy];
     result->_symbolConfiguration = [_symbolConfiguration retain];
+    result->_systemSymbolName = [_systemSymbolName copy];
     result->_scaledRepCache = nil;
     result->_drawingHandlerRepCache = nil;
 
@@ -1731,41 +1771,29 @@ static NSUInteger scaledRepCacheBytes(NSArray *cache) {
     _accessibilityDescription = description;
 }
 
-// Darling does not ship SF Symbols artwork (it is Apple's proprietary asset
-// catalog), so every system symbol is drawn as the same generic template glyph:
-// a rounded square outline sized like a symbol at the configured point size.
-// Apple returns nil for names it doesn't know; here only nil or empty names do,
-// because there is no symbol list to check against and apps usually expect an
-// image for the names they ship with.
-+ (NSImage *) _symbolPlaceholderWithDescription: (NSString *) description
-                                  configuration:
-                                          (NSImageSymbolConfiguration *)
-                                                  configuration
-{
-    static BOOL logged = NO;
-    if (!logged) {
-        logged = YES;
-        NSLog(@"NSImage: SF Symbols are not available, system symbol images "
-              @"are drawn as placeholders");
-    }
-
+// Original portable artwork for an explicit subset of public symbol identifiers.
++ (NSImage *) _portableSymbolNamed: (NSString *) name
+                     description: (NSString *) description
+                   configuration: (NSImageSymbolConfiguration *) configuration {
+    QVSymbol symbol = portableSymbol(name);
+    if (symbol == QVSymbolUnknown)
+        return nil;
     if (configuration == nil)
         configuration = [NSImageSymbolConfiguration
                 configurationWithScale: NSImageSymbolScaleMedium];
-
-    CGFloat side = [configuration _placeholderSide];
-    NSSize size = NSMakeSize(side, side);
-    NSCustomImageRep *rep = [[NSCustomImageRep alloc]
-            initWithDrawSelector: @selector(_drawSymbolPlaceholder:)
-                        delegate: [NSImageSymbolConfiguration class]];
-    [rep setSize: size];
-
-    NSImage *image = [[[self alloc] initWithSize: size] autorelease];
-    [image addRepresentation: rep];
-    [rep release];
-    [image setTemplate: YES];
+    CGFloat side = [configuration _symbolSide];
+    if (!isfinite(side) || side <= 0)
+        return nil;
+    NSImage *image = [self imageWithSize: NSMakeSize(side, side) flipped: NO
+            drawingHandler: ^BOOL(NSRect rect) {
+                return [configuration _drawPortableSymbol: symbol inRect: rect];
+            }];
+    if (image == nil)
+        return nil;
+    [image setTemplate: ![configuration _hasSymbolPalette]];
     [image setAccessibilityDescription: description];
     image->_symbolConfiguration = [configuration retain];
+    image->_systemSymbolName = [name copy];
     return image;
 }
 
@@ -1774,8 +1802,7 @@ static NSUInteger scaledRepCacheBytes(NSArray *cache) {
 {
     if ([name length] == 0)
         return nil;
-    return [self _symbolPlaceholderWithDescription: description
-                                     configuration: nil];
+    return [self _portableSymbolNamed: name description: description configuration: nil];
 }
 
 + (instancetype) imageWithSystemSymbolName: (NSString *) name
@@ -1799,8 +1826,9 @@ static NSUInteger scaledRepCacheBytes(NSArray *cache) {
     NSImageSymbolConfiguration *merged = [_symbolConfiguration
             configurationByApplyingConfiguration: configuration];
     return [[self class]
-            _symbolPlaceholderWithDescription: _accessibilityDescription
-                                configuration: merged];
+            _portableSymbolNamed: _systemSymbolName
+                     description: _accessibilityDescription
+                   configuration: merged];
 }
 
 - (NSImageSymbolConfiguration *) symbolConfiguration {
@@ -1835,7 +1863,7 @@ static NSUInteger scaledRepCacheBytes(NSArray *cache) {
 + (instancetype) configurationWithPaletteColors: (NSArray<NSColor *> *) colors {
     NSImageSymbolConfiguration *result = [[[self alloc] init] autorelease];
     // Keep immutable configuration state even when the caller passes a mutable
-    // array. The generic template placeholder has no palette layers to color.
+    // array; drawing resolves its immutable colors for the supported layers.
     result->_paletteColors = [colors copy];
     return result;
 }
@@ -1907,9 +1935,13 @@ static NSUInteger scaledRepCacheBytes(NSArray *cache) {
            [_paletteColors hash];
 }
 
-// Side of the square placeholder: the point size (default: the system font
-// size) plus a little padding, adjusted for the symbol scale.
-- (CGFloat) _placeholderSide {
+// Project sizing policy, independent of Apple symbol metrics.
+- (CGFloat) _symbolSide {
+    if (!isfinite(_pointSize) || !isfinite(_weight))
+        return NAN;
+    for (id color in _paletteColors)
+        if (![color isKindOfClass: [NSColor class]])
+            return NAN;
     CGFloat pointSize = _pointSize > 0 ? _pointSize : 13.0;
     CGFloat factor = 1.0;
     if (_scale == NSImageSymbolScaleSmall)
@@ -1919,18 +1951,105 @@ static NSUInteger scaledRepCacheBytes(NSArray *cache) {
     return ceil(pointSize * factor + 3.0);
 }
 
-+ (void) _drawSymbolPlaceholder: (NSCustomImageRep *) rep {
-    NSSize size = [rep size];
-    CGFloat line = MAX(1.0, floor(size.width / 12.0));
-    NSRect box = NSInsetRect(NSMakeRect(0, 0, size.width, size.height),
-                             line * 1.5, line * 1.5);
-    CGFloat radius = box.size.width / 5.0;
-    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect: box
-                                                         xRadius: radius
-                                                         yRadius: radius];
-    [path setLineWidth: line];
-    [[NSColor blackColor] setStroke];
-    [path stroke];
+- (BOOL) _hasSymbolPalette {
+    return [_paletteColors count] != 0;
+}
+
+- (NSColor *) _secondarySymbolColor: (NSColor *) primary {
+    return [_paletteColors count] > 1 ? [_paletteColors objectAtIndex: 1] : primary;
+}
+
+- (BOOL) _drawPortableSymbol: (NSUInteger) symbol inRect: (NSRect) rect {
+    NSColor *color = [_paletteColors count] ? [_paletteColors objectAtIndex: 0]
+                                           : [NSColor labelColor];
+    if (![color isKindOfClass: [NSColor class]])
+        return NO;
+    CGContextRef context = NSCurrentGraphicsPort();
+    if (context == NULL || !isfinite(rect.size.width) ||
+        !isfinite(rect.size.height) || rect.size.width <= 0 || rect.size.height <= 0)
+        return NO;
+    CGContextSaveGState(context);
+    @try {
+        CGContextTranslateCTM(context, rect.origin.x, rect.origin.y);
+        CGContextScaleCTM(context, rect.size.width / 16, rect.size.height / 16);
+        [color setStroke]; [color setFill];
+        NSBezierPath *path = [NSBezierPath bezierPath];
+        [path setLineWidth: MIN(3.5, MAX(.6, 1.25 + _weight))];
+        [path setLineCapStyle: NSRoundLineCapStyle];
+        [path setLineJoinStyle: NSRoundLineJoinStyle];
+        switch ((QVSymbol)symbol) {
+        case QVSymbolPlus:
+            symbolLine(path, 8, 3, 8, 13);
+            // fall through: both plus and minus have a horizontal stroke.
+        case QVSymbolMinus: symbolLine(path, 3, 8, 13, 8); break;
+        case QVSymbolGear: symbolGear(path, 8, 8, 5.5); break;
+        case QVSymbolGears:
+            symbolGear(path, 5, 10, 3.5); [path stroke]; [path removeAllPoints];
+            [[self _secondarySymbolColor: color] setStroke];
+            symbolGear(path, 11, 5, 3.5); break;
+        case QVSymbolFolder: case QVSymbolFolderPlus:
+            [path moveToPoint: NSMakePoint(2, 3)];
+            [path lineToPoint: NSMakePoint(2, 12)];
+            [path lineToPoint: NSMakePoint(6, 12)];
+            [path lineToPoint: NSMakePoint(8, 10)];
+            [path lineToPoint: NSMakePoint(14, 10)];
+            [path lineToPoint: NSMakePoint(14, 3)]; [path closePath];
+            if (symbol == QVSymbolFolderPlus) {
+                [path stroke]; [path removeAllPoints];
+                [[self _secondarySymbolColor: color] setStroke];
+                symbolLine(path, 8, 4.5, 8, 8.5); symbolLine(path, 6, 6.5, 10, 6.5);
+            }
+            break;
+        case QVSymbolPerson:
+            [path appendBezierPathWithOvalInRect: NSMakeRect(5.5, 9, 5, 5)];
+            [path moveToPoint: NSMakePoint(2, 2)];
+            [path curveToPoint: NSMakePoint(14, 2)
+                controlPoint1: NSMakePoint(2, 10) controlPoint2: NSMakePoint(14, 10)];
+            [path closePath]; break;
+        case QVSymbolList:
+            for (NSUInteger i = 0; i < 3; i++) {
+                CGFloat y = 4 + i * 4;
+                [path appendBezierPathWithOvalInRect: NSMakeRect(2, y-.5, 1, 1)];
+                symbolLine(path, 6, y, 14, y);
+            } break;
+        case QVSymbolMultiplyCircle:
+            [path appendBezierPathWithOvalInRect: NSMakeRect(1, 1, 14, 14)];
+            [path setWindingRule: NSEvenOddWindingRule];
+            // Cut the diagonal cross out of the filled disc, keeping transparent holes.
+            [path moveToPoint: NSMakePoint(4, 5)];
+            [path lineToPoint: NSMakePoint(5, 4)];
+            [path lineToPoint: NSMakePoint(8, 7)];
+            [path lineToPoint: NSMakePoint(11, 4)];
+            [path lineToPoint: NSMakePoint(12, 5)];
+            [path lineToPoint: NSMakePoint(9, 8)];
+            [path lineToPoint: NSMakePoint(12, 11)];
+            [path lineToPoint: NSMakePoint(11, 12)];
+            [path lineToPoint: NSMakePoint(8, 9)];
+            [path lineToPoint: NSMakePoint(5, 12)];
+            [path lineToPoint: NSMakePoint(4, 11)];
+            [path lineToPoint: NSMakePoint(7, 8)]; [path closePath];
+            [path fill]; return YES;
+        case QVSymbolX:
+            symbolLine(path, 4, 4, 12, 12); symbolLine(path, 4, 12, 12, 4); break;
+        case QVSymbolCheck:
+            [path moveToPoint: NSMakePoint(2, 8)];
+            [path lineToPoint: NSMakePoint(6, 4)]; [path lineToPoint: NSMakePoint(14, 13)]; break;
+        case QVSymbolSearch:
+            [path appendBezierPathWithOvalInRect: NSMakeRect(2, 6, 8, 8)];
+            symbolLine(path, 9, 7, 14, 2); break;
+        case QVSymbolTrash:
+            [path appendBezierPathWithRect: NSMakeRect(4, 2, 8, 10)];
+            symbolLine(path, 2, 12, 14, 12); symbolLine(path, 6, 14, 10, 14);
+            symbolLine(path, 7, 4, 7, 10); symbolLine(path, 9, 4, 9, 10); break;
+        case QVSymbolBack:
+            [path moveToPoint: NSMakePoint(11, 3)];
+            [path lineToPoint: NSMakePoint(5, 8)]; [path lineToPoint: NSMakePoint(11, 13)]; break;
+        default: return NO;
+        }
+        [path stroke]; return YES;
+    } @finally {
+        CGContextRestoreGState(context);
+    }
 }
 
 @end
