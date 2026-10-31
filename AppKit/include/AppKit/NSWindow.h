@@ -239,6 +239,7 @@ APPKIT_EXPORT const NSNotificationName NSWindowDidExitVersionBrowserNotification
 
     id<NSWindowDelegate> _delegate;
     NSResponder *_firstResponder;
+    NSResponder *_qvolutionProposedFirstResponder;
 
     NSTextView *_sharedFieldEditor;
     NSTextView *_currentFieldEditor;

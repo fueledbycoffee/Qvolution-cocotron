@@ -1932,26 +1932,47 @@ static BOOL _allowsAutomaticWindowTabbing;
     return YES;
 }
 
+- (NSResponder *)_qvolutionProposedFirstResponder {
+    return _qvolutionProposedFirstResponder;
+}
+
 - (BOOL) makeFirstResponder: (NSResponder *) responder {
-    if (_firstResponder == responder) {
+    if (_firstResponder == responder)
         return YES;
-    }
-    if ([responder isKindOfClass: [NSControl class]] &&
-        _firstResponder == [(NSControl *) responder currentEditor]) {
+    if ([responder isKindOfClass:[NSControl class]] &&
+            _firstResponder == [(NSControl *)responder currentEditor])
         return YES;
-    }
 
-    if (![_firstResponder resignFirstResponder]) {
-        return NO;
-    }
-
-    _firstResponder = responder;
-
-    if ([_firstResponder becomeFirstResponder]) {
-        return YES;
-    } else {
-        _firstResponder = self;
-        return NO;
+    NSResponder *previous=[_firstResponder retain];
+    NSResponder *target=[responder retain];
+    NSResponder *outerProposal=_qvolutionProposedFirstResponder;
+    _qvolutionProposedFirstResponder=target;
+    BOOL becoming=NO;
+    @try {
+        if (![previous resignFirstResponder])
+            return NO;
+        // An editing observer may already have transferred focus elsewhere.
+        if (_firstResponder != previous)
+            return _firstResponder == target;
+        _firstResponder=target;
+        becoming=YES;
+        BOOL accepted=[target becomeFirstResponder];
+        if (!accepted && _firstResponder==target)
+            _firstResponder=self;
+        return accepted && _firstResponder==target;
+    } @catch (id error) {
+        if (becoming && _firstResponder==target)
+            _firstResponder=self;
+        @throw;
+    } @finally {
+        _qvolutionProposedFirstResponder=outerProposal;
+        @try {
+            if ([previous respondsToSelector:@selector(_qvolutionFinishFirstResponderTransition:)])
+                [previous _qvolutionFinishFirstResponderTransition:_firstResponder];
+        } @finally {
+            [target release];
+            [previous release];
+        }
     }
 }
 

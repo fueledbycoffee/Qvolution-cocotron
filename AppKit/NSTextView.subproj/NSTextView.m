@@ -51,7 +51,7 @@
 #import <AppKit/NSTextStorage.h>
 #import <AppKit/NSTextTab.h>
 #import <AppKit/NSTextView.h>
-#import <AppKit/NSWindow.h>
+#import <AppKit/NSWindow-Private.h>
 #import <Foundation/NSKeyedArchiver.h>
 
 #import "NSRulerMarker+NSTextExtensions.h"
@@ -3154,6 +3154,13 @@ static NSTextView *s_targetTextView = nil;
     return YES;
 }
 
+- (void)_qvolutionFinishFirstResponderTransition:(NSResponder *)current {
+    if (current==self || NSTextInspectorKeepsRulerContext(self,current))
+        return;
+    NSRulerView *ruler=[[self enclosingScrollView] horizontalRulerView];
+    if ([ruler clientView]==self) [ruler setClientView:nil];
+}
+
 - (BOOL) resignFirstResponder {
     if ([super resignFirstResponder] == NO) {
         return NO;
@@ -3163,7 +3170,8 @@ static NSTextView *s_targetTextView = nil;
             if ([_delegate textShouldEndEditing: self] == NO)
                 return NO;
 
-    if ([self usesRuler]) {
+    if ([self usesRuler] && !NSTextInspectorKeepsRulerContext(self,
+            [[self window] _qvolutionProposedFirstResponder])) {
         [[[self enclosingScrollView] horizontalRulerView] setClientView: nil];
     }
 

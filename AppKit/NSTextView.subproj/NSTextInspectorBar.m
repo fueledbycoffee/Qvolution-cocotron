@@ -15,24 +15,130 @@
  SOFTWARE. */
 #import "NSTextInspectorBar.h"
 #import <AppKit/NSAttributedString.h>
+#import <AppKit/NSBezierPath.h>
 #import <AppKit/NSButton.h>
 #import <AppKit/NSColor.h>
 #import <AppKit/NSFont.h>
 #import <AppKit/NSFontManager.h>
 #import <AppKit/NSGraphics.h>
+#import <AppKit/NSImage.h>
+#import <AppKit/NSRulerView.h>
+#import <AppKit/NSStringDrawing.h>
 #import <AppKit/NSParagraphStyle.h>
 #import <AppKit/NSPopUpButton.h>
 #import <AppKit/NSPopUpButtonCellPrivate.h>
 #import <AppKit/NSTextView.h>
-#import <AppKit/NSWindow.h>
+#import <AppKit/NSWindow-Private.h>
+
+typedef NS_ENUM(NSUInteger, NSTextInspectorGlyph) {
+    NSTextInspectorBoldGlyph, NSTextInspectorItalicGlyph, NSTextInspectorUnderlineGlyph,
+    NSTextInspectorLeftGlyph, NSTextInspectorCenterGlyph, NSTextInspectorRightGlyph
+};
+
+static NSImage *inspectorGlyph(NSTextInspectorGlyph glyph, BOOL selected) {
+    NSString *title=nil;
+    NSFont *font=nil;
+    if (glyph < NSTextInspectorLeftGlyph) {
+        title=glyph==NSTextInspectorBoldGlyph ? @"B" : glyph==NSTextInspectorItalicGlyph ? @"I" : @"U";
+        font=glyph==NSTextInspectorBoldGlyph ? [NSFont boldSystemFontOfSize:14] : [NSFont systemFontOfSize:14];
+        if (glyph==NSTextInspectorItalicGlyph)
+            font=[[NSFontManager sharedFontManager] convertFont:font toHaveTrait:NSItalicFontMask];
+        if (!font) return nil;
+    }
+    return [NSImage imageWithSize:NSMakeSize(16,16) flipped:YES drawingHandler:^BOOL(NSRect rect) {
+        // Match the existing textured bezel's light/off and dark/on interiors.
+        NSColor *color = selected ? [NSColor whiteColor] : [NSColor blackColor];
+        if (glyph >= NSTextInspectorLeftGlyph) {
+            [color setStroke];
+            NSBezierPath *lines = [NSBezierPath bezierPath];
+            [lines setLineWidth:1.5];
+            for (NSUInteger row=0; row<4; row++) {
+                CGFloat width = row%2 ? 8 : 12;
+                CGFloat x = glyph==NSTextInspectorLeftGlyph ? 2 :
+                        glyph==NSTextInspectorCenterGlyph ? (16-width)/2 : 14-width;
+                [lines moveToPoint:NSMakePoint(x,3+row*3)];
+                [lines lineToPoint:NSMakePoint(x+width,3+row*3)];
+            }
+            [lines stroke];
+        } else {
+            NSDictionary *attributes=@{NSFontAttributeName:font,NSForegroundColorAttributeName:color};
+            NSSize size=[title sizeWithAttributes:attributes];
+            [title drawAtPoint:NSMakePoint((16-size.width)/2,(16-size.height)/2) withAttributes:attributes];
+            if (glyph==NSTextInspectorUnderlineGlyph) {
+                [color setStroke];
+                NSBezierPath *line=[NSBezierPath bezierPath];[line setLineWidth:1];
+                [line moveToPoint:NSMakePoint(3,14.5)];[line lineToPoint:NSMakePoint(13,14.5)];[line stroke];
+            }
+        }
+        return YES;
+    }];
+}
+
+@interface _NSTextInspectorBar (FormattingControlContext)
+- (void)_setFormattingRulerContextActive:(BOOL)active;
+- (BOOL)_keepsRulerContextForResponder:(NSResponder *)responder;
+@end
+
+@interface _NSTextInspectorFormatButton : NSButton
+@end
+@implementation _NSTextInspectorFormatButton
+- (BOOL)acceptsFirstResponder {
+    id owner=[self superview];
+    return [super acceptsFirstResponder] && [self isEnabled] &&
+            [owner isKindOfClass:[_NSTextInspectorBar class]] &&
+            [owner _keepsRulerContextForResponder:self];
+}
+- (BOOL)becomeFirstResponder {
+    if (![self acceptsFirstResponder] || ![super becomeFirstResponder]) return NO;
+    [(_NSTextInspectorBar *)[self superview] _setFormattingRulerContextActive:YES];
+    [self setNeedsDisplay:YES];
+    return YES;
+}
+- (BOOL)resignFirstResponder {
+    if (![super resignFirstResponder]) return NO;
+    id owner=[self superview];
+    if ([owner isKindOfClass:[_NSTextInspectorBar class]] &&
+        ![owner _keepsRulerContextForResponder:[[self window] _qvolutionProposedFirstResponder]])
+        [owner _setFormattingRulerContextActive:NO];
+    [self setNeedsDisplay:YES];
+    return YES;
+}
+- (void)_qvolutionFinishFirstResponderTransition:(NSResponder *)current {
+    id owner=[self superview];
+    if ([owner isKindOfClass:[_NSTextInspectorBar class]] &&
+        ![owner _keepsRulerContextForResponder:current])
+        [owner _setFormattingRulerContextActive:NO];
+}
+- (void)drawRect:(NSRect)rect {
+    [super drawRect:rect];
+    if ([[self window] firstResponder]==self) {
+        // Image-only buttons still need a keyboard-focus indicator.
+        [([self state] ? [NSColor whiteColor] : [NSColor blackColor]) setStroke];
+        NSBezierPath *focus=[NSBezierPath bezierPathWithRoundedRect:NSInsetRect([self bounds],2,2) xRadius:3 yRadius:3];
+        CGFloat dash[]={1,2};[focus setLineDash:dash count:2 phase:0];[focus setLineWidth:1];[focus stroke];
+    }
+}
+@end
+
+BOOL NSTextInspectorKeepsRulerContext(NSTextView *view, NSResponder *proposed) {
+    if (!view) return NO;
+    _NSTextInspectorBar *bar=(id)[[view enclosingScrollView] _textInspectorBar];
+    return [bar textView]==view && [bar _keepsRulerContextForResponder:proposed];
+}
 
 @implementation _NSTextInspectorBar
-- (NSButton *)button:(NSString *)title identifier:(NSString *)identifier action:(SEL)action {
-    NSButton *button=[[[NSButton alloc] initWithFrame:NSZeroRect] autorelease];
-    [button setTitle:title];
+- (NSButton *)buttonWithGlyph:(NSTextInspectorGlyph)glyph identifier:(NSString *)identifier action:(SEL)action {
+    NSButton *button=[[[_NSTextInspectorFormatButton alloc] initWithFrame:NSZeroRect] autorelease];
+    [button setTitle:identifier];
     [button setIdentifier:identifier];
     [button setToolTip:identifier];
-    [button setButtonType:NSPushOnPushOffButton];
+    [button setButtonType:NSOnOffButton];
+    [button setBezelStyle:NSTexturedRoundedBezelStyle];
+    [button setImage:inspectorGlyph(glyph,NO)];
+    [button setAlternateImage:inspectorGlyph(glyph,YES)];
+    [button setImagePosition:NSImageOnly];
+    NSButtonCell *cell=[button cell];
+    [cell setShowsStateBy:[cell showsStateBy]|NSContentsCellMask];
     [button setTarget:self]; [button setAction:action];
     [self addSubview:button];
     return button;
@@ -55,12 +161,12 @@
     [_size addItemsWithTitles:[NSArray arrayWithObjects:@"8",@"9",@"10",@"11",@"12",@"14",@"16",@"18",@"24",@"36",@"48",@"72",nil]];
     [_size setTarget:self]; [_size setAction:@selector(changeSize:)];
     [self addSubview:_size]; [_size release];
-    _bold=[self button:@"B" identifier:@"Bold" action:@selector(changeBold:)];
-    _italic=[self button:@"I" identifier:@"Italic" action:@selector(changeItalic:)];
-    _underline=[self button:@"U" identifier:@"Underline" action:@selector(changeUnderline:)];
-    _left=[self button:@"L" identifier:@"Align left" action:@selector(changeAlignment:)];
-    _center=[self button:@"C" identifier:@"Align center" action:@selector(changeAlignment:)];
-    _right=[self button:@"R" identifier:@"Align right" action:@selector(changeAlignment:)];
+    _bold=[self buttonWithGlyph:NSTextInspectorBoldGlyph identifier:@"Bold" action:@selector(changeBold:)];
+    _italic=[self buttonWithGlyph:NSTextInspectorItalicGlyph identifier:@"Italic" action:@selector(changeItalic:)];
+    _underline=[self buttonWithGlyph:NSTextInspectorUnderlineGlyph identifier:@"Underline" action:@selector(changeUnderline:)];
+    _left=[self buttonWithGlyph:NSTextInspectorLeftGlyph identifier:@"Align left" action:@selector(changeAlignment:)];
+    _center=[self buttonWithGlyph:NSTextInspectorCenterGlyph identifier:@"Align center" action:@selector(changeAlignment:)];
+    _right=[self buttonWithGlyph:NSTextInspectorRightGlyph identifier:@"Align right" action:@selector(changeAlignment:)];
     [_left setTag:NSLeftTextAlignment]; [_center setTag:NSCenterTextAlignment]; [_right setTag:NSRightTextAlignment];
     [self sync];
     [self resizeSubviewsWithOldSize:NSZeroSize];
@@ -70,7 +176,38 @@
 - (BOOL)isFlipped { return YES; }
 - (BOOL)isOpaque { return YES; }
 - (NSTextView *)textView { return _textView; }
-- (void)setTextView:(NSTextView *)view { _textView=view; [self sync]; }
+- (BOOL)_keepsRulerContextForResponder:(NSResponder *)responder {
+    NSWindow *window=[self window];
+    if (!_textView || !window || [_textView window]!=window ||
+            [[_textView enclosingScrollView] _textInspectorBar]!=self)
+        return NO;
+    if (responder==_textView) return YES;
+    return [responder isKindOfClass:[_NSTextInspectorFormatButton class]] &&
+            [(NSView *)responder superview]==self && [(NSView *)responder window]==window;
+}
+- (void)_setFormattingRulerContextActive:(BOOL)active {
+    NSScrollView *scroll=[_textView enclosingScrollView];
+    NSRulerView *ruler=[scroll horizontalRulerView];
+    if (!ruler) return;
+    if (!active) {
+        if ([ruler clientView]==_textView) [ruler setClientView:nil];
+    } else if ([_textView usesRuler] && [scroll _textInspectorBar]==self &&
+               [self window]==[_textView window]) {
+        if ([ruler clientView]!=_textView) [ruler setClientView:_textView];
+        [_textView updateRuler];
+    }
+}
+- (void)setTextView:(NSTextView *)view {
+    if (view!=_textView) {
+        [self _setFormattingRulerContextActive:NO];
+        _textView=view;
+    }
+    [self sync];
+    NSResponder *focused=[[self window] firstResponder];
+    if ([focused isKindOfClass:[_NSTextInspectorFormatButton class]] &&
+        [(NSView *)focused superview]==self)
+        [self _setFormattingRulerContextActive:YES];
+}
 - (CGFloat)preferredHeightForWidth:(CGFloat)width { return width < 450 ? 60 : 30; }
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
     CGFloat width=NSWidth([self bounds]);

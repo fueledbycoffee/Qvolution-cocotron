@@ -2,6 +2,8 @@
 
 @class NSTextView, NSPopUpButton, NSButton;
 
+BOOL NSTextInspectorKeepsRulerContext(NSTextView *view, NSResponder *proposed);
+
 typedef NS_ENUM(NSInteger, NSTextInspectorFontAction) {
     NSTextInspectorFontFamily, NSTextInspectorFontSize, NSTextInspectorFontTrait
 };

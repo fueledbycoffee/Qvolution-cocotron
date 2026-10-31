@@ -25,6 +25,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #define NSAppKitPrivateWindow 0x8000000
 
 @interface NSWindow (NSWindow_private)
+- (NSResponder *)_qvolutionProposedFirstResponder;
 - (CGWindow *) platformWindow;
 - (BOOL) titleChangedRecently;
 - (CGContextRef) cgContext;
@@ -67,4 +68,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 - (void) redo: sender;
 - (BOOL) validateMenuItem: (NSMenuItem *) item;
 - (void) dirtyRect: (NSRect) rect;
+@end
+
+@interface NSResponder (QvolutionFocusTransition)
+- (void)_qvolutionFinishFirstResponderTransition:(NSResponder *)current;
 @end
