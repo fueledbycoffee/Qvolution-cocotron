@@ -18,6 +18,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <AppKit/NSAppearance.h>
+#import <Foundation/NSNumber.h>
 #import <AppKit/NSColor_CGColor.h>
 #import <AppKit/NSColor_catalog.h>
 #import <AppKit/NSDisplay.h>
@@ -56,6 +57,11 @@ static NSColor *systemAppearanceColor(NSColorName name, NSColor *light) {
     }];
 }
 
+@interface NSColor_catalog ()
+- initWithCatalogName:(NSColorListName)catalogName colorName:(NSColorName)colorName
+                color:(NSColor *)color alphaOverride:(NSNumber *)alphaOverride;
+@end
+
 @implementation NSColor_catalog
 
 - (NSColorType) type {
@@ -66,11 +72,19 @@ static NSColor *systemAppearanceColor(NSColorName name, NSColor *light) {
             colorName: (NSColorName) colorName
                 color: (NSColor *) color
 {
+    return [self initWithCatalogName:catalogName colorName:colorName
+                              color:color alphaOverride:nil];
+}
+
+- initWithCatalogName:(NSColorListName)catalogName colorName:(NSColorName)colorName
+                color:(NSColor *)color alphaOverride:(NSNumber *)alphaOverride {
     _catalogName = [catalogName copy];
     _colorName = [colorName copy];
-    if ([catalogName isEqualToString:@"System"] && color != nil)
+    // Derived backing already contains the requested opacity and dynamic provider.
+    if (alphaOverride == nil && [catalogName isEqualToString:@"System"] && color != nil)
         color = systemAppearanceColor(colorName, color);
     _color = [color copy];
+    _alphaOverride = [alphaOverride copy];
     return self;
 }
 
@@ -78,6 +92,7 @@ static NSColor *systemAppearanceColor(NSColorName name, NSColor *light) {
     [_colorName release];
     [_catalogName release];
     [_color release];
+    [_alphaOverride release];
     NSDeallocateObject(self);
     return;
     [super dealloc];
@@ -91,10 +106,29 @@ static NSColor *systemAppearanceColor(NSColorName name, NSColor *light) {
         NSColor_catalog *other = otherObject;
 
         return ([_catalogName isEqualToString: other->_catalogName] &&
-                [_colorName isEqualToString: other->_colorName]);
+                [_colorName isEqualToString: other->_colorName] &&
+                (_alphaOverride == other->_alphaOverride ||
+                 [_alphaOverride isEqual:other->_alphaOverride]));
     }
 
     return NO;
+}
+
+- (NSUInteger)hash {
+    return [_catalogName hash] ^ [_colorName hash] ^ [_alphaOverride hash];
+}
+
+- (CGFloat)alphaComponent {
+    return [_color alphaComponent];
+}
+
+- (NSColor *)colorWithAlphaComponent:(CGFloat)alpha {
+    NSColor *modified = [_color colorWithAlphaComponent:alpha];
+    if (modified == nil)
+        return nil;
+    return [[[[self class] alloc] initWithCatalogName:_catalogName
+            colorName:_colorName color:modified
+            alphaOverride:[NSNumber numberWithDouble:alpha]] autorelease];
 }
 
 - (NSString *) description {
