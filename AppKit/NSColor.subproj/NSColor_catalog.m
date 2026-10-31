@@ -17,6 +17,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
+#import <AppKit/NSAppearance.h>
 #import <AppKit/NSColor_CGColor.h>
 #import <AppKit/NSColor_catalog.h>
 #import <AppKit/NSDisplay.h>
@@ -31,6 +32,30 @@ void NSColorSetCatalogColor(NSColorListName catalogName, NSColorName colorName,
 NSColor *NSColorGetCatalogColor(NSColorListName catalogName,
                                 NSColorName colorName);
 
+// Original fallback palette for semantic roles; these are not native macOS samples.
+static NSColor *systemAppearanceColor(NSColorName name, NSColor *light) {
+    CGFloat white;
+    if ([name isEqualToString:@"textBackgroundColor"] ||
+        [name isEqualToString:@"controlBackgroundColor"])
+        white = 0.12;
+    else if ([name isEqualToString:@"controlColor"])
+        white = 0.18;
+    else if ([name isEqualToString:@"textColor"] ||
+             [name isEqualToString:@"controlTextColor"] ||
+             [name isEqualToString:@"labelColor"])
+        white = 0.92;
+    else
+        return light;
+    NSColor *dark = [NSColor colorWithCalibratedWhite:white alpha:1];
+    return [NSColor colorWithName:name dynamicProvider:^NSColor *(NSAppearance *appearance) {
+        NSAppearanceName appearanceName = [appearance name];
+        if ([appearanceName isEqualToString:NSAppearanceNameDarkAqua] ||
+            [appearanceName isEqualToString:NSAppearanceNameVibrantDark])
+            return dark;
+        return light;
+    }];
+}
+
 @implementation NSColor_catalog
 
 - (NSColorType) type {
@@ -43,6 +68,8 @@ NSColor *NSColorGetCatalogColor(NSColorListName catalogName,
 {
     _catalogName = [catalogName copy];
     _colorName = [colorName copy];
+    if ([catalogName isEqualToString:@"System"] && color != nil)
+        color = systemAppearanceColor(colorName, color);
     _color = [color copy];
     return self;
 }
