@@ -38,6 +38,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 - (NSSize) sizeForContents;
 - (NSRect) rectForSelectedItem;
+- (void) scrollSelectedItemToVisible;
+- (void) scrollBy: (CGFloat) delta;
 
 - (NSInteger) runTrackingWithEvent: (NSEvent *) event;
 

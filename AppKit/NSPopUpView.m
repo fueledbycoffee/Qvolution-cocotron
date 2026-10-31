@@ -245,6 +245,36 @@ static const NSTimeInterval kMenuInitialClickThreshold = .3f;
     }
 }
 
+- (void) scrollBy: (CGFloat) delta {
+    NSArray *rects = [self _cachedItemRects];
+    if ([rects count] == 0)
+        return;
+    NSRect last = [[rects lastObject] rectValue];
+    CGFloat maximum = MAX(0, NSMaxY(last) + WINDOW_BORDER_THICKNESS -
+            NSHeight([self bounds]));
+    NSPoint origin = [self bounds].origin;
+    origin.y = MAX(0, MIN(maximum, origin.y + delta));
+    if (origin.y != NSMinY([self bounds])) {
+        [self setBoundsOrigin: origin];
+        [self setNeedsDisplay: YES];
+    }
+}
+
+- (void) scrollSelectedItemToVisible {
+    if (_selectedIndex < 0 || _selectedIndex >= [[self visibleItemArray] count])
+        return;
+    NSRect item = [self rectForItemAtIndex: _selectedIndex];
+    NSRect viewport = [self bounds];
+    if (NSMinY(item) < NSMinY(viewport))
+        [self scrollBy: NSMinY(item) - NSMinY(viewport)];
+    else if (NSMaxY(item) > NSMaxY(viewport))
+        [self scrollBy: NSMaxY(item) - NSMaxY(viewport)];
+}
+
+- (void) scrollWheel: (NSEvent *) event {
+    [self scrollBy: -[event deltaY] * _cellSize.height];
+}
+
 static NSRect boundsToTitleAreaRect(NSRect rect) {
     return NSInsetRect(rect, WINDOW_BORDER_THICKNESS, WINDOW_BORDER_THICKNESS);
 }
@@ -533,9 +563,6 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
     // this
     BOOL cancelled = NO;
 
-    NSRect screenVisible =
-            NSInsetRect([[[self window] screen] visibleFrame], 0, 4);
-
     [NSEvent startPeriodicEventsAfterDelay: .0 withPeriod: .02];
     BOOL mouseMoved = NO;
 
@@ -554,7 +581,7 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
 
         event = [[self window]
                 nextEventMatchingMask: NSPeriodicMask | NSLeftMouseUpMask |
-                                       NSMouseMovedMask |
+                                       NSMouseMovedMask | NSScrollWheelMask |
                                        NSLeftMouseDraggedMask | NSKeyDownMask |
                                        NSAppKitDefinedMask];
         if (firstTimestamp == 0.) {
@@ -579,7 +606,7 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
                 state = STATE_EXIT;
                 break;
             }
-        } else
+        } else if ([event type] != NSPeriodic)
             _keyboardUIState = KEYBOARD_INACTIVE;
 
         if ([event type] == NSAppKitDefined) {
@@ -594,26 +621,19 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
         }
 
         if (NSPointInRect(point, [[self window] frame])) {
-            if (!NSPointInRect(point, screenVisible)) {
-                // The point is inside the menu, and on the top or bottom border
-                // of the screen - let's autoscroll
-                NSPoint origin = [[self window] frame].origin;
-                BOOL change = NO;
-
-                if (point.y < NSMinY(screenVisible)) {
-                    origin.y += _cellSize.height;
-                    change = YES;
-                }
-
-                if (point.y > NSMaxY(screenVisible)) {
-                    origin.y -= _cellSize.height;
-                    change = YES;
-                }
-
-                if (change)
-                    [[self window] setFrameOrigin: origin];
+            NSPoint local = [[self window] convertScreenToBase: point];
+            local = [self convertPoint: local fromView: nil];
+            if ([event type] == NSScrollWheel) {
+                [self scrollWheel: event];
+            } else if ([event type] == NSPeriodic &&
+                       _keyboardUIState == KEYBOARD_INACTIVE) {
+                CGFloat edge = MIN(_cellSize.height, NSHeight([self bounds]) / 4);
+                if (local.y < NSMinY([self bounds]) + edge)
+                    [self scrollBy: -_cellSize.height];
+                else if (local.y > NSMaxY([self bounds]) - edge)
+                    [self scrollBy: _cellSize.height];
             }
-        } else {
+        } else if (_keyboardUIState == KEYBOARD_INACTIVE) {
             [self updateSelectedIndex: -1];
         }
         // Convert the global point to view coordinates
@@ -689,6 +709,7 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
     if (_selectedIndex < 0)
         _selectedIndex = previous;
 
+    [self scrollSelectedItemToVisible];
     [self setNeedsDisplay: YES];
 }
 
@@ -711,6 +732,7 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
         _selectedIndex = searchIndex;
     }
 
+    [self scrollSelectedItemToVisible];
     [self setNeedsDisplay: YES];
 }
 
@@ -768,6 +790,7 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
         }
     }
     if (newIndex != oldIndex) {
+        [self scrollSelectedItemToVisible];
         [self setNeedsDisplay: YES];
     }
 }

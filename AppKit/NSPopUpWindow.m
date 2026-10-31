@@ -67,11 +67,24 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     frame.size = size;
     frame.origin.y -=
             (size.height - selectedRect.origin.y) - selectedRect.size.height;
+    CGFloat contentTop = NSMaxY(frame);
+    NSRect visible = [[self screen] visibleFrame];
+    if (visible.size.width > 0 && visible.size.height > 0) {
+        frame.size.width = MIN(frame.size.width, visible.size.width);
+        frame.size.height = MIN(frame.size.height, visible.size.height);
+        frame.origin.x = MAX(NSMinX(visible), MIN(frame.origin.x,
+                NSMaxX(visible) - frame.size.width));
+        frame.origin.y = MAX(NSMinY(visible), MIN(frame.origin.y,
+                NSMaxY(visible) - frame.size.height));
+    }
     [self setFrame: frame display: NO];
 
-    [_view setFrameSize: size];
+    [_view setFrameSize: frame.size];
     [_view setFrameOrigin: NSMakePoint(0, 0)];
 
+    [_view setBoundsOrigin: NSZeroPoint];
+    [_view scrollBy: contentTop - NSMaxY(frame)];
+    [_view scrollSelectedItemToVisible];
     [_view setNeedsDisplay: YES];
 
     [self orderFront: nil];
