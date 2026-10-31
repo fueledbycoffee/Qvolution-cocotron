@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #import FT_TRUETYPE_TABLES_H
+#import FT_ADVANCES_H
 
 @implementation O2Font_freetype
 
@@ -411,15 +412,24 @@ FT_Face O2FontFreeTypeFace(O2Font_freetype *self) {
 }
 
 - (void) fetchAdvances {
-    FT_Set_Char_Size(_face, 0, _unitsPerEm * 64, 72, 72);
+    NSInteger *advances = NSZoneMalloc(NULL, sizeof(NSInteger) * _numberOfGlyphs);
+    FT_Fixed batch[256];
 
-    _advances = NSZoneMalloc(NULL, sizeof(NSInteger) * _numberOfGlyphs);
-
-    for (O2Glyph glyph = 0; glyph < _numberOfGlyphs; glyph++) {
-        FT_Load_Glyph(_face, glyph, FT_LOAD_DEFAULT);
-
-        _advances[glyph] = _face->glyph->advance.x / (O2Float)(2 << 5);
+    for (FT_UInt first = 0; first < _numberOfGlyphs;) {
+        FT_UInt count = MIN(256, _numberOfGlyphs - first);
+        FT_Error error = FT_Get_Advances(_face, first, count, FT_LOAD_NO_SCALE, batch);
+        if (error != 0) {
+            NSZoneFree(NULL, advances);
+            [NSException raise: NSInternalInconsistencyException
+                        format: @"FreeType advance lookup failed: %d", error];
+            return;
+        }
+        for (FT_UInt index = 0; index < count; index++)
+            // Bitmap strikes keep 26.6 advances even with FT_LOAD_NO_SCALE.
+            advances[first + index] = batch[index] / (FT_IS_SCALABLE(_face) ? 1 : 64);
+        first += count;
     }
+    _advances = advances;
 }
 
 - (O2Glyph) glyphWithGlyphName: (NSString *) name {
