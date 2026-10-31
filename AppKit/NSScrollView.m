@@ -1053,38 +1053,49 @@ static Class _rulerViewClass = nil;
     _allowsMagnification = value;
 }
 
+static void tileSubview(NSScrollView *self, NSView *view, NSRect frame) {
+    if (view == nil || NSEqualRects([view frame], frame))
+        return;
+    NSRect oldFrame = [view frame];
+    [view setFrame: frame];
+    // Frame changes do not invalidate drawing. Repaint both the moved content
+    // and the area it exposed (for example when a ruler loses its markers).
+    [view setNeedsDisplay: YES];
+    [self setNeedsDisplayInRect: NSUnionRect(oldFrame, frame)];
+}
+
 - (void) tile {
     NSRect frame;
     if (_textInspectorBar) {
         frame = [self insetBounds];
         frame.size.height = MIN(NSHeight(frame),
                 [(_NSTextInspectorBar *)_textInspectorBar preferredHeightForWidth: NSWidth(frame)]);
-        [_textInspectorBar setFrame: frame];
+        tileSubview(self, _textInspectorBar, frame);
     }
 
     [self createHeaderAndCornerViewsIfNeeded];
     [self createRulerViewsIfNeeded];
 
     frame = [self headerClipViewFrame];
-    [_headerClipView setFrame: frame];
+    tileSubview(self, _headerClipView, frame);
 
     frame = [self cornerViewFrame];
-    [_cornerView setFrame: frame];
+    tileSubview(self, _cornerView, frame);
 
     frame = [self verticalScrollerFrame];
-    [_verticalScroller setFrame: frame];
+    tileSubview(self, _verticalScroller, frame);
 
     frame = [self horizontalScrollerFrame];
-    [_horizontalScroller setFrame: frame];
+    tileSubview(self, _horizontalScroller, frame);
 
     frame = [self clipViewFrame];
-    [_clipView setFrame: frame];
+    tileSubview(self, _clipView, frame);
 
     frame = [self horizontalRulerFrame];
-    [_horizontalRuler setFrame: frame];
+    tileSubview(self, _horizontalRuler, frame);
 
     frame = [self verticalRulerFrame];
-    [_verticalRuler setFrame: frame];
+    tileSubview(self, _verticalRuler, frame);
 
     frame = [_clipView bounds];
     if (![self hasVerticalScroller])
