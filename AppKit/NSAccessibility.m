@@ -388,6 +388,7 @@ NSString *const NSAccessibilityMenuRole = @"NSAccessibilityMenuRole";
 NSString *const NSAccessibilityOutlineRole = @"NSAccessibilityOutlineRole";
 NSString *const NSAccessibilityPopUpButtonRole =
         @"NSAccessibilityPopUpButtonRole";
+NSAccessibilityRole const NSAccessibilityPopoverRole = @"AXPopover";
 NSString *const NSAccessibilityProgressIndicatorRole =
         @"NSAccessibilityProgressIndicatorRole";
 NSString *const NSAccessibilityRadioButtonRole =
