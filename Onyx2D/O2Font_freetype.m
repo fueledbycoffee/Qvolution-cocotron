@@ -73,7 +73,7 @@ FcConfig *O2FontSharedFontConfig() {
     return fontConfig;
 }
 
-static FT_Face createFaceForMatch(FcPattern *match) {
+static FT_Face createFaceForMatch(FcPattern *match, BOOL requireUnicode) {
     FcChar8 *filename = NULL;
     int faceIndex = 0;
     FcResult indexResult = FcPatternGetInteger(match, FC_INDEX, 0, &faceIndex);
@@ -85,7 +85,7 @@ static FT_Face createFaceForMatch(FcPattern *match) {
     if (FT_New_Face(O2FontSharedFreeTypeLibrary(), (const char *)filename,
                     faceIndex, &face) != 0)
         return NULL;
-    if (FT_Select_Charmap(face, FT_ENCODING_UNICODE) != 0) {
+    if (requireUnicode && FT_Select_Charmap(face, FT_ENCODING_UNICODE) != 0) {
         FT_Done_Face(face);
         return NULL;
     }
@@ -101,7 +101,7 @@ static FT_Face createMatchingFace(FcPattern *pattern) {
     FcPattern *match = FcFontMatch(config, pattern, &result);
     if (match == NULL)
         return NULL;
-    FT_Face face = createFaceForMatch(match);
+    FT_Face face = createFaceForMatch(match, YES);
     FcPatternDestroy(match);
     return face;
 }
@@ -208,7 +208,7 @@ static FT_Face createUserInterfaceFace(BOOL fixedPitch, BOOL emphasized,
         return NULL;
     FT_Face face = NULL;
     for (int index = 0; index < candidates->nfont; ++index) {
-        face = createFaceForMatch(candidates->fonts[index]);
+        face = createFaceForMatch(candidates->fonts[index], YES);
         if (face == NULL)
             continue;
         if (face->units_per_EM > 0 && face->num_glyphs > 0 &&
@@ -233,6 +233,62 @@ O2FontRef O2FontCreateForUserInterface(BOOL fixedPitch, BOOL emphasized,
         return nil;
     }
     return [font initWithFace:face];
+}
+
+// 1 is an exact loaded face; 0 permits legacy family/pattern matching; -1 is failure.
+static int createExactPostScriptFace(const char *name, FT_Face *face) {
+    *face = NULL;
+    if (name[0] == '\0')
+        return 0; // Empty pattern retains the configured legacy default.
+    FcConfig *config = O2FontSharedFontConfig();
+    if (config == NULL)
+        return -1;
+    FcPattern *query = FcPatternCreate();
+    FcObjectSet *objects = FcObjectSetBuild(FC_FILE, FC_INDEX, NULL);
+    if (query == NULL || objects == NULL ||
+            !FcPatternAddString(query, FC_POSTSCRIPT_NAME, (const FcChar8 *)name)) {
+        if (query != NULL) FcPatternDestroy(query);
+        if (objects != NULL) FcObjectSetDestroy(objects);
+        return -1;
+    }
+    FcFontSet *matches = FcFontList(config, query, objects);
+    FcPatternDestroy(query);
+    FcObjectSetDestroy(objects);
+    if (matches == NULL)
+        return -1;
+    int result = matches->nfont > 0 ? -1 : 0;
+    for (int index = 0; index < matches->nfont; ++index) {
+        FT_Face candidate = createFaceForMatch(matches->fonts[index], NO);
+        if (candidate == NULL)
+            continue;
+        const char *actual = FT_Get_Postscript_Name(candidate);
+        if (actual != NULL && strcmp(actual, name) == 0) {
+            *face = candidate;
+            result = 1;
+            break;
+        }
+        FT_Done_Face(candidate);
+    }
+    FcFontSetDestroy(matches);
+    return result;
+}
+
+static char *copyFontNameUTF8(CFStringRef name) {
+    if (name == NULL || CFGetTypeID(name) != CFStringGetTypeID())
+        return NULL;
+    CFIndex length = CFStringGetLength(name);
+    for (CFIndex index = 0; index < length; ++index)
+        if (CFStringGetCharacterAtIndex(name, index) == 0)
+            return NULL;
+    CFIndex maximum = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8);
+    if (maximum < 0 || maximum == LONG_MAX || (uintmax_t)maximum >= SIZE_MAX)
+        return NULL;
+    char *bytes = malloc((size_t)maximum + 1);
+    if (bytes != NULL && !CFStringGetCString(name, bytes, maximum + 1, kCFStringEncodingUTF8)) {
+        free(bytes);
+        bytes = NULL;
+    }
+    return bytes;
 }
 
 + (NSString *) filenameForPattern: (NSString *) pattern {
@@ -285,8 +341,23 @@ O2FontRef O2FontCreateForUserInterface(BOOL fixedPitch, BOOL emphasized,
 
 - (instancetype) initWithFontName: (NSString *) name {
     self = [super initWithFontName: name];
-
-    NSString *filename = [[self class] filenameForPattern: name];
+    if (self == nil)
+        return nil;
+    char *requested = copyFontNameUTF8((CFStringRef)_name);
+    if (requested == NULL) {
+        [self release];
+        return nil;
+    }
+    FT_Face exactFace;
+    int exact = createExactPostScriptFace(requested, &exactFace);
+    free(requested);
+    if (exact > 0)
+        return [self initWithFace:exactFace];
+    if (exact < 0) {
+        [self release];
+        return nil;
+    }
+    NSString *filename = [[self class] filenameForPattern: _name];
     if (filename == nil) {
         filename = [[self class] filenameForPattern: @""];
     }
