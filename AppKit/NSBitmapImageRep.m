@@ -933,10 +933,11 @@ NSBitmapImageRepPropertyKey NSImageCurrentFrame = @"NSImageCurrentFrame";
 }
 
 - (CGBitmapInfo) CGBitmapInfo {
-    // The bitmap planes store samples in component order (RGBA, ARGB with NSAlphaFirstBitmapFormat), i.e. big-endian
-    // for 8-bit samples; createBitmapIfNeeded copies CGImage data in that layout. Say so explicitly: Onyx2D treats
-    // kCGBitmapByteOrderDefault as host (little) endian and would read and encode the channels reversed.
-    CGBitmapInfo result = (_bitsPerSample == 8) ? kCGBitmapByteOrder32Big : kCGBitmapByteOrderDefault;
+    // Four-byte 8-bit pixels store samples in component order (RGBA or ARGB).
+    // Onyx2D needs an explicit big-endian word order for that layout. Packed
+    // RGB888 has no 32-bit word order and must retain the default byte order.
+    CGBitmapInfo result = (_bitsPerSample == 8 && !(_bitsPerPixel == 24 && _samplesPerPixel == 3 && ![self hasAlpha]))
+        ? kCGBitmapByteOrder32Big : kCGBitmapByteOrderDefault;
 
     if (![self hasAlpha]) {
         if (_bitsPerPixel == 32 && _samplesPerPixel == 3) {
