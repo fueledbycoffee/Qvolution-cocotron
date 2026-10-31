@@ -698,8 +698,43 @@ double CTFontGetAdvancesForGlyphs(CTFontRef font, CTFontOrientation orientation,
                                 const CGGlyph *glyphs, CGSize *advances,
                                 CFIndex count)
 {
+    if (count <= 0 || font == NULL || glyphs == NULL)
+        return 0;
+    CGFontRef graphics = graphicsFont(font);
+    if (graphics == NULL)
+        return 0;
     FT_Face face = faceForFont(font);
-    FT_Set_Pixel_Sizes(face, fontSize(font), fontSize(font));
+    int unitsPerEm = CGFontGetUnitsPerEm(graphics);
+    CGFloat size = fontSize(font);
+    if ((orientation == kCTFontOrientationDefault ||
+         orientation == kCTFontOrientationHorizontal) &&
+        face != NULL && FT_IS_SCALABLE(face) && unitsPerEm > 0 &&
+        isfinite(size)) {
+        // Current constructors store only the existing identity-matrix model.
+        // A future real matrix implementation must transform these ideal advances.
+        int units[256];
+        double scale = (double)size / unitsPerEm;
+        double total = 0;
+        for (CFIndex first = 0; first < count;) {
+            CFIndex batch = MIN((CFIndex)256, count - first);
+            if (!CGFontGetGlyphAdvances(graphics, glyphs + first, batch, units)) {
+                [NSException raise:NSInternalInconsistencyException
+                            format:@"Cannot query font design-unit advances"];
+                return 0;
+            }
+            for (CFIndex index = 0; index < batch; index++) {
+                double width = units[index] * scale;
+                if (advances != NULL)
+                    advances[first + index] = CGSizeMake(width, 0);
+                total += width;
+            }
+            first += batch;
+        }
+        return total;
+    }
+
+    // Legacy vertical/non-scalable/matrix handling remains unqualified.
+    FT_Set_Pixel_Sizes(face, size, size);
 
     double sum = 0;
     for (CFIndex i = 0; i < count; i++) {
