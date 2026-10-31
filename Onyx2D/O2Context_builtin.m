@@ -539,15 +539,18 @@ static BOOL clipToIntegralRects(O2Context_builtin *self, NSArray *phases) {
     size_t height = O2ImageGetHeight(self->_surface);
     if (width > INT_MAX || height > INT_MAX)
         return NO;
-    O2Float minX = 0, minY = 0, maxX = width, maxY = height;
+    double minX = 0, minY = 0, maxX = width, maxY = height;
     for (O2ClipPhase *phase in phases) {
-        if (O2ClipPhasePhaseType(phase) == O2ClipPhaseMask)
+        O2ClipPhaseType type = O2ClipPhasePhaseType(phase);
+        if (type != O2ClipPhaseNonZeroPath && type != O2ClipPhaseEOPath)
             return NO;
+        O2Path *path = O2ClipPhaseObject(phase);
         O2Rect rect;
-        if (!O2PathIsRect(O2ClipPhaseObject(phase), &rect))
+        if (!O2PathIsRect(path, &rect))
             return NO;
-        O2Float x0 = rect.origin.x, y0 = rect.origin.y;
-        O2Float x1 = x0 + rect.size.width, y1 = y0 + rect.size.height;
+        const O2Point *points = O2PathPoints(path);
+        double x0 = points[0].x, y0 = points[0].y;
+        double x1 = points[2].x, y1 = points[2].y;
         if (!isfinite(x0) || !isfinite(y0) || !isfinite(x1) || !isfinite(y1) ||
                 floor(x0) != x0 || floor(y0) != y0 ||
                 floor(x1) != x1 || floor(y1) != y1)
@@ -557,10 +560,10 @@ static BOOL clipToIntegralRects(O2Context_builtin *self, NSArray *phases) {
         maxX = MIN(maxX, MAX(x0, x1));
         maxY = MIN(maxY, MAX(y0, y1));
     }
-    int x = MIN((O2Float)width, MAX(0, minX));
-    int y = MIN((O2Float)height, MAX(0, minY));
-    int endX = MIN((O2Float)width, MAX(0, maxX));
-    int endY = MIN((O2Float)height, MAX(0, maxY));
+    int x = MIN((double)width, MAX(0, minX));
+    int y = MIN((double)height, MAX(0, minY));
+    int endX = MIN((double)width, MAX(0, maxX));
+    int endY = MIN((double)height, MAX(0, maxY));
     O2RasterizerSetViewport(self, x, y, MAX(0, endX - x), MAX(0, endY - y));
     return YES;
 }
