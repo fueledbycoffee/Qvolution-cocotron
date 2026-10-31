@@ -693,7 +693,8 @@ void O2RasterizerSetShouldAntialias(O2Context_builtin *self, BOOL antialias,
     int i;
     for (i = 0; i < numberOfSamples; i++) {
         // Complementary interior samples avoid a directional bias at pixel centers.
-        self->samplesX[i] = (O2Float) radicalInverseBase2(i) +
+        self->samplesX[i] = numberOfSamples == 1 ? 0.5f :
+                (O2Float) radicalInverseBase2(i) +
                 ((i & 1) ? 0.75f : 0.25f) / numberOfSamples;
         self->samplesWeight = MAX_SAMPLES / numberOfSamples;
     }
