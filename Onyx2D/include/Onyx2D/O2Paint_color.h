@@ -43,3 +43,6 @@
         surfaceToPaintTransform: (O2AffineTransform) transform;
 
 @end
+
+// Exact source-owned constant painter; patterns and image paints return NO.
+BOOL O2PaintGetConstantColor(O2Paint *paint, O2argb32f *color);

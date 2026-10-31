@@ -18,6 +18,8 @@ src=r'''
 #include <stdio.h>
 #include <assert.h>
 #include <time.h>
+#define YES true
+#define NO false
 typedef bool BOOL;typedef double O2Float;
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -28,7 +30,7 @@ typedef bool BOOL;typedef double O2Float;
 typedef struct{uint8_t b,g,r,a;} O2argb8u;
 typedef struct O2Surface{uint8_t bytes[3*5280];uint8_t *_pixelBytes;size_t _bytesPerRow;int bits;bool byte;void(*_writeargb32f)(struct O2Surface*,int,int,O2argb32f*,int);void(*_writeargb8u)(struct O2Surface*,int,int,O2argb8u*,int);}O2Surface;
 '''
-for name in ['static void O2SurfaceWrite_argb32f_to_argb8u(', 'static void O2SurfaceWrite_argb32f_to_ABGR8888(', 'static void O2SurfaceWrite_argb8u_to_BGRA8888(', 'static void O2SurfaceWrite_argb8u_to_ARGB8888(', 'static void O2SurfaceWrite_argb32f_to_argb8u_to_ANY(', 'void O2SurfaceWriteSpan_largb32f_PRE(']:src+=function(Path('Onyx2D/O2Surface.m'),name)+'\n'
+for name in ['static void O2SurfaceWrite_argb32f_to_argb8u(', 'static void O2SurfaceWrite_argb32f_to_ABGR8888(', 'static void O2SurfaceWrite_argb8u_to_BGRA8888(', 'static void O2SurfaceWrite_argb8u_to_ARGB8888(', 'static void O2SurfaceWrite_argb32f_to_argb8u_to_ANY(', 'static BOOL O2SurfaceCanWriteRepeatedColor(', 'BOOL O2SurfaceWriteRepeatedColor(', 'void O2SurfaceWriteSpan_largb32f_PRE(']:src+=function(Path('Onyx2D/O2Surface.m'),name)+'\n'
 src+=r'''
 static void rawFloat(O2Surface*s,int x,int y,O2argb32f*span,int n){memcpy(s->_pixelBytes+y*s->_bytesPerRow+x*16,span,n*16);}
 static unsigned rng=12345;static float randomFloat(void){rng=rng*1664525u+1013904223u;return (rng%4001)/1000.f-1;}
@@ -44,6 +46,11 @@ int main(void){setbuf(stdout,NULL);O2argb32f span[320];unsigned cases=0;
   if(variant==2)for(int i=0;i<320;i++)span[i].g=randomFloat();
   O2SurfaceWriteSpan_largb32f_PRE(&a,2,1,span,n);if(n)b._writeargb32f(&b,2,1,span,n);
   assert(!memcmp(a.bytes,b.bytes,sizeof(a.bytes)));cases++;
+  if(variant==0||variant==3){init(&a,mode);init(&b,mode);
+   BOOL repeated=O2SurfaceWriteRepeatedColor(&a,2,1,color,n);
+   assert(repeated==(mode!=4||n==0));
+   if(repeated){for(int k=0;k<n;k++)span[k]=color;if(n)b._writeargb32f(&b,2,1,span,n);assert(!memcmp(a.bytes,b.bytes,sizeof(a.bytes)));}
+  }
  }
  for(int i=0;i<320;i++)span[i]=O2argb32fInit(.82,.82,.82,1);
  O2Surface s;init(&s,2);double seconds[2];

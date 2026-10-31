@@ -743,32 +743,44 @@ void O2SurfaceWriteSpan_argb8u_PRE(O2Surface *self, int x, int y,
     self->_writeargb8u(self, x, y, span, length);
 }
 
+static BOOL O2SurfaceCanWriteRepeatedColor(O2Surface *self) {
+    return self->_writeargb32f == O2SurfaceWrite_argb32f_to_argb8u ||
+            self->_writeargb32f == O2SurfaceWrite_argb32f_to_ABGR8888 ||
+            (self->_writeargb32f == O2SurfaceWrite_argb32f_to_argb8u_to_ANY &&
+             (self->_writeargb8u == O2SurfaceWrite_argb8u_to_BGRA8888 ||
+              self->_writeargb8u == O2SurfaceWrite_argb8u_to_ARGB8888));
+}
+
+BOOL O2SurfaceWriteRepeatedColor(O2Surface *self, int x, int y,
+        O2argb32f color, int length) {
+    if (length <= 0)
+        return YES;
+    if (!O2SurfaceCanWriteRepeatedColor(self))
+        return NO;
+    // Use the selected conversion once, including its byte order and rounding.
+    self->_writeargb32f(self, x, y, &color, 1);
+    uint8_t *pixel = self->_pixelBytes + y * self->_bytesPerRow + x * 4;
+    size_t written = 1;
+    while (written < (size_t)length) {
+        size_t count = MIN(written, (size_t)length - written);
+        memcpy(pixel + written * 4, pixel, count * 4);
+        written += count;
+    }
+    return YES;
+}
+
 void O2SurfaceWriteSpan_largb32f_PRE(O2Surface *self, int x, int y,
                                      O2argb32f *span, int length)
 {
     if (length == 0)
         return;
 
-    BOOL byteWriter = self->_writeargb32f == O2SurfaceWrite_argb32f_to_argb8u ||
-            self->_writeargb32f == O2SurfaceWrite_argb32f_to_ABGR8888 ||
-            (self->_writeargb32f == O2SurfaceWrite_argb32f_to_argb8u_to_ANY &&
-             (self->_writeargb8u == O2SurfaceWrite_argb8u_to_BGRA8888 ||
-              self->_writeargb8u == O2SurfaceWrite_argb8u_to_ARGB8888));
-    if (length > 1 && byteWriter) {
+    if (length > 1 && O2SurfaceCanWriteRepeatedColor(self)) {
         int i = 1;
         while (i < length && memcmp(span, span + i, sizeof(*span)) == 0)
             i++;
-        if (i == length) {
-            // Convert once through the selected writer, preserving its byte
-            // layout and rounding, then repeat the identical stored pixel.
-            self->_writeargb32f(self, x, y, span, 1);
-            uint8_t *pixel = self->_pixelBytes + y * self->_bytesPerRow + x * 4;
-            uint32_t packed;
-            memcpy(&packed, pixel, sizeof(packed));
-            for (i = 1; i < length; i++)
-                memcpy(pixel + i * 4, &packed, sizeof(packed));
+        if (i == length && O2SurfaceWriteRepeatedColor(self, x, y, span[0], length))
             return;
-        }
     }
     self->_writeargb32f(self, x, y, span, length);
 }

@@ -33,6 +33,8 @@ typedef struct { unsigned char bytes[4][(320*16)+16]; int width,height; } O2Surf
 typedef struct { void *_paint_largb8u_PRE; O2argb32f color; int skipX; } O2Paint;
 typedef struct O2Context_builtin { NSInteger _vpx,_vpy,_vpwidth,_vpheight; O2BlendSpan_argb32f _blend_argb32f_PRE; struct O2Context_builtin *_clipContext; O2Surface *_surface; void *_blend_argb8u_PRE; } O2Context_builtin; typedef O2Context_builtin O2Context_builtin_FT;
 typedef struct { unsigned width,rows; int pitch; unsigned char *buffer; } FT_Bitmap;
+static BOOL O2PaintGetConstantColor(O2Paint *p,O2argb32f *color){(void)p;(void)color;return false;}
+static BOOL O2SurfaceWriteRepeatedColor(O2Surface *s,int x,int y,O2argb32f color,int n){(void)s;(void)x;(void)y;(void)color;(void)n;return false;}
 static bool O2SurfaceCanReadWriteARGB8u(O2Surface *s) { (void)s; return false; }
 static O2argb32f *O2Image_read_argb32f(O2Surface *s,int x,int y,O2argb32f *dst,int n) {
  assert(x>=0&&y>=0&&x+n<=s->width&&y<s->height);memcpy(dst,s->bytes[y]+16*x,16*n);return NULL;
