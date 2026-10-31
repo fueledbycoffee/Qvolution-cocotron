@@ -47,6 +47,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <CoreGraphics/CGWindowPrivate.h>
 #import <objc/message.h>
 #import <pthread.h>
+#import "NSAppearanceInternal.h"
 #import <stdatomic.h>
 #include <stdarg.h>
 
@@ -128,7 +129,19 @@ NSApplication *NSApp = nil;
     return NSUserInterfaceLayoutDirectionLeftToRight;
 }
 
-@synthesize appearance = _appearance;
+- (NSAppearance *)appearance { return _appearance; }
+
+- (void)setAppearance:(NSAppearance *)appearance {
+    if (_appearance == appearance)
+        return;
+    NSAppearance *previous = [[self effectiveAppearance] retain];
+    [appearance retain]; [_appearance release]; _appearance = appearance;
+    @try {
+        if (previous != [self effectiveAppearance])
+            [[NSNotificationCenter defaultCenter] postNotificationName:_NSApplicationEffectiveAppearanceDidChange
+                    object:self userInfo:[NSDictionary dictionaryWithObject:previous forKey:_NSPreviousEffectiveAppearance]];
+    } @finally { [previous release]; }
+}
 
 - (NSAppearance *) effectiveAppearance {
     static NSAppearance *aqua = nil;

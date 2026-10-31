@@ -41,6 +41,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSTrackingArea.h>
 #import <AppKit/NSView.h>
 #import <AppKit/NSWindow-Private.h>
+#import "NSAppearanceInternal.h"
 #import <AppKit/NSWindow.h>
 #import <AppKit/NSWindowAnimationContext.h>
 #import <ApplicationServices/ApplicationServices.h>
@@ -148,6 +149,7 @@ NSInteger NSBitsPerPixelFromDepth(NSWindowDepth depth) {
 @interface NSWindow ()
 
 - (NSRect) zoomedFrame;
+- (void)_appearanceDidChangeFrom:(NSAppearance *)previous;
 
 @end
 
@@ -255,13 +257,36 @@ NSInteger NSBitsPerPixelFromDepth(NSWindowDepth depth) {
 	NSWindowTabbingMode _tabbingMode;
 	NSWindowCollectionBehavior _collectionBehavior;
 
-@synthesize appearance = _appearance;
 @synthesize identifier = _identifier;
 @synthesize accessibilityElement = _isAccessible;
 @synthesize restorationClass = _restorationClass;
 @synthesize restorable = _restorable;
 
 static BOOL _allowsAutomaticWindowTabbing;
+
+- (NSAppearance *)appearance { return _appearance; }
+
+- (void)setAppearance:(NSAppearance *)appearance {
+    if (_appearance == appearance)
+        return;
+    NSAppearance *previous = [[self effectiveAppearance] retain];
+    [appearance retain]; [_appearance release]; _appearance = appearance;
+    @try { [self _appearanceDidChangeFrom:previous]; }
+    @finally { [previous release]; }
+}
+
+- (void)_appearanceDidChangeFrom:(NSAppearance *)previous {
+    if (previous == [self effectiveAppearance])
+        return;
+    if ([_backgroundView appearance] == nil)
+        [_backgroundView _appearanceDidChangeFrom:previous];
+    [self setViewsNeedDisplay:YES];
+}
+
+- (void)_applicationAppearanceDidChange:(NSNotification *)notification {
+    if (_appearance == nil)
+        [self _appearanceDidChangeFrom:[[notification userInfo] objectForKey:_NSPreviousEffectiveAppearance]];
+}
 
 + (NSWindowDepth) defaultDepthLimit {
     return 0;
@@ -440,6 +465,8 @@ static BOOL _allowsAutomaticWindowTabbing;
     if (!(_styleMask & NSAppKitPrivateWindow)) {
         [[NSApplication sharedApplication] _addWindow: self];
     }
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_applicationAppearanceDidChange:)
+            name:_NSApplicationEffectiveAppearanceDidChange object:nil];
     return self;
 }
 
@@ -469,8 +496,8 @@ static BOOL _allowsAutomaticWindowTabbing;
     [_title release];
     [_miniwindowTitle release];
     [_miniwindowImage release];
-    [_appearance release];
     [_backgroundView _setWindow: nil];
+    [_appearance release];
     [_backgroundView release];
     [_menu release];
     [_menuView release];
@@ -3846,7 +3873,9 @@ static BOOL _allowsAutomaticWindowTabbing;
 }
 
 - (NSAppearance *) effectiveAppearance {
-    return _appearance != nil ? _appearance : [NSApp effectiveAppearance];
+    if (_appearance != nil) return _appearance;
+    NSAppearance *inherited = [NSApp effectiveAppearance];
+    return inherited != nil ? inherited : [NSAppearance currentAppearance];
 }
 
 - (CGFloat) backingScaleFactor {

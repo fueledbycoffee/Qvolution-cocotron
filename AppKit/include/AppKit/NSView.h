@@ -587,7 +587,7 @@ APPKIT_EXPORT const NSViewFullScreenModeOptionKey NSFullScreenModeApplicationPre
 
 @interface NSView (NSViewEffectiveAppearance)
 
-// The view's own appearance, else its superview's, else the current appearance.
+// Explicit view appearance, then nearest superview/window, then app appearance.
 @property(readonly, nonnull) NSAppearance *effectiveAppearance;
 
 @end

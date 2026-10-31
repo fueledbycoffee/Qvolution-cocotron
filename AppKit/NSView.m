@@ -20,6 +20,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <AppKit/NSApplication.h>
+#import "NSAppearanceInternal.h"
 #import <AppKit/NSClipView.h>
 #import <AppKit/NSColor.h>
 #import <AppKit/NSCursor.h>
@@ -123,11 +124,21 @@ const NSViewFullScreenModeOptionKey NSFullScreenModeApplicationPresentationOptio
 
 @synthesize identifier = _identifier;
 @synthesize translatesAutoresizingMaskIntoConstraints = _translatesAutoresizingMaskIntoConstraints;
-@synthesize appearance = _appearance;
 @synthesize wantsBestResolutionOpenGLSurface = _wantsBestResolutionOpenGLSurface;
 
 static BOOL NSViewLayersEnabled = YES;
 static BOOL NSShowAllViews = NO;
+
+- (NSAppearance *)appearance { return _appearance; }
+
+- (void)setAppearance:(NSAppearance *)appearance {
+    if (_appearance == appearance)
+        return;
+    NSAppearance *previous = [[self effectiveAppearance] retain];
+    [appearance retain]; [_appearance release]; _appearance = appearance;
+    @try { [self _appearanceDidChangeFrom:previous]; }
+    @finally { [previous release]; }
+}
 
 + (void) initialize {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -456,6 +467,7 @@ typedef struct __VFlags {
         _autoresizesSubviews = vflags.vf.autoresizeSubviews;
     }
 
+    [self _registerForApplicationAppearanceChanges];
     return self;
 }
 
@@ -496,10 +508,12 @@ typedef struct __VFlags {
     [self _setDefaultLayoutPriorities];
     _alphaValue = 1.0;
 
+    [self _registerForApplicationAppearanceChanges];
     return self;
 }
 
 - (void) dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:_NSApplicationEffectiveAppearanceDidChange object:nil];
     [NSLayoutConstraint deactivateConstraints:[self constraints]];
 
     // Do this first?
@@ -529,6 +543,7 @@ typedef struct __VFlags {
     [_layerContext invalidate];
     [_layerContext release];
 
+    [_appearance release];
     [_identifier release];
     for (NSGestureRecognizer *recognizer in _gestureRecognizers)
         [recognizer _setView: nil];
@@ -1314,50 +1329,58 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
 
 - (void) _setWindow: (NSWindow *) window {
     if (_window != window) {
-        BOOL windowRecalulatesKeyViewLoop =
-                [window autorecalculatesKeyViewLoop];
-        if (windowRecalulatesKeyViewLoop)
-            [self setNextKeyView: nil];
+        NSAppearance *previousAppearance = [[self effectiveAppearance] retain];
+        @try {
+            BOOL windowRecalulatesKeyViewLoop =
+                    [window autorecalculatesKeyViewLoop];
+            if (windowRecalulatesKeyViewLoop)
+                [self setNextKeyView: nil];
 
-        [self viewWillMoveToWindow: window];
+            [self viewWillMoveToWindow: window];
 
-        _window = window;
+            _window = window;
 
-        if (_layerContext && _window == nil) {
-            [self _removeLayerFromSuperlayer];
-        } else if (_layerContext) {
-            [_layerContext setSubwindow: [_window _createSubWindowWithFrame: [self frame]]];
-            [self _updateLayerVisibility];
-        } else if (_layer != nil && _window != nil) {
-            [self _addLayerToSuperlayer];
-        }
+            if (_layerContext && _window == nil) {
+                [self _removeLayerFromSuperlayer];
+            } else if (_layerContext) {
+                [_layerContext setSubwindow: [_window _createSubWindowWithFrame: [self frame]]];
+                [self _updateLayerVisibility];
+            } else if (_layer != nil && _window != nil) {
+                [self _addLayerToSuperlayer];
+            }
 
-        [_subviews makeObjectsPerformSelector: _cmd withObject: window];
-        _validTrackingAreas = NO;
-        [_window invalidateCursorRectsForView: self]; // this also invalidates
-                                                      // tracking areas
+            [_subviews makeObjectsPerformSelector: _cmd withObject: window];
+            _validTrackingAreas = NO;
+            [_window invalidateCursorRectsForView: self]; // this also invalidates
+                                                          // tracking areas
 
-        if (windowRecalulatesKeyViewLoop)
-            [_window recalculateKeyViewLoop];
+            if (windowRecalulatesKeyViewLoop)
+                [_window recalculateKeyViewLoop];
 
-        [self viewDidMoveToWindow];
+            [self viewDidMoveToWindow];
+            [self _appearanceDidChangeFrom:previousAppearance];
+        } @finally { [previousAppearance release]; }
     }
 }
 
 - (void) _setSuperview: superview {
     if (_superview == superview)
         return;
-    if (_layer != nil)
-        [self _removeLayerFromSuperlayer];
-    _superview = superview;
-    [self _updateLayerVisibility];
-    if (_layer != nil && _superview != nil)
-        [self _addLayerToSuperlayer];
+    NSAppearance *previousAppearance = [[self effectiveAppearance] retain];
+    @try {
+        if (_layer != nil)
+            [self _removeLayerFromSuperlayer];
+        _superview = superview;
+        [self _updateLayerVisibility];
+        if (_layer != nil && _superview != nil)
+            [self _addLayerToSuperlayer];
 
-    [_window invalidateCursorRectsForView: self]; // this also invalidates
-                                                  // tracking areas
+        [_window invalidateCursorRectsForView: self]; // this also invalidates
+                                                      // tracking areas
 
-    [self setNextResponder: superview];
+        [self setNextResponder: superview];
+        [self _appearanceDidChangeFrom:previousAppearance];
+    } @finally { [previousAppearance release]; }
 }
 
 - (void) _insertSubview: (NSView *) view atIndex: (NSInteger) index {
@@ -3625,7 +3648,33 @@ static NSMutableArray *installedViewConstraints(NSView *view, BOOL create) {
         return _appearance;
     if (_superview != nil)
         return [_superview effectiveAppearance];
-    return [NSAppearance currentAppearance];
+    if (_window != nil)
+        return [_window effectiveAppearance];
+    NSAppearance *inherited = [NSApp effectiveAppearance];
+    return inherited != nil ? inherited : [NSAppearance currentAppearance];
+}
+
+- (void)_registerForApplicationAppearanceChanges {
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_applicationAppearanceDidChange:)
+            name:_NSApplicationEffectiveAppearanceDidChange object:nil];
+}
+
+- (void)_applicationAppearanceDidChange:(NSNotification *)notification {
+    if (_appearance == nil && _superview == nil && _window == nil)
+        [self _appearanceDidChangeFrom:[[notification userInfo] objectForKey:_NSPreviousEffectiveAppearance]];
+}
+
+- (void)_appearanceDidChangeFrom:(NSAppearance *)previous {
+    if (previous == [self effectiveAppearance])
+        return;
+    NSArray *children = [_subviews copy];
+    @try {
+        [self setNeedsDisplay:YES];
+        [self viewDidChangeEffectiveAppearance];
+        for (NSView *child in children)
+            if ([child superview] == self && [child appearance] == nil)
+                [child _appearanceDidChangeFrom:previous];
+    } @finally { [children release]; }
 }
 
 @end
