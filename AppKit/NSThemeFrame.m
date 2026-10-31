@@ -237,6 +237,9 @@ static const CGFloat kTitleBarHeight = 28.0;
     [[NSColor colorWithCalibratedWhite: 0.78 alpha: 1.0] setFill];
     NSRectFill(NSMakeRect(NSMinX(bar), NSMinY(bar), NSWidth(bar), 1.0));
 
+    if ([[self window] titleVisibility] == NSWindowTitleHidden)
+        return;
+
     NSString *title = [[self window] title];
     if ([title length] == 0)
         return;

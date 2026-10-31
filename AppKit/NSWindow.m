@@ -1211,6 +1211,7 @@ static BOOL _allowsAutomaticWindowTabbing;
     _miniwindowTitle = [title copy];
 
     [self _updatePlatformWindowTitle];
+    [_backgroundView setNeedsDisplay: YES];
 
     if ([self _isApplicationWindow])
         [NSApp changeWindowsItem: self title: title filename: NO];
@@ -4042,7 +4043,10 @@ static inline NSRect scaleWindowRect(NSRect rect, CGFloat scale) {
 }
 
 - (void) setTitleVisibility: (NSWindowTitleVisibility) value {
+    if (_titleVisibility == value)
+        return;
     _titleVisibility = value;
+    [_backgroundView setNeedsDisplay: YES];
 }
 
 @end
