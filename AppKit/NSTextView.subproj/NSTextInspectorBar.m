@@ -63,6 +63,7 @@
     [self resizeSubviewsWithOldSize:NSZeroSize];
     return self;
 }
+- (void)dealloc { [_familyValue release]; [super dealloc]; }
 - (BOOL)isFlipped { return YES; }
 - (BOOL)isOpaque { return YES; }
 - (NSTextView *)textView { return _textView; }
@@ -113,8 +114,8 @@
 }
 - (NSFont *)convertFont:(NSFont *)font {
     NSFontManager *manager=[NSFontManager sharedFontManager];
-    if (_fontAction==NSTextInspectorFontFamily) return [manager convertFont:font toFamily:[_family titleOfSelectedItem]];
-    if (_fontAction==NSTextInspectorFontSize) return [manager convertFont:font toSize:[[_size titleOfSelectedItem] doubleValue]];
+    if (_fontAction==NSTextInspectorFontFamily) return [manager convertFont:font toFamily:_familyValue];
+    if (_fontAction==NSTextInspectorFontSize) return [manager convertFont:font toSize:_sizeValue];
     return _removeTrait ? [manager convertFont:font toNotHaveTrait:_trait]
                         : [manager convertFont:font toHaveTrait:_trait];
 }
@@ -126,8 +127,15 @@
     [_textView setSelectedRange:selection];
     [self sync];
 }
-- (void)changeFamily:(id)sender { _fontAction=NSTextInspectorFontFamily; [self applyFont]; }
-- (void)changeSize:(id)sender { _fontAction=NSTextInspectorFontSize; [self applyFont]; }
+- (void)changeFamily:(id)sender {
+    NSString *family=[[_family titleOfSelectedItem] copy];
+    [_familyValue release]; _familyValue=family;
+    _fontAction=NSTextInspectorFontFamily; [self applyFont];
+}
+- (void)changeSize:(id)sender {
+    _sizeValue=[[_size titleOfSelectedItem] doubleValue];
+    _fontAction=NSTextInspectorFontSize; [self applyFont];
+}
 - (void)changeBold:(NSButton *)sender {
     _fontAction=NSTextInspectorFontTrait; _trait=NSBoldFontMask; _removeTrait=[sender state]==NSControlStateValueOff; [self applyFont];
 }

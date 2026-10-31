@@ -11,6 +11,8 @@ typedef NS_ENUM(NSInteger, NSTextInspectorFontAction) {
     NSPopUpButton *_family, *_size;
     NSButton *_bold, *_italic, *_underline, *_left, *_center, *_right;
     NSTextInspectorFontAction _fontAction;
+    NSString *_familyValue;
+    CGFloat _sizeValue;
     BOOL _removeTrait;
     NSUInteger _trait;
 }
