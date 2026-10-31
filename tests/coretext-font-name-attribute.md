@@ -1,0 +1,7 @@
+# PostScript font-name attribute
+
+The vendored CTFont headers supply the existing copy API and attribute (clean-room rung2). [Apple kCTFontNameAttribute](https://developer.apple.com/documentation/coretext/kctfontnameattribute) specifies the descriptor's PostScript name as a CFString (rung3), distinct from the full/display-name APIs. The focused correction reuses the existing owned CTFontCopyPostScriptName helper instead of asking CTFontCopyName for the full-name key. Other attribute branches and the underlying helper's existing fallback behavior are unchanged; this is not complete metadata/fallback/variation fidelity.
+
+Original coretext-font-name-attribute.m loads an explicit open BoldOblique font through CGDataProvider, verifies actual PostScript identity and metrics, independently requires full-name and PostScript-name controls to differ, then checks the public Name attribute equals actual PostScript name. The copied attribute remains valid after the original font/provider are released. It does not query the failing traits getter or descriptor first.
+
+Coordinator's metadata-only stage18 run now passes those input controls and reaches the intended PS/full Name-attribute mismatch, exit1/shutdown0 (font-name-postmetadata-before.json). Earlier pre-metadata provider-identity failures do not prove this target. Exact production recipe compiles x86_64+i386 fat; original focused TU compiles. Candidate runtime remains coordinator-owned/pending; no native all-font naming or vendor cause is inferred.
