@@ -862,6 +862,7 @@ void O2GaussianKernelRelease(O2GaussianKernelRef kernel) {
 }
 
 static O2argb32f argbFromColor(O2ColorRef color) {
+    O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(color));
     size_t count = O2ColorGetNumberOfComponents(color);
     const O2Float *components = O2ColorGetComponents(color);
 

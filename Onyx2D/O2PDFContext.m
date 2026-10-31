@@ -74,6 +74,14 @@ static BOOL O2PDFReadBoxes(NSDictionary *info, O2Rect *boxes, BOOL *present) {
     return YES;
 }
 
+static void requirePDFColors(O2ContextRef context, BOOL fill, BOOL stroke) {
+    O2GState *state = O2ContextCurrentGState(context);
+    if (fill)
+        O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(state->_fillColor));
+    if (stroke)
+        O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(state->_strokeColor));
+}
+
 @implementation O2PDFContext
 
 - (void) clipToState: (O2ClipState *) clipState {
@@ -450,8 +458,10 @@ static BOOL O2PDFReadBoxes(NSDictionary *info, O2Rect *boxes, BOOL *present) {
     [self contentWithString: @"Q "];
 }
 
-- (void) emitCurrentGState {
-    O2GState *gState = O2ContextCurrentGState(self); {
+- (void) emitCurrentGStateForFill:(BOOL)fill stroke:(BOOL)stroke {
+    requirePDFColors(self, fill, stroke);
+    O2GState *gState = O2ContextCurrentGState(self);
+    if (stroke) {
         const O2Float *components = O2ColorGetComponents(gState->_strokeColor);
 
         switch ([O2ColorGetColorSpace(gState->_strokeColor) type]) {
@@ -475,7 +485,8 @@ static BOOL O2PDFReadBoxes(NSDictionary *info, O2Rect *boxes, BOOL *present) {
             O2UnimplementedMethod();
             break;
         }
-    } {
+    }
+    if (fill) {
         const O2Float *components = O2ColorGetComponents(gState->_fillColor);
 
         switch ([O2ColorGetColorSpace(gState->_fillColor) type]) {
@@ -579,8 +590,11 @@ static BOOL O2PDFReadBoxes(NSDictionary *info, O2Rect *boxes, BOOL *present) {
 }
 
 - (void) drawPath: (O2PathDrawingMode) pathMode {
+    BOOL fill = pathMode != kO2PathStroke;
+    BOOL stroke = pathMode >= kO2PathStroke;
+    requirePDFColors(self, fill, stroke);
     [self emitSaveGState];
-    [self emitCurrentGState]; // spool the graphic state before the actual path,
+    [self emitCurrentGStateForFill:fill stroke:stroke]; // spool the graphic state before the actual path,
                               // because some old Adobe Software,
     [self emitPath: _path];   // e.g. AR 7 and AI CS2, complain about "Invalid
                               // operation inside a path" otherwise.
@@ -616,9 +630,11 @@ static BOOL O2PDFReadBoxes(NSDictionary *info, O2Rect *boxes, BOOL *present) {
               count: (NSUInteger) count
 {
     // FIXME: use advances if not null
-
+    if (count == 0 || glyphs == NULL)
+        return;
+    requirePDFColors(self, YES, NO);
     [self emitSaveGState];
-    [self emitCurrentGState];
+    [self emitCurrentGStateForFill:YES stroke:NO];
     [self contentWithString: @"BT "];
 
     O2GState *state = O2ContextCurrentGState(self);
@@ -648,8 +664,9 @@ static BOOL O2PDFReadBoxes(NSDictionary *info, O2Rect *boxes, BOOL *present) {
 }
 
 - (void) drawShading: (O2Shading *) shading {
+    O2ColorSpaceRequireSupportedRendering(O2ShadingColorSpace(shading));
     [self emitSaveGState];
-    [self emitCurrentGState];
+    [self emitCurrentGStateForFill:NO stroke:NO];
     O2PDFObject *pdfObject = [shading encodeReferenceWithContext: self];
     O2PDFObject *name = [self nameForResource: pdfObject inCategory: "Shading"];
 
@@ -658,11 +675,14 @@ static BOOL O2PDFReadBoxes(NSDictionary *info, O2Rect *boxes, BOOL *present) {
 }
 
 - (void) drawImage: (O2Image *) image inRect: (O2Rect) rect {
+    O2ColorSpaceRequireSupportedRendering(O2ImageGetColorSpace(image));
+    BOOL fill = O2ImageIsMask(image);
+    requirePDFColors(self, fill, NO);
     [self emitSaveGState];
 
     O2PDFObject *pdfObject = [image encodeReferenceWithContext: self];
     O2PDFObject *name = [self nameForResource: pdfObject inCategory: "XObject"];
-    [self emitCurrentGState];
+    [self emitCurrentGStateForFill:fill stroke:NO];
 
     [self emitSaveGState];
     [self translateCTM: rect.origin.x: rect.origin.y];

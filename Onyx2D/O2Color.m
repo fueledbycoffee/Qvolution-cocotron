@@ -209,6 +209,7 @@ int O2ColorConvertComponentsToDeviceRGB(O2ColorSpaceRef inputSpace,
                                         const O2Float *components,
                                         O2Float *rgbComponents)
 {
+    O2ColorSpaceRequireSupportedRendering(inputSpace);
     O2ColorSpaceModel model = O2ColorSpaceGetModel(inputSpace);
 
     switch (model) {
@@ -308,6 +309,7 @@ int O2ColorConvertComponentsToDeviceRGB(O2ColorSpaceRef inputSpace,
 
 O2ColorRef O2ColorConvertToDeviceRGB(O2ColorRef self) {
     O2ColorSpaceRef colorSpace = O2ColorGetColorSpace(self);
+    O2ColorSpaceRequireSupportedRendering(colorSpace);
     O2ColorSpaceModel model = O2ColorSpaceGetModel(colorSpace);
     if (model == kO2ColorSpaceModelRGB) {
         // No need for a conversion

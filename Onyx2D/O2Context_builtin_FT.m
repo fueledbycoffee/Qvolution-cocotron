@@ -2,6 +2,7 @@
 #import <Onyx2D/O2Font_freetype.h>
 #import <Onyx2D/O2GraphicsState.h>
 #import <Onyx2D/O2Paint_color.h>
+#import <Onyx2D/O2ColorSpace.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -54,6 +55,7 @@
 }
 
 static O2Paint *paintFromColor(O2ColorRef color) {
+    O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(color));
     size_t count = O2ColorGetNumberOfComponents(color);
     const O2Float *components = O2ColorGetComponents(color);
 
@@ -213,6 +215,8 @@ static BOOL glyphBitmapPosition(NSInteger anchorX, NSInteger anchorY,
     if (count == 0 || glyphs == NULL || _surface == NULL)
         return;
 
+    O2GState *gState = O2ContextCurrentGState(self);
+    O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(gState->_fillColor));
     O2Size *defaultAdvances = NULL;
     if (advances == NULL) {
         if (count > SIZE_MAX / sizeof(*defaultAdvances))
@@ -224,91 +228,87 @@ static BOOL glyphBitmapPosition(NSInteger anchorX, NSInteger anchorY,
 
     O2SurfaceLock(_surface);
 
-    O2GState *gState = O2ContextCurrentGState(self);
-    O2Paint *paint = paintFromColor(gState->_fillColor);
-    O2AffineTransform Trm = O2ContextGetTextRenderingMatrix(self);
+    O2Paint *paint = nil;
+    @try {
+        paint = paintFromColor(gState->_fillColor);
+        O2AffineTransform Trm = O2ContextGetTextRenderingMatrix(self);
 
-    NSPoint point = O2PointApplyAffineTransform(NSMakePoint(0, 0), Trm);
+        NSPoint point = O2PointApplyAffineTransform(NSMakePoint(0, 0), Trm);
 
-    // Only use the scaling part of the current transform to scale the font size
-    O2Float scaleX = sqrt((Trm.a * Trm.a) + (Trm.c * Trm.c));
-    O2Float scaleY = sqrt((Trm.b * Trm.b) + (Trm.d * Trm.d));
-    O2AffineTransform scalingTransform =
-            O2AffineTransformMakeScale(scaleX, scaleY);
-    O2Size fontSize = O2SizeApplyAffineTransform(
-            O2SizeMake(0, O2GStatePointSize(gState)), scalingTransform);
+        // Only use the scaling part of the current transform to scale the font size
+        O2Float scaleX = sqrt((Trm.a * Trm.a) + (Trm.c * Trm.c));
+        O2Float scaleY = sqrt((Trm.b * Trm.b) + (Trm.d * Trm.d));
+        O2AffineTransform scalingTransform =
+                O2AffineTransformMakeScale(scaleX, scaleY);
+        O2Size fontSize = O2SizeApplyAffineTransform(
+                O2SizeMake(0, O2GStatePointSize(gState)), scalingTransform);
 
-    [self establishFontStateInDeviceIfDirty];
+        [self establishFontStateInDeviceIfDirty];
 
-    O2Font_freetype *font = (O2Font_freetype *) gState->_font;
-    FT_Face face = [font face];
+        O2Font_freetype *font = (O2Font_freetype *) gState->_font;
+        FT_Face face = [font face];
 
-    NSUInteger i;
-    FT_Error ftError;
+        NSUInteger i;
+        FT_Error ftError;
 
-    if (face == NULL) {
-        NSLog(@"face is NULL");
-        O2PaintRelease(paint);
-        O2SurfaceUnlock(_surface);
-        free(defaultAdvances);
-        return;
-    }
-
-    if ((ftError =
-                 FT_Set_Char_Size(face, 0, fontSize.height * 64, 72.0, 72.0))) {
-        NSLog(@"FT_Set_Char_Size returned %d", ftError);
-        O2PaintRelease(paint);
-        O2SurfaceUnlock(_surface);
-        free(defaultAdvances);
-        return;
-    }
-
-    if (advances == NULL)
-        O2ContextGetDefaultAdvances(self, glyphs, defaultAdvances, count);
-
-    const O2Size *useAdvances = (advances != NULL) ? advances : defaultAdvances;
-
-    BOOL position = _allowsAntialiasing && gState->_shouldAntialias &&
-            _allowsFontSubpixelPositioning && gState->_shouldSubpixelPositionFonts && FT_IS_SCALABLE(face) &&
-            !(_allowsFontSubpixelQuantization && gState->_shouldSubpixelQuantizeFonts);
-    for (i = 0; i < count; i++) {
-        uint8_t phaseX = 0, phaseY = 0;
-        NSInteger anchorX = 0, anchorY = 0;
-        BOOL valid = !position ||
-                (splitGlyphOrigin(point.x, &anchorX, &phaseX) &&
-                 splitGlyphOrigin(point.y, &anchorY, &phaseY));
-        O2FreeTypeCachedGlyph *cached = valid
-                ? [font rasterizeGlyph: glyphs[i] pointSize: fontSize.height
-                                phaseX: phaseX phaseY: phaseY] : nil;
-
-        if (cached != nil && (!position || glyphBitmapPosition(anchorX, anchorY,
-                cached->left, cached->top, cached->bitmap.width, cached->bitmap.rows,
-                &anchorX, &anchorY)))
-            renderFreeTypeBitmap(self, _surface, &cached->bitmap,
-                    position ? anchorX : point.x + cached->left,
-                    position ? anchorY : point.y - cached->top, paint);
-
-        if (advances != NULL) {
-            // Advances are in text space, so only the linear part of Trm
-            // applies; that is also what carries the device y-flip.
-            O2Size step = O2SizeApplyAffineTransform(advances[i], Trm);
-
-            point.x += step.width;
-            point.y += step.height;
-        } else if (cached != nil) {
-            // Keep FreeType's hinted advance here; defaultAdvances would
-            // change what this path renders today. Cost: the draw step and
-            // the text-position update below then come from different
-            // sources, so chained runs drift by the hinting delta.
-            point.x += cached->advance >> 6;
+        if (face == NULL) {
+            NSLog(@"face is NULL");
+            return;
         }
+
+        if ((ftError =
+                     FT_Set_Char_Size(face, 0, fontSize.height * 64, 72.0, 72.0))) {
+            NSLog(@"FT_Set_Char_Size returned %d", ftError);
+            return;
+        }
+
+        if (advances == NULL)
+            O2ContextGetDefaultAdvances(self, glyphs, defaultAdvances, count);
+
+        const O2Size *useAdvances = (advances != NULL) ? advances : defaultAdvances;
+
+        BOOL position = _allowsAntialiasing && gState->_shouldAntialias &&
+                _allowsFontSubpixelPositioning && gState->_shouldSubpixelPositionFonts && FT_IS_SCALABLE(face) &&
+                !(_allowsFontSubpixelQuantization && gState->_shouldSubpixelQuantizeFonts);
+        for (i = 0; i < count; i++) {
+            uint8_t phaseX = 0, phaseY = 0;
+            NSInteger anchorX = 0, anchorY = 0;
+            BOOL valid = !position ||
+                    (splitGlyphOrigin(point.x, &anchorX, &phaseX) &&
+                     splitGlyphOrigin(point.y, &anchorY, &phaseY));
+            O2FreeTypeCachedGlyph *cached = valid
+                    ? [font rasterizeGlyph: glyphs[i] pointSize: fontSize.height
+                                    phaseX: phaseX phaseY: phaseY] : nil;
+
+            if (cached != nil && (!position || glyphBitmapPosition(anchorX, anchorY,
+                    cached->left, cached->top, cached->bitmap.width, cached->bitmap.rows,
+                    &anchorX, &anchorY)))
+                renderFreeTypeBitmap(self, _surface, &cached->bitmap,
+                        position ? anchorX : point.x + cached->left,
+                        position ? anchorY : point.y - cached->top, paint);
+
+            if (advances != NULL) {
+                // Advances are in text space, so only the linear part of Trm
+                // applies; that is also what carries the device y-flip.
+                O2Size step = O2SizeApplyAffineTransform(advances[i], Trm);
+
+                point.x += step.width;
+                point.y += step.height;
+            } else if (cached != nil) {
+                // Keep FreeType's hinted advance here; defaultAdvances would
+                // change what this path renders today. Cost: the draw step and
+                // the text-position update below then come from different
+                // sources, so chained runs drift by the hinting delta.
+                point.x += cached->advance >> 6;
+            }
+        }
+
+        O2ContextConcatAdvancesToTextMatrix(self, useAdvances, count);
+    } @finally {
+        O2PaintRelease(paint);
+        free(defaultAdvances);
+        O2SurfaceUnlock(_surface);
     }
-
-    O2PaintRelease(paint);
-    O2ContextConcatAdvancesToTextMatrix(self, useAdvances, count);
-    free(defaultAdvances);
-
-    O2SurfaceUnlock(_surface);
 }
 
 @end

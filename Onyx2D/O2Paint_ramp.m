@@ -68,6 +68,12 @@ ONYX2D_STATIC_INLINE void CMYKAToRGBA(O2Float *input, O2Float32 *output) {
 
     O2Function *function = [shading function];
     O2ColorSpace *colorSpace = O2ShadingColorSpace(shading);
+    @try {
+        O2ColorSpaceRequireSupportedRendering(colorSpace);
+    } @catch (id exception) {
+        [self release];
+        @throw;
+    }
     O2ColorSpaceModel colorSpaceType = [colorSpace type];
     O2Float output[O2ColorSpaceGetNumberOfComponents(colorSpace) + 1];
     void (*outputToRGBA)(O2Float *, O2Float32 *);

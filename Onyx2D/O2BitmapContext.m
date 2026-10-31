@@ -54,6 +54,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
          releaseCallback: (O2BitmapContextReleaseDataCallback) releaseCallback
              releaseInfo: (void *) releaseInfo
 {
+    if (O2ColorSpaceContainsHLG(colorSpace)) {
+        NSLog(@"HLG bitmap contexts require an implemented color conversion pipeline");
+        [self release];
+        return nil;
+    }
     O2Surface *surface =
             [[[self surfaceClass] alloc] initWithBytes: bytes
                                                  width: width

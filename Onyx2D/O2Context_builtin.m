@@ -189,6 +189,11 @@ void O2DContextClipAndFillEdges(O2Context_builtin *self, int fillRuleMask);
 }
 
 - (void) endTransparencyLayer {
+    if ([_stateStack count] > 1) {
+        O2GState *restored = [_stateStack objectAtIndex:[_stateStack count] - 2];
+        if (restored->_shadowKernel)
+            O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(restored->_shadowColor));
+    }
     O2LayerRef layer = O2LayerRetain([self->_layerStack lastObject]);
 
     O2ContextRestoreGState(self);
@@ -296,6 +301,7 @@ ONYX2D_STATIC O2Paint *paintFromColor(O2Context_builtin *self, O2ColorRef color,
                                       O2AffineTransform surfaceToPaintMatrix)
 {
     O2Paint *result = nil;
+    O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(color));
     O2PatternRef pattern = O2ColorGetPattern(color);
 
     if (pattern != NULL) {
@@ -306,17 +312,17 @@ ONYX2D_STATIC O2Paint *paintFromColor(O2Context_builtin *self, O2ColorRef color,
         O2BitmapContext *context =
                 [[[self class] alloc] initWithSurface: surface flipped: NO];
 
-        O2ContextClearRect(context, O2RectMake(0, 0, size.width, size.height));
-        // do save/restore? probably pointless
-        [pattern drawInContext: context];
-
-        result = [[O2Paint_pattern alloc]
-                          initWithImage: surface
-                surfaceToPaintTransform: surfaceToPaintMatrix
-                                  phase: O2GStatePatternPhase(gState)];
-
-        O2ContextRelease(context);
-        [surface release];
+        @try {
+            O2ContextClearRect(context, O2RectMake(0, 0, size.width, size.height));
+            [pattern drawInContext: context];
+            result = [[O2Paint_pattern alloc]
+                              initWithImage: surface
+                    surfaceToPaintTransform: surfaceToPaintMatrix
+                                      phase: O2GStatePatternPhase(gState)];
+        } @finally {
+            O2ContextRelease(context);
+            [surface release];
+        }
     } else {
         size_t count = O2ColorGetNumberOfComponents(color);
         const O2Float *components = O2ColorGetComponents(color);
@@ -343,80 +349,77 @@ ONYX2D_STATIC O2Paint *paintFromColor(O2Context_builtin *self, O2ColorRef color,
 - (void) drawPath: (O2PathDrawingMode) drawingMode {
     O2GState *gState = O2ContextCurrentGState(self);
 
-    O2RasterizerSetShouldAntialias(self, gState->_shouldAntialias,
-                                   gState->_antialiasingQuality);
+    BOOL usesFill = drawingMode != kO2PathStroke;
+    BOOL usesStroke = drawingMode >= kO2PathStroke && gState->_lineWidth > 0;
+    if (usesFill)
+        O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(gState->_fillColor));
+    if (usesStroke)
+        O2ColorSpaceRequireSupportedRendering(O2ColorGetColorSpace(gState->_strokeColor));
+    O2AffineTransform paintMatrix = O2AffineTransformInvert(gState->_deviceSpaceTransform);
+    O2Paint *fillPaint = nil, *strokePaint = nil;
+    VGPath *vgPath = nil;
+    @try {
+        if (usesFill) fillPaint = paintFromColor(self, gState->_fillColor, paintMatrix);
+        if (usesStroke) strokePaint = paintFromColor(self, gState->_strokeColor, paintMatrix);
 
-    /* Path construction is affected by the CTM, and the stroke pen is affected
-     * by the CTM , this means path points and the stroke can be affected by
-     * different transforms as the CTM can change during path construction and
-     * before stroking. For example, creation of transformed shapes which are
-     * drawn using an untransformed pen. The current tesselator expects
-     * everything to be in user coordinates and it tesselates from there into
-     * device space, but the path points are already in base coordinates. So,
-     * path points are brought from base coordinates into the active coordinate
-     * space using an inverted transform and then everything is tesselated using
-     * the CTM into device space.  */
+        O2RasterizerSetShouldAntialias(self, gState->_shouldAntialias,
+                                       gState->_antialiasingQuality);
 
-    O2AffineTransform userToSurfaceMatrix = gState->_deviceSpaceTransform;
+        /* Path construction is affected by the CTM, and the stroke pen is affected
+         * by the CTM , this means path points and the stroke can be affected by
+         * different transforms as the CTM can change during path construction and
+         * before stroking. For example, creation of transformed shapes which are
+         * drawn using an untransformed pen. The current tesselator expects
+         * everything to be in user coordinates and it tesselates from there into
+         * device space, but the path points are already in base coordinates. So,
+         * path points are brought from base coordinates into the active coordinate
+         * space using an inverted transform and then everything is tesselated using
+         * the CTM into device space.  */
 
-    O2PathApplyTransform(_path,
-                         O2AffineTransformInvert(gState->_userSpaceTransform));
-    VGPath *vgPath = [[VGPath alloc] initWithKGPath: _path];
+        O2AffineTransform userToSurfaceMatrix = gState->_deviceSpaceTransform;
 
-    if (drawingMode != kO2PathStroke) {
-        O2AffineTransform surfaceToPaintMatrix =
-                userToSurfaceMatrix; // context->m_pathUserToSurface *
-                                     // context->m_fillPaintToUser;
+        O2PathApplyTransform(_path,
+                             O2AffineTransformInvert(gState->_userSpaceTransform));
+        vgPath = [[VGPath alloc] initWithKGPath: _path];
 
-        surfaceToPaintMatrix = O2AffineTransformInvert(surfaceToPaintMatrix);
+        if (drawingMode != kO2PathStroke) {
+            O2ContextSetupPaintAndBlendMode(self, fillPaint, gState->_blendMode);
 
-        O2Paint *paint =
-                paintFromColor(self, gState->_fillColor, surfaceToPaintMatrix);
+            VGPathFill(vgPath, userToSurfaceMatrix, self);
 
-        O2ContextSetupPaintAndBlendMode(self, paint, gState->_blendMode);
-        O2PaintRelease(paint);
+            VGFillRuleMask fillRule =
+                    (drawingMode == kO2PathFill || drawingMode == kO2PathFillStroke)
+                            ? VG_NON_ZERO
+                            : VG_EVEN_ODD;
 
-        VGPathFill(vgPath, userToSurfaceMatrix, self);
-
-        VGFillRuleMask fillRule =
-                (drawingMode == kO2PathFill || drawingMode == kO2PathFillStroke)
-                        ? VG_NON_ZERO
-                        : VG_EVEN_ODD;
-
-        O2DContextClipAndFillEdges(self, fillRule);
-    }
-
-    if (drawingMode >= kO2PathStroke) {
-        if (gState->_lineWidth > 0.0f) {
-            O2AffineTransform surfaceToPaintMatrix =
-                    userToSurfaceMatrix; // = context->m_pathUserToSurface *
-                                         // context->m_strokePaintToUser;
-
-            surfaceToPaintMatrix =
-                    O2AffineTransformInvert(surfaceToPaintMatrix);
-
-            O2Paint *paint = paintFromColor(self, gState->_strokeColor,
-                                            surfaceToPaintMatrix);
-            O2ContextSetupPaintAndBlendMode(self, paint, gState->_blendMode);
-            O2PaintRelease(paint);
-
-            O2RasterizerClear(self);
-
-            VGPathStroke(vgPath, userToSurfaceMatrix, self,
-                         gState->_dashLengths, gState->_dashLengthsCount,
-                         gState->_dashPhase,
-                         YES /* context->m_strokeDashPhaseReset ? YES : NO*/,
-                         gState->_lineWidth, gState->_lineCap,
-                         gState->_lineJoin, RI_MAX(gState->_miterLimit, 1.0f));
-
-            O2DContextClipAndFillEdges(self, VG_NON_ZERO);
+            O2DContextClipAndFillEdges(self, fillRule);
         }
-    }
 
-    O2ContextSetPaint(self, nil);
-    [vgPath release];
-    O2RasterizerClear(self);
-    O2PathReset(_path);
+        if (drawingMode >= kO2PathStroke) {
+            if (gState->_lineWidth > 0.0f) {
+                O2ContextSetupPaintAndBlendMode(self, strokePaint, gState->_blendMode);
+
+                O2RasterizerClear(self);
+
+                VGPathStroke(vgPath, userToSurfaceMatrix, self,
+                             gState->_dashLengths, gState->_dashLengthsCount,
+                             gState->_dashPhase,
+                             YES /* context->m_strokeDashPhaseReset ? YES : NO*/,
+                             gState->_lineWidth, gState->_lineCap,
+                             gState->_lineJoin, RI_MAX(gState->_miterLimit, 1.0f));
+
+                O2DContextClipAndFillEdges(self, VG_NON_ZERO);
+            }
+        }
+
+        O2RasterizerClear(self);
+        O2PathReset(_path);
+    } @finally {
+        O2ContextSetPaint(self, nil);
+        [vgPath release];
+        O2PaintRelease(fillPaint);
+        O2PaintRelease(strokePaint);
+    }
 }
 
 - (void) showGlyphs: (const O2Glyph *) glyphs
@@ -435,6 +438,7 @@ ONYX2D_STATIC O2Paint *paintFromColor(O2Context_builtin *self, O2ColorRef color,
 }
 
 - (void) drawShading: (O2Shading *) shading {
+    O2ColorSpaceRequireSupportedRendering(O2ShadingColorSpace(shading));
     O2GState *gState = O2ContextCurrentGState(self);
     O2ClipState *clipState = O2GStateClipState(gState);
     O2Paint *paint;
@@ -504,6 +508,7 @@ createImageToSurfaceTransform(O2ImageRef image, O2Rect rect,
 }
 
 - (void) drawImage: (O2Image *) image inRect: (O2Rect) rect {
+    O2ColorSpaceRequireSupportedRendering(O2ImageGetColorSpace(image));
     O2GState *gState = O2ContextCurrentGState(self);
     O2ImageRef softMask = O2ImageGetMask(image);
 
@@ -531,16 +536,6 @@ createImageToSurfaceTransform(O2ImageRef image, O2Rect rect,
     O2RasterizerSetShouldAntialias(self, gState->_shouldAntialias,
                                    gState->_antialiasingQuality);
 
-    // FIX, adjustable, do we even need this ??
-    O2AffineTransform fillPaintToUser = O2AffineTransformIdentity;
-
-    O2AffineTransform surfaceToPaintMatrix =
-            O2AffineTransformConcat(imageToSurface, fillPaintToUser);
-
-    surfaceToPaintMatrix = O2AffineTransformInvert(surfaceToPaintMatrix);
-
-    O2Paint *paint =
-            paintFromColor(self, gState->_fillColor, surfaceToPaintMatrix);
     O2InterpolationQuality iq;
     if (gState->_interpolationQuality == kO2InterpolationDefault)
         iq = kO2InterpolationLow;
@@ -551,7 +546,7 @@ createImageToSurfaceTransform(O2ImageRef image, O2Rect rect,
                    initWithImage: image
                             mask: softMask
                             mode: VG_DRAW_IMAGE_NORMAL
-                           paint: paint
+                           paint: nil
             interpolationQuality: iq
                   surfaceToImage: O2AffineTransformInvert(imageToSurface)
                    surfaceToMask: O2AffineTransformInvert(maskToSurface)];
@@ -562,7 +557,6 @@ createImageToSurfaceTransform(O2ImageRef image, O2Rect rect,
 
     O2ContextSetupPaintAndBlendMode(self, imagePaint, gState->_blendMode);
 
-    O2PaintRelease(paint);
     O2PaintRelease(imagePaint);
 
     O2DContextAddEdge(self, p0, p1);

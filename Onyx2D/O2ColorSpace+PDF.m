@@ -11,6 +11,7 @@
 @implementation O2ColorSpace (PDF)
 
 - (O2PDFObject *) encodeReferenceWithContext: (O2PDFContext *) context {
+    O2ColorSpaceRequireSupportedRendering(self);
     O2PDFObject *name;
 
     switch (_type) {
@@ -281,6 +282,7 @@
 
 @implementation O2ColorSpace_indexed (PDF)
 - (O2PDFObject *) encodeReferenceWithContext: (O2PDFContext *) context {
+    O2ColorSpaceRequireSupportedRendering(self);
     O2PDFArray *result = [O2PDFArray pdfArray];
     int max = O2ColorSpaceGetNumberOfComponents(_base) * (_hival + 1);
 

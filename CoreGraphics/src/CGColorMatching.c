@@ -12,7 +12,7 @@ typedef enum {
     TransferSRGB,
     TransferLinear,
     TransferPQ,
-    TransferHLG, // Onyx2D cannot create an HLG space yet
+    TransferHLG,
 } Transfer;
 
 typedef struct {
@@ -48,6 +48,7 @@ static bool describeNamedSpace(CFStringRef name, RGBSpace *out) {
         {&kCGColorSpaceLinearDisplayP3, {&kPrimariesDisplayP3, TransferLinear, false}},
         {&kCGColorSpaceExtendedLinearDisplayP3, {&kPrimariesDisplayP3, TransferLinear, true}},
         {&kCGColorSpaceITUR_2100_PQ, {&kPrimariesBT2020, TransferPQ, false}},
+        {&kCGColorSpaceITUR_2100_HLG, {&kPrimariesBT2020, TransferHLG, false}},
     };
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
         if (CFEqual(name, *table[i].name)) {

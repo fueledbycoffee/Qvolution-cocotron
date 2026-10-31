@@ -4,6 +4,7 @@
 #include <CoreGraphics/CGGradient.h>
 #include <Foundation/NSString.h>
 #include <Onyx2D/O2Color.h>
+#include <Onyx2D/O2ColorSpace.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -57,6 +58,10 @@ static CFTypeRef CGGradientCreate(CGColorSpaceRef colorSpace,
     CGFloat previousLocation = 0.0;
     CGColorSpaceModel model;
 
+    if (O2ColorSpaceContainsHLG((O2ColorSpaceRef)colorSpace)) {
+        NSLog(@"HLG gradients require an implemented color conversion pipeline");
+        return NULL;
+    }
     if (count == 0)
         return NULL;
     if (numberOfComponents == 0 || numberOfComponents > CGGradientMaximumComponents)
@@ -176,6 +181,11 @@ CGGradientRef CGGradientCreateWithColors(CGColorSpaceRef colorSpace,
             return NULL;
         }
 
+        if (O2ColorSpaceContainsHLG((O2ColorSpaceRef)CGColorGetColorSpace(color))) {
+            NSLog(@"HLG gradient stops require an implemented color conversion pipeline");
+            free(components);
+            return NULL;
+        }
         checkNumberOfComponents = CGColorGetNumberOfComponents(color);
         if (checkNumberOfComponents != numberOfComponents) {
             /* Only the component count is compared; a different count is refused, as nothing converts colours. */

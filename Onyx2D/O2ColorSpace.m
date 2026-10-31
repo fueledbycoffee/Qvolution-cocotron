@@ -19,6 +19,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <CoreFoundation/CFBase.h>
 #import <Foundation/NSString.h>
+#import <Foundation/NSException.h>
 #import <Onyx2D/O2ColorSpace.h>
 
 const CFStringRef kO2ColorSpaceDisplayP3 = CFSTR("kCGColorSpaceDisplayP3");
@@ -158,6 +159,7 @@ O2ColorSpaceRef O2ColorSpaceCreateWithName(CFStringRef name) {
         CFSTR("kCGColorSpaceLinearDisplayP3"),
         CFSTR("kCGColorSpaceExtendedLinearDisplayP3"),
         CFSTR("kCGColorSpaceITUR_2100_PQ"),
+        CFSTR("kCGColorSpaceITUR_2100_HLG"),
         kO2ColorSpaceITUR_709,
         kO2ColorSpaceITUR_2020,
         kO2ColorSpaceROMMRGB,
@@ -165,6 +167,8 @@ O2ColorSpaceRef O2ColorSpaceCreateWithName(CFStringRef name) {
     for (size_t i = 0; i < sizeof(rgbNames) / sizeof(rgbNames[0]); i++) {
         if (CFEqual(name, rgbNames[i])) {
             O2ColorSpaceRef cs = [[O2ColorSpace alloc] initWithDeviceRGB];
+            if (cs == nil)
+                return NULL;
             CFRetain(name);
             cs->_name = name;
             return cs;
@@ -205,6 +209,24 @@ CFStringRef O2ColorSpaceGetName(O2ColorSpaceRef colorSpace) {
     return colorSpace ? colorSpace->_name : NULL;
 }
 
+BOOL O2ColorSpaceContainsHLG(O2ColorSpaceRef space) {
+    if (space == nil)
+        return NO;
+    if (space->_name && CFEqual(space->_name, CFSTR("kCGColorSpaceITUR_2100_HLG")))
+        return YES;
+    if ([space type] == kO2ColorSpaceModelIndexed)
+        return O2ColorSpaceContainsHLG([(O2ColorSpace_indexed *)space baseColorSpace]);
+    if ([space type] == kO2ColorSpaceModelDeviceN)
+        return O2ColorSpaceContainsHLG([(O2ColorSpace_DeviceN *)space alternateSpace]);
+    return NO;
+}
+
+void O2ColorSpaceRequireSupportedRendering(O2ColorSpaceRef space) {
+    if (O2ColorSpaceContainsHLG(space))
+        [NSException raise:NSInvalidArgumentException
+                    format:@"HLG rendering requires an implemented color conversion pipeline"];
+}
+
 BOOL O2ColorSpaceIsPlatformRGB(O2ColorSpaceRef self) {
     return self->_isPlatformRGB;
 }
@@ -239,6 +261,9 @@ O2ColorSpaceModel O2ColorSpaceGetModel(O2ColorSpaceRef self) {
 - (BOOL) isEqualToColorSpace: (O2ColorSpaceRef) other {
     if (self->_type != other->_type)
         return NO;
+    if (_type == kO2ColorSpaceModelRGB &&
+        (O2ColorSpaceContainsHLG(self) || O2ColorSpaceContainsHLG(other)))
+        return self->_name && other->_name && CFEqual(self->_name, other->_name);
     return YES;
 }
 

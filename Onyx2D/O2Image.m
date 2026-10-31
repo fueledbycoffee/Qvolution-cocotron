@@ -313,6 +313,11 @@ ONYX2D_STATIC BOOL initFunctionsForParameters(O2Image *self,
                                               O2BitmapInfo bitmapInfo)
 {
 
+    if (O2ColorSpaceContainsHLG(colorSpace)) {
+        NSLog(@"HLG image decoding requires an implemented color conversion pipeline");
+        return NO;
+    }
+
     self->_read_a8u = O2Image_read_a8u_src_argb8u;
     self->_read_a32f = O2ImageRead_ANY_to_A8_to_Af;
     self->_read_argb32f = O2ImageRead_ANY_to_argb8u_to_argb32f;

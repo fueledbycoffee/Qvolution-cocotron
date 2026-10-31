@@ -75,6 +75,8 @@ O2ColorSpaceModel O2ColorSpaceGetModel(O2ColorSpaceRef self);
 
 O2ColorSpaceRef O2ColorSpaceCreateWithName(CFStringRef name);
 CFStringRef O2ColorSpaceGetName(O2ColorSpaceRef colorSpace);
+BOOL O2ColorSpaceContainsHLG(O2ColorSpaceRef colorSpace);
+void O2ColorSpaceRequireSupportedRendering(O2ColorSpaceRef colorSpace);
 
 @end
 
