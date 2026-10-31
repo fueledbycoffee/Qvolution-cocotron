@@ -557,6 +557,15 @@ static NSColor *systemCatalogColor(NSColorName name, NSColor *fallback) {
                                            color: color ? color : fallback];
 }
 
++ (NSColor *) placeholderTextColor {
+    return systemCatalogColor(@"placeholderTextColor",
+                              [NSColor colorWithCalibratedWhite:0.45 alpha:1]);
+}
+
++ (NSColor *) controlAccentColor {
+    return systemCatalogColor(@"controlAccentColor", [NSColor selectedControlColor]);
+}
+
 // Label text at decreasing emphasis: black with less alpha than labelColor.
 + (NSColor *) secondaryLabelColor {
     return systemCatalogColor(@"secondaryLabelColor",
