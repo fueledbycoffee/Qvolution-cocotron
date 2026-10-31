@@ -53,6 +53,6 @@ with tempfile.TemporaryDirectory(prefix='qv-ps-name-') as d:
    location=12+table*16+8;struct.pack_into('>I',data,location,struct.unpack_from('>I',data,location)[0]+offset)
   ttc.extend(data)
  collection=Path(d)/'original-open-fonts.ttc';collection.write_bytes(ttc)
- f=Path(d)/'test.c';out=Path(d)/'test';f.write_text(pre+body('static FT_Face createFaceForMatch(')+'\n'+body('static FT_Face createMatchingFace(')+'\n'+body('static int createExactPostScriptFace(')+test)
+ f=Path(d)/'test.c';out=Path(d)/'test';f.write_text(pre+body('static FT_Face createFaceForMatchInLibrary(')+'\n'+body('static FT_Face createFaceForMatch(')+'\n'+body('static FT_Face createMatchingFace(')+'\n'+body('static int createExactPostScriptFace(')+test)
  flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','fontconfig','freetype2'],text=True));subprocess.run(['clang','-std=c11','-UNDEBUG','-fsanitize=address,undefined',str(f),'-o',str(out),*flags],check=True)
  subprocess.run([str(out),'/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf',str(repo/'tests/fixtures/qvolution-fontspecific.bdf'),str(collection)],check=True,timeout=20,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
