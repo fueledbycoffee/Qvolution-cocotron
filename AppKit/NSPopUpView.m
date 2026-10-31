@@ -219,6 +219,15 @@ static const NSTimeInterval kMenuInitialClickThreshold = .3f;
     [self sizeForMenuItems: [self visibleItemArray]];
 }
 
+- (CGFloat)heightForMaximumVisibleRows:(NSUInteger)rows {
+    NSArray *rects = [self _cachedItemRects];
+    NSUInteger count = [rects count];
+    if (count == 0)
+        return WINDOW_BORDER_THICKNESS * 2;
+    NSUInteger last = rows == 0 || rows >= count ? count - 1 : rows - 1;
+    return NSMaxY([[rects objectAtIndex:last] rectValue]) + WINDOW_BORDER_THICKNESS;
+}
+
 // For attributed strings - precalcing the the item rects makes performance much
 // faster.
 - (NSArray *) _cachedItemRects {

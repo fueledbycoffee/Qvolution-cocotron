@@ -43,6 +43,23 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     [super dealloc];
 }
 
+- (void)setMaximumVisibleRows:(NSUInteger)rows {
+    _maximumVisibleRows = rows;
+}
+
+- (void)layoutPopupViewport {
+    NSView *content = [self contentView];
+    NSRect bounds = [content bounds];
+    NSSize size = bounds.size;
+    if (_maximumVisibleRows > 0)
+        size.height = MIN(size.height, [_view heightForMaximumVisibleRows:_maximumVisibleRows]);
+    NSPoint origin = bounds.origin;
+    if (![content isFlipped])
+        origin.y += bounds.size.height - size.height;
+    [_view setFrameSize:size];
+    [_view setFrameOrigin:origin];
+}
+
 - (void) setMenu: (NSMenu *) menu {
     [_view setMenu: menu];
 }
@@ -64,7 +81,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                 didSize: (BOOL) didSize {
     [super platformWindow: window frameChanged: frame didSize: didSize];
     if (didSize) {
-        [_view setFrameSize: [[self contentView] bounds].size];
+        [self layoutPopupViewport];
         [_view scrollBy: 0];
         [_view scrollSelectedItemToVisible];
     }
@@ -80,6 +97,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     frame.origin.y -=
             (size.height - selectedRect.origin.y) - selectedRect.size.height;
     CGFloat contentTop = NSMaxY(frame);
+    if (_maximumVisibleRows > 0) {
+        frame.size.height = MIN(frame.size.height,
+                [_view heightForMaximumVisibleRows:_maximumVisibleRows]);
+        CGFloat offset = MAX(0, MIN(size.height - frame.size.height,
+                selectedRect.origin.y - frame.size.height / 2));
+        frame.origin.y = contentTop - offset - frame.size.height;
+    }
     CGSize nativeLimit = [[self platformWindow] maximumPopupSize];
     NSRect visible = [[self screen] visibleFrame];
     if (nativeLimit.width > 0 && nativeLimit.height > 0) {
@@ -98,8 +122,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     }
     [self setFrame: frame display: NO];
 
-    [_view setFrameSize: frame.size];
-    [_view setFrameOrigin: NSMakePoint(0, 0)];
+    [self layoutPopupViewport];
 
     [_view setBoundsOrigin: NSZeroPoint];
     [_view scrollBy: contentTop - NSMaxY(frame)];

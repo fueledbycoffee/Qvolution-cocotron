@@ -22,12 +22,21 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSGraphicsStyle.h>
 #import <AppKit/NSImage.h>
 #import <AppKit/NSMenu.h>
-#import <AppKit/NSPopUpButtonCell.h>
+#import <AppKit/NSPopUpButtonCellPrivate.h>
 #import <AppKit/NSPopUpWindow.h>
 #import <AppKit/NSRaise.h>
 #import <Foundation/NSKeyedArchiver.h>
 
 @implementation NSPopUpButtonCell
+
+- (NSUInteger)_maximumVisibleRows {
+    return _maximumVisibleRows;
+}
+
+- (void)_setMaximumVisibleRows:(NSUInteger)rows {
+    _maximumVisibleRows = rows;
+}
+
 
 - init {
     self = [super init];
@@ -537,6 +546,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     NSPopUpWindow *window = [[NSPopUpWindow alloc]
             initWithFrame: NSMakeRect(origin.x, origin.y, cellFrame.size.width,
                                       cellFrame.size.height)];
+    [window setMaximumVisibleRows: _maximumVisibleRows];
     [window setPullsDown: _pullsDown];
     [window setMenu: menu];
     if ([self font] != nil)
