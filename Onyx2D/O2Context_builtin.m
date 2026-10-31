@@ -534,10 +534,52 @@ static void normalizeClipToLayerDomain(O2Context_builtin *self,
         }
 }
 
+static BOOL clipToIntegralRects(O2Context_builtin *self, NSArray *phases) {
+    size_t width = O2ImageGetWidth(self->_surface);
+    size_t height = O2ImageGetHeight(self->_surface);
+    if (width > INT_MAX || height > INT_MAX)
+        return NO;
+    double minX = 0, minY = 0, maxX = width, maxY = height;
+    for (O2ClipPhase *phase in phases) {
+        O2ClipPhaseType type = O2ClipPhasePhaseType(phase);
+        if (type != O2ClipPhaseNonZeroPath && type != O2ClipPhaseEOPath)
+            return NO;
+        O2Path *path = O2ClipPhaseObject(phase);
+        O2Rect rect;
+        if (!O2PathIsRect(path, &rect))
+            return NO;
+        const O2Point *points = O2PathPoints(path);
+        double x0 = points[0].x, y0 = points[0].y;
+        double x1 = points[2].x, y1 = points[2].y;
+        if (!isfinite(x0) || !isfinite(y0) || !isfinite(x1) || !isfinite(y1) ||
+                floor(x0) != x0 || floor(y0) != y0 ||
+                floor(x1) != x1 || floor(y1) != y1)
+            return NO;
+        minX = MAX(minX, MIN(x0, x1));
+        minY = MAX(minY, MIN(y0, y1));
+        maxX = MIN(maxX, MAX(x0, x1));
+        maxY = MIN(maxY, MAX(y0, y1));
+    }
+    int x = MIN((double)width, MAX(0, minX));
+    int y = MIN((double)height, MAX(0, minY));
+    int endX = MIN((double)width, MAX(0, maxX));
+    int endY = MIN((double)height, MAX(0, maxY));
+    O2RasterizerSetViewport(self, x, y, MAX(0, endX - x), MAX(0, endY - y));
+    return YES;
+}
+
+static BOOL hasViewportClip(O2Context_builtin *self) {
+    return self->_clipContext == nil &&
+            [[O2GStateClipState(O2ContextCurrentGState(self)) clipPhases] count] != 0;
+}
+
 - (void) clipToState: (O2ClipState *) clipState {
     NSArray *phases = [clipState clipPhases];
     NSArray *inherited = [_layerClipPhases lastObject];
     O2ContextDeviceClipReset_builtin(self);
+    // Integral device rectangles cover whole pixels; the viewport is exact.
+    if ([_layerClipPhases count] == 0 && clipToIntegralRects(self, phases))
+        return;
     // Layer drawing uses conditional coverage within inherited path samples.
     // The parent applies that domain and inherited soft masks once at composite.
     for (O2ClipPhase *phase in inherited) {
@@ -1646,7 +1688,8 @@ void O2DContextClipAndFillEdges(O2Context_builtin *self, int fillRuleMask) {
     else
         surface = self->_surface;
 
-    if (self->_clipContext != nil && self->_clipContext->_clipSamples != NULL) {
+    if ((self->_clipContext != nil && self->_clipContext->_clipSamples != NULL) ||
+            hasViewportClip(self)) {
         O2GState *state = O2ContextCurrentGState(self);
         O2RasterizerSetShouldAntialias(self, state->_shouldAntialias,
                 state->_shouldAntialias ? MAX_SAMPLES : 1);
@@ -1795,7 +1838,7 @@ void O2ContextSetupPaintAndBlendMode(O2Context_builtin *self, O2PaintRef paint,
 
     O2Surface *surface = [self->_layerStack count] > 0
             ? O2LayerGetSurface([self->_layerStack lastObject]) : self->_surface;
-    if (self->_clipContext != nil ||
+    if (self->_clipContext != nil || hasViewportClip(self) ||
         !O2SurfaceCanReadWriteARGB8u(surface) ||
         paint->_paint_largb8u_PRE == NULL) {
         self->_writeCoverage_argb8u_PRE = NULL;
