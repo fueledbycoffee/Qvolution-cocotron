@@ -37,11 +37,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     }
     [_version retain];
 
-    if (!O2PDFParse_xref(data, &_xref)) {
+    O2PDFxref *xref;
+    if (!O2PDFParse_xref(data, &xref)) {
         [self dealloc];
         return nil;
     }
-    [_xref retain];
+    _xref = [xref retain];
 
     return self;
 }

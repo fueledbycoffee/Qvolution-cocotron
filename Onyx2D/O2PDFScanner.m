@@ -144,13 +144,17 @@ static void debugTracev(const char *bytes, unsigned length,
                         O2PDFInteger position, NSString *format,
                         va_list arguments)
 {
+    if (position < 0)
+        position = 0;
+    if ((NSUInteger) position > length)
+        position = length;
     NSString *dump = [[[NSString alloc]
             initWithBytes: bytes + position
                    length: MIN(80, (length - position))
                  encoding: NSISOLatin1StringEncoding] autorelease];
 
     NSLogv(format, arguments);
-    NSLog(@"position=%d,dump=[%@]", position, dump);
+    NSLog(@"position=%ld,dump=[%@]", (long) position, dump);
 }
 
 static void debugTrace(const char *bytes, unsigned length,
@@ -170,8 +174,7 @@ static BOOL debugError(const char *bytes, unsigned length,
 
     va_start(arguments, format);
     debugTracev(bytes, length, position, format, arguments);
-    [NSException raise: @"" format: @""];
-    ;
+    va_end(arguments);
     return NO;
 }
 
