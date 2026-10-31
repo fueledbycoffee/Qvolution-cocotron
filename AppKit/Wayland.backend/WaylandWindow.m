@@ -52,6 +52,7 @@
 // device transform, alongside Onyx2D's bottom-left to top-left conversion.
 @interface WaylandDrawingContext : O2Context_builtin_FT
 - (id) initWithSurface: (O2Surface *) surface logicalSize: (NSSize) logicalSize border: (CGFloat) border;
+- (void) clipTitlebarAtHeight: (CGFloat) height;
 @end
 
 @implementation WaylandDrawingContext
@@ -64,6 +65,14 @@
         O2ContextSetCTM(self, O2AffineTransformIdentity);
     }
     return self;
+}
+
+- (void) clipTitlebarAtHeight: (CGFloat) height {
+    O2Point edge = O2ContextConvertPointToDeviceSpace(self, O2PointMake(0, height));
+    // NSStringDrawer lays out in a rectangle but does not clip glyph writes.
+    // Keep title overhang out of content without changing byte glyph blending.
+    O2RasterizerSetViewport(self, 0, 0, O2ImageGetWidth(_surface),
+            MAX(0, MIN(O2ImageGetHeight(_surface), floor(edge.y))));
 }
 @end
 
@@ -423,6 +432,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     _configureUpdatePending = NO;
     _configured = NO;
     _activated = NO;
+    _decorationsDirty = YES;
     // The tracker survives hiding: _frame keeps the fullscreen size, so the size
     // from before fullscreen would be lost if the next map saved it again.
     _fullscreenRequested = _pendingFullscreen = _fullscreenRecheckPending = NO;
@@ -501,6 +511,10 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 }
 
 - (void) setStyleMask: (NSUInteger) mask {
+    NSUInteger buttons = NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
+                         NSWindowStyleMaskResizable;
+    if ((_styleMask ^ mask) & buttons)
+        _decorationsDirty = YES;
     _styleMask = mask;
     [self updateSizeLimits];
     [self updateFullscreen];
@@ -583,6 +597,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 }
 
 - (void) setTitle: (NSString *) title {
+    if (_title != title && ![_title isEqualToString: title])
+        _decorationsDirty = YES;
     [_title release];
     _title = [title copy];
     [self updateTitle];
@@ -807,6 +823,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
         O2ColorSpaceRelease(colorSpace);
         _context = [[WaylandDrawingContext alloc] initWithSurface: surface logicalSize: logical
                                                           border: _clientDecorated ? WaylandBorder : 0];
+        _decorationsDirty = YES;
         [surface release];
     }
     return _context;
@@ -826,7 +843,9 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 }
 
 - (void) drawDecorations {
-    if (!_clientDecorated || _context == nil)
+    // Content drawing is clipped inside the frame; the backing surface retains
+    // its decoration pixels until an input changes or the context is recreated.
+    if (!_clientDecorated || _context == nil || !_decorationsDirty)
         return;
     [NSGraphicsContext saveGraphicsState];
     O2ContextSaveGState(_context);
@@ -849,9 +868,11 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
             [(_styleMask & masks[i] ? colors[i] : [NSColor grayColor]) set];
             [[NSBezierPath bezierPathWithOvalInRect: NSMakeRect(7 + i * 20, h + 8, 12, 12)] fill];
         }
+        [(WaylandDrawingContext *)_context clipTitlebarAtHeight: h];
         [_title drawInRect: NSMakeRect(76, h + 6, MAX(0, w - 90), 18)
            withAttributes: @{NSFontAttributeName: [NSFont systemFontOfSize: 12],
                              NSForegroundColorAttributeName: [NSColor blackColor]}];
+        _decorationsDirty = NO;
     } @finally {
         O2ContextRestoreGState(_context);
         [NSGraphicsContext restoreGraphicsState];
@@ -861,9 +882,11 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 - (void) flushBuffer {
     if (_context == nil)
         return;
+    _needsPresent = YES;
+    if ([_delegate isFlushWindowDisabled])
+        return;
     [self drawDecorations];
     O2ContextFlush(_context);
-    _needsPresent = YES;
     [self presentIfPossible];
 }
 
@@ -1260,6 +1283,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     [self recheckFullscreen];
 
     BOOL activationChanged = _pendingActivated != _activated;
+    if (activationChanged)
+        _decorationsDirty = YES;
     BOOL activated = _pendingActivated;
     _activated = activated;
 

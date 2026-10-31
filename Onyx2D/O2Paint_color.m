@@ -56,6 +56,13 @@ ONYX2D_STATIC int color_largb32f_PRE(O2Paint *selfX, int x, int y,
     return length;
 }
 
+BOOL O2PaintGetConstantColor(O2Paint *paint, O2argb32f *color) {
+    if (paint->_paint_largb32f_PRE != color_largb32f_PRE)
+        return NO;
+    *color = ((O2Paint_color *)paint)->_argb32f_PRE;
+    return YES;
+}
+
 - initWithGray: (O2Float) gray
                           alpha: (O2Float) alpha
         surfaceToPaintTransform: (O2AffineTransform) transform

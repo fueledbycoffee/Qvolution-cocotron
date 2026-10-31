@@ -101,6 +101,9 @@ BOOL O2SurfaceCanReadWriteARGB8u(O2Surface *surface);
 
 void O2SurfaceWriteSpan_argb8u_PRE(O2Surface *self, int x, int y,
                                    O2argb8u *span, int length);
+BOOL O2SurfaceWriteRepeatedColor(O2Surface *self, int x, int y,
+        O2argb32f color, int length);
+
 void O2SurfaceWriteSpan_largb32f_PRE(O2Surface *self, int x, int y,
                                      O2argb32f *span, int length);
 

@@ -18,7 +18,8 @@ src=r'''
 #include <string.h>
 #include <math.h>
 #include <assert.h>
-typedef float O2Float;typedef long NSInteger;
+typedef float O2Float;typedef long NSInteger;typedef bool BOOL;
+#define COVERAGE_MULTIPLIER 256
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define ONYX2D_STATIC static
@@ -32,6 +33,8 @@ typedef struct { unsigned char bytes[4][(320*16)+16]; int width,height; } O2Surf
 typedef struct { void *_paint_largb8u_PRE; O2argb32f color; int skipX; } O2Paint;
 typedef struct O2Context_builtin { NSInteger _vpx,_vpy,_vpwidth,_vpheight; O2BlendSpan_argb32f _blend_argb32f_PRE; struct O2Context_builtin *_clipContext; O2Surface *_surface; void *_blend_argb8u_PRE; } O2Context_builtin; typedef O2Context_builtin O2Context_builtin_FT;
 typedef struct { unsigned width,rows; int pitch; unsigned char *buffer; } FT_Bitmap;
+static BOOL O2PaintGetConstantColor(O2Paint *p,O2argb32f *color){(void)p;(void)color;return false;}
+static BOOL O2SurfaceWriteRepeatedColor(O2Surface *s,int x,int y,O2argb32f color,int n){(void)s;(void)x;(void)y;(void)color;(void)n;return false;}
 static bool O2SurfaceCanReadWriteARGB8u(O2Surface *s) { (void)s; return false; }
 static O2argb32f *O2Image_read_argb32f(O2Surface *s,int x,int y,O2argb32f *dst,int n) {
  assert(x>=0&&y>=0&&x+n<=s->width&&y<s->height);memcpy(dst,s->bytes[y]+16*x,16*n);return NULL;
@@ -49,7 +52,7 @@ static O2Float *O2ImageReadSpan_Af_MASK(O2Surface *s,int x,int y,O2Float *out,in
  for(int i=0;i<n;i++){O2argb32f p;memcpy(&p,s->bytes[y]+16*(x+i),16);out[i]=p.a;}return out;
 }
 '''
-for file,name in [('O2argb32f.m','void O2BlendSpanNormal_ffff('),('O2Context_builtin.m','ONYX2D_STATIC void O2ApplyCoverageAndMaskToSpan_largb32f_PRE('),('O2Context_builtin.m','ONYX2D_STATIC void O2ApplyCoverageToSpan_largb32f_PRE('),('O2Context_builtin.m','O2RasterizeWriteCoverageSpanffff(')]:src+=('static void ' if name=='O2RasterizeWriteCoverageSpanffff(' else '')+function(file,name)+'\n'
+for file,name in [('O2argb32f.m','void O2BlendSpanCopy_ffff('),('O2argb32f.m','void O2BlendSpanNormal_ffff('),('O2Context_builtin.m','ONYX2D_STATIC void O2ApplyCoverageAndMaskToSpan_largb32f_PRE('),('O2Context_builtin.m','ONYX2D_STATIC void O2ApplyCoverageToSpan_largb32f_PRE('),('O2Context_builtin.m','O2RasterizeWriteCoverageSpanffff(')]:src+=('static void ' if name=='O2RasterizeWriteCoverageSpanffff(' else '')+function(file,name)+'\n'
 src+=function('O2Context_builtin.m','void O2ContextWriteGlyphCoverageSpanFloat(')+'\n'
 src+=ft+r'''
 static void init(O2Surface *s,int width,int height,O2argb32f color) {
@@ -84,7 +87,7 @@ int main(void) {
 }
 '''
 out=Path(tempfile.mkdtemp(prefix='onyx-float-draw-'));(out/'draw.c').write_text(src)
-subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(out/'draw.c'),'-lm','-o',str(out/'draw')],check=True)
+subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-fsanitize=address,undefined',str(out/'draw.c'),'-lm','-o',str(out/'draw')],check=True)
 subprocess.run([str(out/'draw')],check=True)
 
 shutil.rmtree(out)

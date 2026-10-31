@@ -108,6 +108,7 @@ static inline O2AffineTransform createImageToSurfaceTransform(O2ImageRef image,
 
 - (void) dealloc {
     [_clipContext release];
+    [_viewportClipPhases release];
     [_layerClipPhases release];
     free(_clipSamples);
     [_paint release];
@@ -249,6 +250,8 @@ static inline O2AffineTransform createImageToSurfaceTransform(O2ImageRef image,
 }
 
 void O2ContextDeviceClipReset_builtin(O2Context_builtin *self) {
+    [self->_viewportClipPhases release];
+    self->_viewportClipPhases = nil;
     [self->_clipContext release];
     self->_clipContext = nil;
     O2RasterizerSetViewport(self, 0, 0, O2ImageGetWidth(self->_surface),
@@ -575,11 +578,30 @@ static BOOL hasViewportClip(O2Context_builtin *self) {
 
 - (void) clipToState: (O2ClipState *) clipState {
     NSArray *phases = [clipState clipPhases];
+    size_t width = O2ImageGetWidth(_surface), height = O2ImageGetHeight(_surface);
+    // Saved states share immutable phases. Only reuse exact integral viewports;
+    // masks and transparency domains still replay their coverage operations.
+    if (_viewportClipPhases != nil && [_layerClipPhases count] == 0 &&
+            _clipContext == nil && width == _viewportClipWidth &&
+            height == _viewportClipHeight &&
+            _vpx == _viewportClipX && _vpy == _viewportClipY &&
+            _vpwidth == _viewportClipW && _vpheight == _viewportClipH &&
+            (phases == nil ? [_viewportClipPhases count] == 0 :
+                    [phases isEqualToArray: _viewportClipPhases]))
+        return;
     NSArray *inherited = [_layerClipPhases lastObject];
     O2ContextDeviceClipReset_builtin(self);
     // Integral device rectangles cover whole pixels; the viewport is exact.
-    if ([_layerClipPhases count] == 0 && clipToIntegralRects(self, phases))
+    if ([_layerClipPhases count] == 0 && clipToIntegralRects(self, phases)) {
+        _viewportClipPhases = phases != nil ? [phases copy] : [[NSArray alloc] init];
+        _viewportClipWidth = width;
+        _viewportClipHeight = height;
+        _viewportClipX = _vpx;
+        _viewportClipY = _vpy;
+        _viewportClipW = _vpwidth;
+        _viewportClipH = _vpheight;
         return;
+    }
     // Layer drawing uses conditional coverage within inherited path samples.
     // The parent applies that domain and inherited soft masks once at composite.
     for (O2ClipPhase *phase in inherited) {
@@ -1152,6 +1174,13 @@ O2RasterizeWriteCoverageSpanffff(O2Surface *surface, O2Surface *mask,
 {
     O2argb32f dst[256], src[256];
     O2Float maskSpan[256];
+    BOOL fullCopy = coverage == COVERAGE_MULTIPLIER && mask == nil &&
+            blendFunction == O2BlendSpanCopy_ffff &&
+            O2SurfaceCanReadWriteARGB8u(surface);
+    O2argb32f color;
+    if (fullCopy && O2PaintGetConstantColor(paint, &color) &&
+            O2SurfaceWriteRepeatedColor(surface, x, y, color, length))
+        return;
     while (length > 0) {
         int requested = MIN(length, 256);
         int chunk = O2PaintReadSpan_largb32f_PRE(paint, x, y, src, requested);
@@ -1159,6 +1188,8 @@ O2RasterizeWriteCoverageSpanffff(O2Surface *surface, O2Surface *mask,
             return;
         if (chunk < 0)
             chunk = -chunk;
+        else if (fullCopy)
+            O2SurfaceWriteSpan_largb32f_PRE(surface, x, y, src, chunk);
         else {
             O2Image_read_argb32f(surface, x, y, dst, chunk);
             blendFunction(src, dst, chunk);
@@ -1361,6 +1392,29 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
 
     int ylimit = self->_vpy + self->_vpheight;
     int xlimit = self->_vpx + self->_vpwidth;
+    int firstY = self->_vpy;
+
+    // Partial-row edges otherwise propagate winding to the viewport's right
+    // edge, even for a one-pixel ruler tick. Closed geometry has no coverage
+    // beyond its last edge. Keep the original pixel sample coordinates.
+    double minY = ylimit, maxY = firstY, maxX = self->_vpx;
+    BOOL finiteBounds = YES;
+    for (int i = 0; i < edgeCount; i++) {
+        Edge *edge = edges[i];
+        if (!isfinite(edge->v0.x) || !isfinite(edge->v1.x) ||
+                !isfinite(edge->v0.y) || !isfinite(edge->v1.y)) {
+            finiteBounds = NO;
+            break;
+        }
+        minY = MIN(minY, edge->v0.y);
+        maxY = MAX(maxY, edge->v1.y);
+        maxX = MAX(maxX, MAX(edge->v0.x, edge->v1.x));
+    }
+    if (finiteBounds) {
+        firstY = MAX(firstY, floor(MAX((double)firstY, minY)));
+        ylimit = MIN(ylimit, ceil(MIN((double)ylimit, maxY)));
+        xlimit = MIN(xlimit, ceil(MIN((double)xlimit, maxX)));
+    }
 
     Edge *activeRoot = NULL;
     int nextAvailableEdge = 0;
@@ -1373,7 +1427,7 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
     int totalActiveEdges = 0;
     int totalActiveVerticalEdgesFullCoverage = 0;
 
-    for (scany = self->_vpy; scany < ylimit; scany++) {
+    for (scany = firstY; scany < ylimit; scany++) {
         Edge *edge, *previous = NULL;
         int unchangedActiveEdges = 1;
 
