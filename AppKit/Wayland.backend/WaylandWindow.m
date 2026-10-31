@@ -35,6 +35,7 @@
 #import <AppKit/NSFont.h>
 #import <AppKit/NSColor.h>
 #import <AppKit/NSAttributedString.h>
+#import <AppKit/NSAppearance.h>
 #import <AppKit/NSStringDrawing.h>
 #import <Foundation/NSProcessInfo.h>
 #import <Foundation/NSRunLoop.h>
@@ -78,8 +79,7 @@
 
 @implementation WaylandWindow
 
-static const CGFloat WaylandTitleHeight = 28;
-static const CGFloat WaylandBorder = 6;
+static const CGFloat WaylandTitleHeight = NSTitlebarHeight;
 
 static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags) {
     union wl_argument args[1] = {{.o = NULL}};
@@ -111,6 +111,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     _bufferScale = 1; _renderScale120 = 120;
     _display = [(WaylandDisplay *) [NSDisplay currentDisplay] retain];
     _subwindows = [NSMutableArray new];
+    _buttonTracker.pressed = _shownPressed = NSTitlebarButtonNone;
 
     _frame = [delegate frame];
     _frame.size.width = MAX(_frame.size.width, 1.0);
@@ -233,9 +234,11 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
         return;
     _surfaceGeneration++;
     _configureUpdatePending = NO;
-    BOOL forceClient = getenv("DARLING_WAYLAND_DECORATIONS") != NULL &&
-            strcmp(getenv("DARLING_WAYLAND_DECORATIONS"), "client") == 0;
-    _pendingClientDecorated = _display->_decorationManager == NULL || forceClient;
+    // Client-side chrome everywhere keeps one look; "server" opts out where
+    // the compositor offers xdg-decoration.
+    const char *decorations = getenv("DARLING_WAYLAND_DECORATIONS");
+    BOOL serverSide = decorations != NULL && strcmp(decorations, "server") == 0;
+    _pendingClientDecorated = _display->_decorationManager == NULL || !serverSide;
 
     union wl_argument args[4];
 
@@ -276,8 +279,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
                     WP_DECORATION_MANAGER_GET_TOPLEVEL_DECORATION,
                     &zxdg_toplevel_decoration_v1_interface, args,
                     WaylandObjectDecoration, self);
-            args[0].u = forceClient ? WP_TOPLEVEL_DECORATION_MODE_CLIENT_SIDE
-                                     : WP_TOPLEVEL_DECORATION_MODE_SERVER_SIDE;
+            args[0].u = serverSide ? WP_TOPLEVEL_DECORATION_MODE_SERVER_SIDE
+                                   : WP_TOPLEVEL_DECORATION_MODE_CLIENT_SIDE;
             WaylandMarshal(_decoration, WP_TOPLEVEL_DECORATION_SET_MODE, NULL, 0, args);
         }
     }
@@ -337,7 +340,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     args[1].i = MAX(1, (int32_t) ceil(_frame.size.height));
     WaylandMarshal(positioner, WP_POSITIONER_SET_SIZE, NULL, 0, args);
     NSRect parent = [_popupParent frame];
-    NSPoint offset = [_popupParent contentOffset];
+    NSPoint offset = [_popupParent geometryContentOffset];
     int32_t x = (int32_t) floor(_frame.origin.x - parent.origin.x + offset.x);
     int32_t y = (int32_t) floor(NSMaxY(parent) - NSMaxY(_frame) + offset.y);
     // A submenu can start beyond its parent edge. Keep the anchor inside the
@@ -427,6 +430,9 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     _toplevel = _xdgSurface = NULL;
     [_surfaceOutputs removeAllObjects];
     [self destroyBuffers];
+    _sentGeometry = O2RectZero;
+    _buttonTracker.pressed = _shownPressed = NSTitlebarButtonNone;
+    _buttonHover = NO;
 
     _mapped = NO;
     _configureUpdatePending = NO;
@@ -613,8 +619,9 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 
     union wl_argument args[2] = {{.i = 0}, {.i = 0}};
     if (!(_styleMask & NSWindowStyleMaskResizable)) {
-        args[0].i = (int32_t) _frame.size.width + (_clientDecorated ? 2 * WaylandBorder : 0);
-        args[1].i = (int32_t) _frame.size.height + (_clientDecorated ? 2 * WaylandBorder + WaylandTitleHeight : 0);
+        // Window geometry units: the visible window, without the shadow margin.
+        args[0].i = (int32_t) _frame.size.width;
+        args[1].i = (int32_t) _frame.size.height + (_clientDecorated ? WaylandTitleHeight : 0);
     }
     WaylandMarshal(_toplevel, WP_TOPLEVEL_SET_MIN_SIZE, NULL, 0, args);
     WaylandMarshal(_toplevel, WP_TOPLEVEL_SET_MAX_SIZE, NULL, 0, args);
@@ -687,7 +694,11 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 }
 
 - (NSPoint) contentOffset {
-    return _clientDecorated ? NSMakePoint(WaylandBorder, WaylandBorder + WaylandTitleHeight) : NSZeroPoint;
+    return _clientDecorated ? NSMakePoint(_margin, _margin + WaylandTitleHeight) : NSZeroPoint;
+}
+
+- (NSPoint) geometryContentOffset {
+    return _clientDecorated ? NSMakePoint(0, WaylandTitleHeight) : NSZeroPoint;
 }
 
 - (BOOL) isDecorationPoint: (CGPoint) point {
@@ -698,33 +709,96 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
            point.x >= offset.x + _frame.size.width || point.y >= offset.y + _frame.size.height;
 }
 
+- (NSTitlebarFrame) titlebarFrame {
+    NSTitlebarFrame frame = {
+        .margin = _margin,
+        .width = ceil(_frame.size.width),
+        .height = ceil(_frame.size.height) + WaylandTitleHeight,
+        .rounded = _margin > 0,
+        .shadow = _margin > 0,
+    };
+    NSAppearanceName appearance = [[_delegate effectiveAppearance] bestMatchFromAppearancesWithNames:
+            @[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
+    frame.state = (NSTitlebarState) {
+        .active = _activated,
+        .dark = [appearance isEqualToString: NSAppearanceNameDarkAqua],
+        .hover = _buttonHover,
+        .pressed = _shownPressed,
+        .enabled = {(_styleMask & NSWindowStyleMaskClosable) != 0,
+                    (_styleMask & NSWindowStyleMaskMiniaturizable) != 0,
+                    (_styleMask & NSWindowStyleMaskResizable) != 0},
+        .hairline = YES,
+    };
+    return frame;
+}
+
+- (void) setButtonHover: (BOOL) hover shownPressed: (NSTitlebarButton) shown {
+    if (hover == _buttonHover && shown == _shownPressed)
+        return;
+    _buttonHover = hover;
+    _shownPressed = shown;
+    _decorationsDirty = YES;
+    [self flushBuffer];
+}
+
+- (void) decorationPointerMoved: (CGPoint) point {
+    if (!_clientDecorated)
+        return;
+    CGFloat x = point.x - _margin, y = point.y - _margin;
+    NSTitlebarButton pressed = _buttonTracker.pressed;
+    [self setButtonHover: NSTitlebarPointInButtonGroup(x, y)
+            shownPressed: NSTitlebarButtonAtPoint(x, y) == pressed ? pressed : NSTitlebarButtonNone];
+}
+
+- (void) decorationPointerLeft {
+    if (_clientDecorated)
+        [self setButtonHover: NO shownPressed: NSTitlebarButtonNone];
+}
+
+- (void) performTitlebarButton: (NSTitlebarButton) action {
+    switch (action) {
+    case NSTitlebarButtonClose:
+        [self closeRequested];
+        break;
+    case NSTitlebarButtonMinimize:
+        [self miniaturize];
+        break;
+    case NSTitlebarButtonZoom:
+        if (_toplevel != NULL)
+            sendRequest(_toplevel, _maximized ? WP_TOPLEVEL_UNSET_MAXIMIZED : WP_TOPLEVEL_SET_MAXIMIZED, 0);
+        break;
+    default:
+        break;
+    }
+}
+
 - (BOOL) decorationButton: (uint32_t) button pressed: (BOOL) pressed
                    serial: (uint32_t) serial atPoint: (CGPoint) point
 {
+    CGFloat x = point.x - _margin, y = point.y - _margin;
+    if (!pressed && button == WP_BTN_LEFT && _buttonTracker.pressed != NSTitlebarButtonNone) {
+        // The press began on a disc, so the release is ours wherever it lands;
+        // the button acts only when released over the disc it pressed.
+        NSTitlebarButton action = NSTitlebarTrackerRelease(&_buttonTracker, x, y);
+        [self setButtonHover: NSTitlebarPointInButtonGroup(x, y) shownPressed: NSTitlebarButtonNone];
+        [self performTitlebarButton: action];
+        [_display flush];
+        return YES;
+    }
     if (![self isDecorationPoint: point])
         return NO;
     if (!pressed || button != WP_BTN_LEFT || _toplevel == NULL || [_display seat] == NULL)
         return YES;
-    CGFloat width = _frame.size.width + 2 * WaylandBorder;
-    CGFloat height = _frame.size.height + 2 * WaylandBorder + WaylandTitleHeight;
-    uint32_t edge = 0;
-    if (point.y < WaylandBorder) edge |= 1;
-    if (point.y >= height - WaylandBorder) edge |= 2;
-    if (point.x < WaylandBorder) edge |= 4;
-    if (point.x >= width - WaylandBorder) edge |= 8;
+    NSTitlebarFrame frame = [self titlebarFrame];
+    uint32_t edge = NSTitlebarResizeEdgesAtPoint(&frame, point.x, point.y);
     union wl_argument args[3] = {{.o = (struct wl_object *) [_display seat]},
                                  {.u = serial}, {.u = edge}};
     if (edge != 0) {
         if (_styleMask & NSWindowStyleMaskResizable)
             WaylandMarshal(_toplevel, WP_TOPLEVEL_RESIZE, NULL, 0, args);
-    } else if (point.y < WaylandBorder + WaylandTitleHeight) {
-        CGFloat x = point.x - WaylandBorder;
-        if (x >= 4 && x < 22 && (_styleMask & NSWindowStyleMaskClosable))
-            [self closeRequested];
-        else if (x >= 24 && x < 42 && (_styleMask & NSWindowStyleMaskMiniaturizable))
-            [self miniaturize];
-        else if (x >= 44 && x < 62 && (_styleMask & NSWindowStyleMaskResizable))
-            sendRequest(_toplevel, _maximized ? WP_TOPLEVEL_UNSET_MAXIMIZED : WP_TOPLEVEL_SET_MAXIMIZED, 0);
+    } else if (y >= 0 && y < WaylandTitleHeight && x >= 0 && x < frame.width) {
+        if (NSTitlebarTrackerPress(&_buttonTracker, &frame.state, x, y))
+            [self setButtonHover: YES shownPressed: _buttonTracker.pressed];
         else
             WaylandMarshal(_toplevel, WP_TOPLEVEL_MOVE, NULL, 0, args);
     }
@@ -758,8 +832,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     [self scheduleScaleUpdate];
 }
 - (NSSize) logicalSurfaceSize {
-    return NSMakeSize(ceil(_frame.size.width) + (_clientDecorated ? 2 * WaylandBorder : 0),
-        ceil(_frame.size.height) + (_clientDecorated ? 2 * WaylandBorder + WaylandTitleHeight : 0));
+    return NSMakeSize(ceil(_frame.size.width) + 2 * _margin,
+        ceil(_frame.size.height) + 2 * _margin + (_clientDecorated ? WaylandTitleHeight : 0));
 }
 
 - (void) outputRemoved: (struct wl_proxy *) output {
@@ -822,7 +896,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
                                   kO2BitmapByteOrder32Little];
         O2ColorSpaceRelease(colorSpace);
         _context = [[WaylandDrawingContext alloc] initWithSurface: surface logicalSize: logical
-                                                          border: _clientDecorated ? WaylandBorder : 0];
+                                                          border: _margin];
         _decorationsDirty = YES;
         [surface release];
     }
@@ -842,10 +916,41 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     }
 }
 
-- (void) drawDecorations {
-    // Content drawing is clipped inside the frame; the backing surface retains
-    // its decoration pixels until an input changes or the context is recreated.
-    if (!_clientDecorated || _context == nil || !_decorationsDirty)
+- (NSTitlebarBitmap) titlebarBitmap {
+    O2Surface *surface = [_context surface];
+    size_t width = O2SurfaceGetWidth(surface);
+    return (NSTitlebarBitmap) {
+        .pixels = O2SurfaceGetPixelBytes(surface),
+        .bytesPerRow = O2SurfaceGetBytesPerRow(surface),
+        .width = (int) width,
+        .height = (int) O2SurfaceGetHeight(surface),
+        .scale = width / [self logicalSurfaceSize].width,
+    };
+}
+
+// Shortens the middle of a title that does not fit, at character boundaries.
+static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CGFloat width) {
+    if ([title sizeWithAttributes: attributes].width <= width)
+        return title;
+    NSUInteger length = [title length];
+    for (NSUInteger keep = length; keep-- > 0;) {
+        NSUInteger headEnd = (keep + 1) / 2, tailStart = length - keep / 2;
+        if (headEnd > 0)
+            headEnd = NSMaxRange([title rangeOfComposedCharacterSequenceAtIndex: headEnd - 1]);
+        if (tailStart < length)
+            tailStart = [title rangeOfComposedCharacterSequenceAtIndex: tailStart].location;
+        if (headEnd > tailStart)
+            continue;
+        NSString *candidate = [NSString stringWithFormat: @"%@\u2026%@",
+                [title substringToIndex: headEnd], [title substringFromIndex: tailStart]];
+        if ([candidate sizeWithAttributes: attributes].width <= width)
+            return candidate;
+    }
+    return @"";
+}
+
+- (void) drawTitle {
+    if ([_title length] == 0)
         return;
     [NSGraphicsContext saveGraphicsState];
     O2ContextSaveGState(_context);
@@ -854,29 +959,45 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
             [NSGraphicsContext graphicsContextWithGraphicsPort: (CGContextRef) _context flipped: NO]];
         O2ContextResetClip(_context);
         O2ContextSetCTM(_context, O2AffineTransformIdentity);
-        CGFloat w = _frame.size.width, h = _frame.size.height;
-        [[NSColor colorWithCalibratedWhite: _activated ? 0.82 : 0.92 alpha: 1] set];
-        NSRectFill(NSMakeRect(-WaylandBorder, h, w + 2 * WaylandBorder,
-                              WaylandTitleHeight + WaylandBorder));
-        NSRectFill(NSMakeRect(-WaylandBorder, -WaylandBorder, w + 2 * WaylandBorder, WaylandBorder));
-        NSRectFill(NSMakeRect(-WaylandBorder, 0, WaylandBorder, h));
-        NSRectFill(NSMakeRect(w, 0, WaylandBorder, h));
-        NSUInteger masks[] = {NSWindowStyleMaskClosable, NSWindowStyleMaskMiniaturizable,
-                               NSWindowStyleMaskResizable};
-        NSColor *colors[] = {[NSColor redColor], [NSColor yellowColor], [NSColor greenColor]};
-        for (int i = 0; i < 3; ++i) {
-            [(_styleMask & masks[i] ? colors[i] : [NSColor grayColor]) set];
-            [[NSBezierPath bezierPathWithOvalInRect: NSMakeRect(7 + i * 20, h + 8, 12, 12)] fill];
-        }
+        CGFloat w = ceil(_frame.size.width), h = _frame.size.height;
+        NSDictionary *attributes = @{
+            NSFontAttributeName: [NSFont titleBarFontOfSize: NSTitlebarFontSize],
+            NSForegroundColorAttributeName: _activated ? [NSColor labelColor] : [NSColor tertiaryLabelColor],
+        };
+        double room;
+        NSTitlebarTitleOriginX(w, 0, &room);
+        NSString *title = titleFittingWidth(_title, attributes, room);
+        NSSize size = [title sizeWithAttributes: attributes];
+        CGFloat x = NSTitlebarTitleOriginX(w, size.width, &room);
         [(WaylandDrawingContext *)_context clipTitlebarAtHeight: h];
-        [_title drawInRect: NSMakeRect(76, h + 6, MAX(0, w - 90), 18)
-           withAttributes: @{NSFontAttributeName: [NSFont systemFontOfSize: 12],
-                             NSForegroundColorAttributeName: [NSColor blackColor]}];
-        _decorationsDirty = NO;
+        [title drawAtPoint: NSMakePoint(x, h + floor((WaylandTitleHeight - size.height) / 2))
+            withAttributes: attributes];
     } @finally {
         O2ContextRestoreGState(_context);
         [NSGraphicsContext restoreGraphicsState];
     }
+}
+
+- (void) drawDecorations {
+    // Content drawing is clipped inside the frame; the backing surface retains
+    // its decoration pixels until an input changes or the context is recreated.
+    if (!_clientDecorated || _context == nil || !_decorationsDirty)
+        return;
+    NSTitlebarBitmap bitmap = [self titlebarBitmap];
+    NSTitlebarFrame frame = [self titlebarFrame];
+    NSTitlebarRenderFrame(&bitmap, &frame);
+    [self drawTitle];
+    _decorationsDirty = NO;
+}
+
+// The application redraws its content every flush, including the bottom
+// corners, so they are cut again each time.
+- (void) maskContentCorners {
+    if (!_clientDecorated || _margin <= 0 || _context == nil)
+        return;
+    NSTitlebarBitmap bitmap = [self titlebarBitmap];
+    NSTitlebarFrame frame = [self titlebarFrame];
+    NSTitlebarMaskContentCorners(&bitmap, &frame);
 }
 
 - (void) flushBuffer {
@@ -886,6 +1007,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     if ([_delegate isFlushWindowDisabled])
         return;
     [self drawDecorations];
+    [self maskContentCorners];
     O2ContextFlush(_context);
     [self presentIfPossible];
 }
@@ -1038,7 +1160,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     @try {
         if (width > INT32_MAX || height > INT32_MAX || ![self ensureEGLPresenterWidth:(int32_t)width height:(int32_t)height])
             failure = @"hardware RGBA8 EGL drawable unavailable";
-        else if (![_eglPresenter presentSurface:surface opaque:_isOpaque verify:_eglVerify corrupt:_eglCorrupt])
+        else if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque] verify:_eglVerify corrupt:_eglCorrupt])
             failure = @"texture upload, GPU output or CPU reference verification";
         else {
             if (_eglVerify) ++_eglChecks;
@@ -1051,6 +1173,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
                 union wl_argument destination[] = {{.i = (int32_t)logical.width}, {.i = (int32_t)logical.height}};
                 WaylandMarshal(_viewport, WP_VIEWPORT_SET_DESTINATION, NULL, 0, destination);
             }
+            [self updateSurfaceRegions];
             // Request pacing before swap's implicit surface commit. Never commit twice.
             union wl_argument args[] = {{.o = NULL}};
             _frameCallback = WaylandCreateObject(_surface, WP_SURFACE_FRAME,
@@ -1059,7 +1182,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
                 failure = @"native EGL swap";
             else {
                 ++_clientPresents;
-                [_clientCapture captureSurface:surface opaque:_isOpaque scale120:_renderScale120];
+                [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
                 ++_eglSwaps; _eglBytes += (uint64_t)width * height * 4;
                 _needsPresent = NO;
                 [_display flush];
@@ -1070,6 +1193,58 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
             failure = @"restore caller CGL context";
     }
     if (failure) [self failEGLPresentation:failure];
+}
+
+- (void) setSurfaceRegion: (uint32_t) opcode rects: (const O2Rect *) rects count: (int) count {
+    union wl_argument args[4] = {{.o = NULL}};
+    struct wl_proxy *region = NULL;
+    if (count > 0) {
+        region = WaylandCreateObject(_display->_compositor, WP_COMPOSITOR_CREATE_REGION,
+                                     &wl_region_interface, args, 0, nil);
+        for (int i = 0; i < count; i++) {
+            args[0].i = (int32_t) rects[i].origin.x;
+            args[1].i = (int32_t) rects[i].origin.y;
+            args[2].i = (int32_t) rects[i].size.width;
+            args[3].i = (int32_t) rects[i].size.height;
+            WaylandMarshal(region, WP_REGION_ADD, NULL, 0, args);
+        }
+    }
+    args[0].o = (struct wl_object *) region;
+    WaylandMarshal(_surface, opcode, NULL, 0, args);
+    if (region != NULL)
+        sendRequest(region, WP_REGION_DESTROY, WL_MARSHAL_FLAG_DESTROY);
+}
+
+// Window geometry (so the compositor snaps, tiles and sizes the visible edge),
+// the input region (visible window plus the resize band; the rest of the
+// shadow passes clicks through) and the opaque region (without the rounded
+// corners). All are applied by the next commit.
+- (void) updateSurfaceRegions {
+    if (_toplevel == NULL)
+        return;
+    NSSize logical = [self logicalSurfaceSize];
+    O2Rect visible = O2RectMake(_margin, _margin, logical.width - 2 * _margin, logical.height - 2 * _margin);
+    if (NSEqualRects(visible, _sentGeometry))
+        return;
+    _sentGeometry = visible;
+    union wl_argument args[4] = {{.i = (int32_t) visible.origin.x}, {.i = (int32_t) visible.origin.y},
+                                 {.i = (int32_t) visible.size.width}, {.i = (int32_t) visible.size.height}};
+    WaylandMarshal(_xdgSurface, WP_XDG_SURFACE_SET_WINDOW_GEOMETRY, NULL, 0, args);
+    O2Rect input = NSInsetRect(visible, -NSTitlebarResizeOutside, -NSTitlebarResizeOutside);
+    [self setSurfaceRegion: WP_SURFACE_SET_INPUT_REGION rects: &input count: _margin > 0 ? 1 : 0];
+    CGFloat r = _margin > 0 ? NSTitlebarCornerRadius : 0;
+    O2Rect opaque[3] = {
+        O2RectMake(visible.origin.x + r, visible.origin.y, visible.size.width - 2 * r, r),
+        O2RectMake(visible.origin.x, visible.origin.y + r, visible.size.width, visible.size.height - 2 * r),
+        O2RectMake(visible.origin.x + r, NSMaxY(visible) - r, visible.size.width - 2 * r, r),
+    };
+    [self setSurfaceRegion: WP_SURFACE_SET_OPAQUE_REGION rects: r > 0 ? opaque : &visible
+                     count: !_isOpaque ? 0 : r > 0 ? 3 : 1];
+}
+
+// Rounded corners and the shadow margin need alpha even in opaque windows.
+- (BOOL) presentsOpaque {
+    return _isOpaque && !_clientDecorated;
 }
 
 // Copies the current content into a shm buffer and commits it, at most once
@@ -1093,7 +1268,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     }
 
     // Onyx2D's premultiplied, little-endian ARGB is wl_shm's ARGB8888.
-    uint32_t format = _isOpaque ? WP_SHM_FORMAT_XRGB8888 : WP_SHM_FORMAT_ARGB8888;
+    uint32_t format = [self presentsOpaque] ? WP_SHM_FORMAT_XRGB8888 : WP_SHM_FORMAT_ARGB8888;
     struct WaylandBuffer *buffer = [self bufferWithWidth: (int32_t) width
                                                   height: (int32_t) height
                                                   format: format];
@@ -1133,9 +1308,10 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
                                          &wl_callback_interface, args,
                                          WaylandObjectFrameCallback, self);
 
+    [self updateSurfaceRegions];
     sendRequest(_surface, WP_SURFACE_COMMIT, 0);
     ++_clientPresents;
-    [_clientCapture captureSurface:surface opaque:_isOpaque scale120:_renderScale120];
+    [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
     buffer->busy = YES;
     _needsPresent = NO;
     [_display flush];
@@ -1170,6 +1346,10 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
             _pendingActivated = WaylandStatesContain(states, WP_TOPLEVEL_STATE_ACTIVATED);
             _pendingMaximized = WaylandStatesContain(states, WP_TOPLEVEL_STATE_MAXIMIZED);
             _pendingFullscreen = WaylandStatesContain(states, WP_TOPLEVEL_STATE_FULLSCREEN);
+            _pendingTiled = WaylandStatesContain(states, WP_TOPLEVEL_STATE_TILED_LEFT) ||
+                            WaylandStatesContain(states, WP_TOPLEVEL_STATE_TILED_RIGHT) ||
+                            WaylandStatesContain(states, WP_TOPLEVEL_STATE_TILED_TOP) ||
+                            WaylandStatesContain(states, WP_TOPLEVEL_STATE_TILED_BOTTOM);
         } else if (opcode == WP_TOPLEVEL_EV_CLOSE) {
             [self closeRequested];
         }
@@ -1236,8 +1416,11 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     // A fullscreen window has no frame of its own to draw.
     BOOL clientDecorated = _toplevel != NULL && (_styleMask & NSWindowStyleMaskTitled) &&
             _pendingClientDecorated && !_pendingFullscreen;
-    BOOL decorationChanged = clientDecorated != _clientDecorated;
+    // Maximized and tiled windows meet the output or a neighbour edge to edge.
+    CGFloat margin = clientDecorated && !_pendingMaximized && !_pendingTiled ? NSTitlebarMargin : 0;
+    BOOL decorationChanged = clientDecorated != _clientDecorated || margin != _margin;
     _clientDecorated = clientDecorated;
+    _margin = margin;
     _maximized = _pendingMaximized;
     if (decorationChanged) {
         [_context release];
@@ -1249,8 +1432,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     int32_t width, height;
     WaylandFullscreenConfigure(&_fullscreenTracker, _pendingFullscreen,
             WaylandFullscreenRound(_frame.size.width), WaylandFullscreenRound(_frame.size.height),
-            _pendingWidth - (_clientDecorated ? 2 * WaylandBorder : 0),
-            _pendingHeight - (_clientDecorated ? 2 * WaylandBorder + WaylandTitleHeight : 0),
+            _pendingWidth,
+            _pendingHeight - (_clientDecorated ? WaylandTitleHeight : 0),
             &width, &height);
     BOOL firstConfigure = !_configured;
     _configured = YES;
@@ -1259,7 +1442,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     BOOL moved = NO;
     if (_popupParent != nil) {
         NSRect parent = [_popupParent frame];
-        NSPoint offset = [_popupParent contentOffset];
+        NSPoint offset = [_popupParent geometryContentOffset];
         NSPoint origin = NSMakePoint(parent.origin.x + _pendingPopupX - offset.x,
                 NSMaxY(parent) - _pendingPopupY + offset.y - _pendingHeight);
         moved = !NSEqualPoints(_frame.origin, origin);
