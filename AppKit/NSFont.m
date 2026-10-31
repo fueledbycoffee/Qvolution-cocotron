@@ -196,15 +196,15 @@ static NSLock *_cacheLock = nil;
 }
 
 + (CGFloat) systemFontSize {
-    return 12.0;
+    return 13.0;
 }
 
 + (CGFloat) smallSystemFontSize {
-    return 10.0;
+    return 11.0;
 }
 
 + (CGFloat) labelFontSize {
-    return 12.0;
+    return 10.0;
 }
 
 + (CGFloat) systemFontSizeForControlSize: (NSControlSize) size {
@@ -228,14 +228,8 @@ static NSLock *_cacheLock = nil;
     NSFont *result = nil;
     CTFontRef ctFont = CTFontCreateUIFontForLanguage(type, size, nil);
     if (ctFont) {
-        NSString *name = (NSString *) CTFontCopyFullName(ctFont);
-
-        size = CTFontGetSize(ctFont);
-
-        result = [NSFont fontWithName: name size: size];
-
-        [ctFont release];
-        [name release];
+        // CoreText already returns NSFont with the selected graphics face.
+        result = [(NSFont *)ctFont autorelease];
     } else {
         result = [NSFont fontWithName: [O2Font postscriptNameForDisplayName:
                                                        fallbackName]
@@ -246,45 +240,44 @@ static NSLock *_cacheLock = nil;
 }
 
 + (NSFont *) boldSystemFontOfSize: (CGFloat) size {
-    NSFont *font = [self systemFontOfSize: size];
-    return [[NSFontManager sharedFontManager] convertFont: font
-                                              toHaveTrait: NSBoldFontMask];
+    return [self _uiFontOfType: kCTFontUIFontEmphasizedSystem size: size
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) controlContentFontOfSize: (CGFloat) size {
     return [self _uiFontOfType: kCTFontControlContentFontType
-                          size: (size == 0) ? 12.0 : size
-                  fallbackName: @"San Francisco"];
+                          size: (size == 0) ? 13.0 : size
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) labelFontOfSize: (CGFloat) size {
     return [self _uiFontOfType: kCTFontLabelFontType
-                          size: (size == 0) ? 12.0 : size
-                  fallbackName: @"San Francisco"];
+                          size: (size == 0) ? 10.0 : size
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) menuFontOfSize: (CGFloat) size {
     return [self _uiFontOfType: kCTFontMenuItemFontType
                           size: size
-                  fallbackName: @"San Francisco"];
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) menuBarFontOfSize: (CGFloat) size {
     return [self _uiFontOfType: kCTFontMenuTitleFontType
                           size: size
-                  fallbackName: @"San Francisco"];
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) messageFontOfSize: (CGFloat) size {
     return [self _uiFontOfType: kCTFontSystemFontType
-                          size: (size == 0) ? 12.0 : size
-                  fallbackName: @"San Francisco"];
+                          size: (size == 0) ? 13.0 : size
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) paletteFontOfSize: (CGFloat) size {
     return [self _uiFontOfType: kCTFontPaletteFontType
-                          size: (size == 0) ? 12.0 : size
-                  fallbackName: @"San Francisco"];
+                          size: (size == 0) ? 13.0 : size
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) systemFontOfSize: (CGFloat) size {
@@ -299,7 +292,7 @@ static NSLock *_cacheLock = nil;
 }
 
 + (NSFont *) monospacedSystemFontOfSize: (CGFloat) size weight: (CGFloat) weight {
-    CGFloat actualSize = (size == 0) ? 12.0 : size;
+    CGFloat actualSize = (size == 0) ? 13.0 : size;
     NSFont *font = [self userFixedPitchFontOfSize: actualSize];
     if (font == nil) {
         font = [self fontWithName: @"Courier" size: actualSize];
@@ -326,20 +319,18 @@ static NSLock *_cacheLock = nil;
 
 + (NSFont *) toolTipsFontOfSize: (CGFloat) size {
     return [self _uiFontOfType: kCTFontToolTipFontType
-                          size: (size == 0) ? 10. : size
-                  fallbackName: @"San Francisco"];
+                          size: (size == 0) ? 11. : size
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) userFontOfSize: (CGFloat) size {
-    return [NSFont fontWithName: [O2Font postscriptNameForDisplayName:
-                                                 @"San Francisco"]
-                           size: (size == 0) ? 12.0 : size];
+    return [self _uiFontOfType: kCTFontUIFontUser size: size
+                  fallbackName: @".AppleSystemUIFont"];
 }
 
 + (NSFont *) userFixedPitchFontOfSize: (CGFloat) size {
-    return [NSFont
-            fontWithName: [O2Font postscriptNameForDisplayName: @"Courier New"]
-                    size: (size == 0) ? 12.0 : size];
+    return [self _uiFontOfType: kCTFontUIFontUserFixedPitch size: size
+                  fallbackName: @"DejaVu Sans Mono"];
 }
 
 + (void) setUserFont: (NSFont *) value {
