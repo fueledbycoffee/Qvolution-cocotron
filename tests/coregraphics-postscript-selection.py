@@ -36,6 +36,7 @@ int main(int argc,char**argv){assert(argc==4);assert(!FT_Init_FreeType(&library)
  face=createFaceForMatch(nonunicode,NO);assert(face&&face->num_glyphs>0&&FT_Set_Charmap(face,face->charmaps[0])==0&&FT_Get_Char_Index(face,65)>0);FT_Done_Face(face);assert(!createFaceForMatch(nonunicode,YES));FcPatternDestroy(nonunicode);
  FcConfigDestroy(config);config=FcConfigCreate();assert(config&&FcConfigAppFontAddFile(config,(const FcChar8*)argv[3]));
  assert(createExactPostScriptFace("DejaVuSans",&face)==1&&face&&face->face_index==1);FT_Done_Face(face);
+ assert(createExactPostScriptFace("DejaVu Sans",&face)==0&&!face);assert(createExactPostScriptFace("dejavusans",&face)==0&&!face); // Normalized family spelling is not an exact advertised PS name.
  FT_Face first,second;assert(!FT_New_Face(library,argv[3],0,&first)&&!FT_New_Face(library,argv[3],1,&second));unsigned cp;for(cp=1;cp<0xd800;cp++)if(!FT_Get_Char_Index(first,cp)&&FT_Get_Char_Index(second,cp))break;assert(cp<0xd800);
  FcCharSet *chars=FcCharSetCreate();FcPattern *coverage=FcPatternCreate();assert(chars&&coverage&&FcCharSetAddChar(chars,cp)&&FcPatternAddCharSet(coverage,FC_CHARSET,chars));face=createMatchingFace(coverage);assert(face&&face->face_index==1&&FT_Get_Char_Index(face,cp));FT_Done_Face(face);FcPatternDestroy(coverage);FcCharSetDestroy(chars);FT_Done_Face(first);FT_Done_Face(second);
  FcConfigDestroy(config);config=NULL;assert(createExactPostScriptFace("DejaVuSans-BoldOblique",&face)==-1&&!face);FT_Done_FreeType(library);

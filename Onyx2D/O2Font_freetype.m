@@ -244,7 +244,7 @@ static int createExactPostScriptFace(const char *name, FT_Face *face) {
     if (config == NULL)
         return -1;
     FcPattern *query = FcPatternCreate();
-    FcObjectSet *objects = FcObjectSetBuild(FC_FILE, FC_INDEX, NULL);
+    FcObjectSet *objects = FcObjectSetBuild(FC_FILE, FC_INDEX, FC_POSTSCRIPT_NAME, NULL);
     if (query == NULL || objects == NULL ||
             !FcPatternAddString(query, FC_POSTSCRIPT_NAME, (const FcChar8 *)name)) {
         if (query != NULL) FcPatternDestroy(query);
@@ -256,9 +256,23 @@ static int createExactPostScriptFace(const char *name, FT_Face *face) {
     FcObjectSetDestroy(objects);
     if (matches == NULL)
         return -1;
-    int result = matches->nfont > 0 ? -1 : 0;
+    int result = 0;
     for (int index = 0; index < matches->nfont; ++index) {
-        FT_Face candidate = createFaceForMatch(matches->fonts[index], NO);
+        FcPattern *entry = matches->fonts[index];
+        BOOL exact = NO;
+        FcChar8 *advertised;
+        for (int nameIndex = 0; FcPatternGetString(entry, FC_POSTSCRIPT_NAME,
+                nameIndex, &advertised) == FcResultMatch; ++nameIndex) {
+            if (strcmp((const char *)advertised, name) == 0) {
+                exact = YES;
+                break;
+            }
+        }
+        // Fontconfig normalizes case/spacing; those matches still need legacy routing.
+        if (!exact)
+            continue;
+        result = -1;
+        FT_Face candidate = createFaceForMatch(entry, NO);
         if (candidate == NULL)
             continue;
         const char *actual = FT_Get_Postscript_Name(candidate);
