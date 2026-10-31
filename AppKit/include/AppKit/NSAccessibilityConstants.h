@@ -239,6 +239,7 @@ APPKIT_EXPORT NSString *const NSAccessibilityMenuItemRole;
 APPKIT_EXPORT NSString *const NSAccessibilityMenuRole;
 APPKIT_EXPORT NSString *const NSAccessibilityOutlineRole;
 APPKIT_EXPORT NSString *const NSAccessibilityPopUpButtonRole;
+APPKIT_EXPORT NSAccessibilityRole const NSAccessibilityPopoverRole;
 APPKIT_EXPORT NSString *const NSAccessibilityProgressIndicatorRole;
 APPKIT_EXPORT NSString *const NSAccessibilityRadioButtonRole;
 APPKIT_EXPORT NSString *const NSAccessibilityRadioGroupRole;
