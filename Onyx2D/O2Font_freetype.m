@@ -150,7 +150,8 @@ FT_Face O2FontCreateMetadataFaceForMatch(FcPattern *match, FT_Library library) {
     return match != NULL ? createFaceForMatchInLibrary(match, NO, library) : NULL;
 }
 
-static FT_Face createMatchingFace(FcPattern *pattern) {
+static FT_Face createMatchingFaceWithEncodingRequirement(FcPattern *pattern,
+                                                          BOOL requireUnicode) {
     FcConfig *config = O2FontSharedFontConfig();
     if (config == NULL || !FcConfigSubstitute(config, pattern, FcMatchPattern))
         return NULL;
@@ -159,8 +160,23 @@ static FT_Face createMatchingFace(FcPattern *pattern) {
     FcPattern *match = FcFontMatch(config, pattern, &result);
     if (match == NULL)
         return NULL;
-    FT_Face face = createFaceForMatch(match, YES);
+    FT_Face face = createFaceForMatch(match, requireUnicode);
     FcPatternDestroy(match);
+    return face;
+}
+
+static FT_Face createMatchingFace(FcPattern *pattern) {
+    return createMatchingFaceWithEncodingRequirement(pattern, YES);
+}
+
+static FT_Face createPatternFace(const char *name) {
+    if (name == NULL)
+        return NULL;
+    FcPattern *pattern = FcNameParse((const FcChar8 *)name);
+    if (pattern == NULL)
+        return NULL;
+    FT_Face face = createMatchingFaceWithEncodingRequirement(pattern, NO);
+    FcPatternDestroy(pattern);
     return face;
 }
 
@@ -427,48 +443,13 @@ static char *copyFontNameUTF8(CFStringRef name) {
         [self release];
         return nil;
     }
-    FT_Face exactFace;
-    int exact = createExactPostScriptFace(requested, &exactFace);
-    free(requested);
-    if (exact > 0)
-        return [self initWithFace:exactFace];
-    if (exact < 0) {
-        [self release];
-        return nil;
-    }
-    NSString *filename = [[self class] filenameForPattern: _name];
-    if (filename == nil) {
-        filename = [[self class] filenameForPattern: @""];
-    }
-    if (filename == nil) {
-        NSLog(@"No font found for name %@", name);
-        [self release];
-        return nil;
-    }
-
-    // fontconfig reports the host's font path (e.g. /usr/share/fonts/...), which does not
-    // exist under the guest's own root, so -fileExistsAtPath: needs it prefixed with
-    // /Volumes/SystemRoot. FreeType is reached through the native passthrough, which already
-    // resolves those host paths itself: handing it the prefixed path instead makes every
-    // FT_New_Face fail with error 1 (FT_Err_Cannot_Open_Resource). So use the prefixed
-    // form only to decide *whether* the file is there, and always hand FreeType the raw
-    // fontconfig path.
-    NSString *freetypePath = filename;
-    if (![[NSFileManager defaultManager] fileExistsAtPath: filename]) {
-        NSString *rooted = [@"/Volumes/SystemRoot" stringByAppendingPathComponent: filename];
-        if (![[NSFileManager defaultManager] fileExistsAtPath: rooted]) {
-            NSLog(@"Font file not found: %@", filename);
-            [self release];
-            return nil;
-        }
-    }
-
     FT_Face face;
-    FT_Error error = FT_New_Face(O2FontSharedFreeTypeLibrary(),
-                                 [freetypePath fileSystemRepresentation], 0, &face);
-
-    if (error != 0) {
-        NSLog(@"FT_New_Face() = %d", error);
+    int exact = createExactPostScriptFace(requested, &face);
+    if (exact == 0)
+        face = createPatternFace(requested);
+    free(requested);
+    if (face == NULL) {
+        NSLog(@"Cannot load matched font %@", name);
         [self release];
         return nil;
     }
