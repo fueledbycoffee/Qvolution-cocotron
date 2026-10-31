@@ -32,6 +32,12 @@ typedef void (*O2BitmapContextReleaseDataCallback)(void *userInfo, void *data);
 
 - (Class) surfaceClass;
 
+- initWithBytes:(void *)bytes width:(size_t)width height:(size_t)height
+        bitsPerComponent:(size_t)bitsPerComponent bytesPerRow:(size_t)bytesPerRow
+        colorSpace:(O2ColorSpaceRef)colorSpace bitmapInfo:(O2BitmapInfo)bitmapInfo
+        releaseCallback:(O2BitmapContextReleaseDataCallback)releaseCallback
+        releaseInfo:(void *)releaseInfo;
+
 - initWithSurface: (O2Surface *) surface flipped: (BOOL) flipped;
 
 - (O2Surface *) surface;

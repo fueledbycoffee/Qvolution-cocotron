@@ -41,3 +41,12 @@ baseline expected failure as after success. Root still must run candidate contro
 
 No fixture result substitutes for actual HLG matching, retagging, managed drawing,
 SDR/display adaptation, GPU correctness, physical UI or application qualification.
+
+The original transaction probe exposed a missing declaration for Onyx's existing
+bitmap instance initializer: the untyped call supplied an incorrect incoming row
+on source-built Stage26. A fresh control declaring the exact own-source signature
+passed all transaction, nested-pattern, shadow-retry and PDF assertions on that
+runtime. The header now declares that existing method; the canonical fixture uses
+the header directly, with no local stand-in, and compiles with
+`-Werror=objc-method-access`. This corrects caller type checking; it does not add
+new rendering behavior or establish full HLG support.
