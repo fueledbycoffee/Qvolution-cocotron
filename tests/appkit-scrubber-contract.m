@@ -25,8 +25,8 @@ static NSImage *originalImage(void){
  NSImage *image=[[NSImage alloc]initWithSize:NSMakeSize(8,4)];[image addRepresentation:rep];[rep release];return image;
 }
 static unsigned raster(NSImageView *view,unsigned char *bytes){
- memset(bytes,0,80*60*4);CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();CGContextRef context=CGBitmapContextCreate(bytes,80,60,8,80*4,space,kCGImageAlphaPremultipliedLast|kCGBitmapByteOrder32Big);if(!context)return 0;
- [NSGraphicsContext saveGraphicsState];[NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithGraphicsPort:context flipped:NO]];[view drawRect:[view bounds]];[NSGraphicsContext restoreGraphicsState];CGContextRelease(context);CGColorSpaceRelease(space);unsigned visible=0;for(int i=0;i<80*60;i++)if(bytes[i*4+3])visible++;return visible;
+ memset(bytes,0,80*60*4);CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();CGContextRef context=CGBitmapContextCreate(bytes,80,60,8,80*4,space,kCGImageAlphaPremultipliedLast|kCGBitmapByteOrder32Big);if(!context){CGColorSpaceRelease(space);return 0;}
+ [NSGraphicsContext saveGraphicsState];@try{[NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithGraphicsPort:context flipped:NO]];[view drawRect:[view bounds]];}@finally{[NSGraphicsContext restoreGraphicsState];CGContextRelease(context);CGColorSpaceRelease(space);}unsigned visible=0;for(int i=0;i<80*60;i++)if(bytes[i*4+3])visible++;return visible;
 }
 static int attributes(void){
  Class<QVAttributes> cls=(Class<QVAttributes>)NSClassFromString(@"NSScrubberLayoutAttributes");CHECK(cls,"real layout attributes class exists");CHECK([(id)cls respondsToSelector:@selector(layoutAttributesForItemAtIndex:)],"public indexed factory exists");
@@ -44,7 +44,15 @@ static int image(void){
  NSImage *source=originalImage();CHECK(source,"own bitmap image control");[item setImage:source];[source setSize:NSMakeSize(16,4)];[source release];CHECK([item image]&&NSEqualSizes([[item image]size],NSMakeSize(8,4))&&[child image]==[item image],"copied image survives original size mutation/release and backs actual child");
  [item setFrameSize:NSMakeSize(100,40)];CHECK(NSEqualRects([child frame],[item bounds]),"actual image child follows resize");[item setFrameSize:NSMakeSize(80,60)];
  unsigned char top[80*60*4],bottom[80*60*4];[item setImageAlignment:NSImageAlignTop];CHECK([item imageAlignment]==NSImageAlignTop&&[child imageAlignment]==NSImageAlignTop,"alignment forwards to actual child");CHECK(raster(child,top)>100,"actual NSImageView renders original pixels");[item setImageAlignment:NSImageAlignBottom];CHECK(raster(child,bottom)>100&&memcmp(top,bottom,sizeof top),"alignment changes actual image raster placement");
- [item setImage:nil];CHECK(![item image]&&![child image],"cleared content stays absent");[item release];return 0;
+ @try{[NSKeyedArchiver archivedDataWithRootObject:item];CHECK(NO,"populated item coding must reject until real image codec");}@catch(NSException *e){CHECK([[e name]isEqual:NSInvalidArchiveOperationException],"explicit populated-coding failure, not silent content loss");}
+ CHECK(NSEqualSizes([[item image]size],NSMakeSize(8,4)),"failed coding preserves live image");
+ [item setImage:nil];CHECK(![item image]&&![child image],"cleared content stays absent");[item setSelected:YES];[item setHighlighted:YES];
+ NSData *archive=[NSKeyedArchiver archivedDataWithRootObject:item];NSView<QVImageItem> *decoded=[NSKeyedUnarchiver unarchiveObjectWithData:archive];CHECK(decoded&&[decoded imageView]&&[[decoded imageView]superview]==decoded&&[decoded isSelected]&&[decoded isHighlighted]&&! [decoded image],"own empty image child/state roundtrip");unsigned children=0;for(NSView *v in [decoded subviews])if([v isKindOfClass:[NSImageView class]])children++;CHECK(children==1&&[decoded imageAlignment]==NSImageAlignBottom&&NSEqualRects([[decoded imageView]frame],[decoded bounds]),"decoded owned child is unique with actual alignment/layout");
+ [item release];NSView<QVImageItem> *fresh=[[(id)cls alloc]initWithFrame:NSMakeRect(0,0,12,12)];NSImageView *retained=[[fresh imageView]retain];[fresh release];CHECK([retained superview]==nil,"item release detaches independently retained child without cycle");[retained release];return 0;
+}
+static int populatedCoding(void){
+ Class cls=NSClassFromString(@"NSScrubberImageItemView");CHECK(cls,"concrete image item prerequisite");NSView<QVImageItem> *item=[[(id)cls alloc]initWithFrame:NSMakeRect(0,0,80,60)];NSImage *source=originalImage();[item setImage:source];[source release];
+ @try{NSData *data=[NSKeyedArchiver archivedDataWithRootObject:item];NSView<QVImageItem>*copy=[NSKeyedUnarchiver unarchiveObjectWithData:data];CHECK(copy&&[copy image]&&NSEqualSizes([[copy image]size],NSMakeSize(8,4)),"populated item preserves actual image");unsigned char pixels[80*60*4];CHECK(raster([copy imageView],pixels)>100,"populated roundtrip retains actual pixels");[item release];return 0;}@catch(NSException *e){fprintf(stderr,"FAIL populated image coding prerequisite %s\n",[[e name]UTF8String]);[item release];return 1;}
 }
 static int codingControl(BOOL image){
  @try {
@@ -56,6 +64,6 @@ static int codingControl(BOOL image){
 }
 int main(int argc,char**argv){@autoreleasepool{
  [NSApplication sharedApplication];CHECK([NSImageView isSubclassOfClass:[NSView class]],"existing concrete image view positive class control");const char *mode=argc>1?argv[1]:"image";int result;
- if(!strcmp(mode,"attributes"))result=attributes();else if(!strcmp(mode,"base"))result=base();else if(!strcmp(mode,"image"))result=image();else if(!strcmp(mode,"coding-control"))result=codingControl(NO);else if(!strcmp(mode,"coding-image-control"))result=codingControl(YES);else if(!strcmp(mode,"render-control")){NSImage *source=originalImage();CHECK(source,"original bitmap");NSImageView *view=[[NSImageView alloc]initWithFrame:NSMakeRect(0,0,80,60)];[view setImage:source];[view setImageScaling:NSImageScaleProportionallyUpOrDown];unsigned char pixels[80*60*4];CHECK(raster(view,pixels)>100,"existing NSImageView actual raster positive control");[view release];[source release];result=0;}else{fputs("FAIL unknown mode\n",stderr);return 2;}
+ if(!strcmp(mode,"attributes"))result=attributes();else if(!strcmp(mode,"base"))result=base();else if(!strcmp(mode,"image"))result=image();else if(!strcmp(mode,"image-populated-coding"))result=populatedCoding();else if(!strcmp(mode,"coding-control"))result=codingControl(NO);else if(!strcmp(mode,"coding-image-control"))result=codingControl(YES);else if(!strcmp(mode,"render-control")){NSImage *source=originalImage();CHECK(source,"original bitmap");NSImageView *view=[[NSImageView alloc]initWithFrame:NSMakeRect(0,0,80,60)];[view setImage:source];[view setImageScaling:NSImageScaleProportionallyUpOrDown];unsigned char pixels[80*60*4];CHECK(raster(view,pixels)>100,"existing NSImageView actual raster positive control");[view release];[source release];result=0;}else{fputs("FAIL unknown mode\n",stderr);return 2;}
  if(!result)puts("PASS original Scrubber public model/image/CPU-raster mode; no full scrubber or compositor qualification");return result;
 }}
