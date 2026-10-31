@@ -114,13 +114,10 @@ static void renderFreeTypeBitmap(O2Context_builtin_FT *self, O2Surface *surface,
     NSInteger minY = MAX(y, self->_vpy);
     NSInteger maxY = MIN(y + fullHeight, self->_vpy + self->_vpheight);
 
+    if (maxX <= minX || maxY <= minY)
+        return;
     NSInteger renderWidth = maxX - minX;
     NSInteger renderHeight = maxY - minY;
-
-    if (renderWidth <= 0 || renderHeight <= 0) {
-        // Fully clipped.
-        return;
-    }
 
     O2argb8u *dstBuffer = __builtin_alloca(renderWidth * sizeof(O2argb8u));
     O2argb8u *srcBuffer = __builtin_alloca(renderWidth * sizeof(O2argb8u));
@@ -184,15 +181,29 @@ static void renderFreeTypeBitmap(O2Context_builtin_FT *self, O2Surface *surface,
 
 // FreeType delta precision is 26.6; retain the integer carry at phase wrap.
 static BOOL splitGlyphOrigin(O2Float value, NSInteger *anchor, uint8_t *phase) {
-    if (!isfinite(value) || (double)value <= (double)NSIntegerMin + (double)UINT_MAX ||
-        (double)value >= (double)NSIntegerMax - (double)UINT_MAX)
+    if (!isfinite(value))
         return NO;
-    O2Float integral = floor(value);
-    long fraction = lround((value - integral) * 64);
+    double integral = floor((double)value);
+    long fraction = lround(((double)value - integral) * 64);
     if (fraction == 64) { integral += 1; fraction = 0; }
+    if ((long double)integral < (long double)NSIntegerMin ||
+        (long double)integral >= (long double)NSIntegerMax + 1.0L)
+        return NO;
     *anchor = (NSInteger)integral;
     *phase = (uint8_t)fraction;
     return YES;
+}
+
+static BOOL glyphBitmapPosition(NSInteger anchorX, NSInteger anchorY,
+        NSInteger left, NSInteger top, size_t width, size_t height,
+        NSInteger *x, NSInteger *y) {
+    if (width > (size_t)NSIntegerMax || height > (size_t)NSIntegerMax)
+        return NO;
+    NSInteger right, bottom;
+    return !__builtin_add_overflow(anchorX, left, x) &&
+            !__builtin_sub_overflow(anchorY, top, y) &&
+            !__builtin_add_overflow(*x, (NSInteger)width, &right) &&
+            !__builtin_add_overflow(*y, (NSInteger)height, &bottom);
 }
 
 - (void) showGlyphs: (const O2Glyph *) glyphs
@@ -270,10 +281,12 @@ static BOOL splitGlyphOrigin(O2Float value, NSInteger *anchor, uint8_t *phase) {
                 ? [font rasterizeGlyph: glyphs[i] pointSize: fontSize.height
                                 phaseX: phaseX phaseY: phaseY] : nil;
 
-        if (cached != nil)
+        if (cached != nil && (!position || glyphBitmapPosition(anchorX, anchorY,
+                cached->left, cached->top, cached->bitmap.width, cached->bitmap.rows,
+                &anchorX, &anchorY)))
             renderFreeTypeBitmap(self, _surface, &cached->bitmap,
-                    position ? anchorX + cached->left : point.x + cached->left,
-                    position ? anchorY - cached->top : point.y - cached->top, paint);
+                    position ? anchorX : point.x + cached->left,
+                    position ? anchorY : point.y - cached->top, paint);
 
         if (advances != NULL) {
             // Advances are in text space, so only the linear part of Trm

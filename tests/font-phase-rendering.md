@@ -59,7 +59,11 @@ Guest tests (coordinator owns runtime/prefix slot):
 
 Native lightweight check: `python3 tests/font-phase-origin-split.py` extracts
 and executes the actual coordinate helper. Checks signed floor/carry cases,
-precision bounds over200001coordinates and invalid/out-of-range rejection.
+precision bounds over200001coordinates per model and invalid/out-of-range rejection.
+The extracted helper runs with explicit int64/double, int32/double and
+int32/float models under undefined-behavior sanitization. Actual bitmap bearing
+add/subtract and right/bottom extents are checked; fully clipped rectangles
+are rejected before subtracting their intersection bounds.
 
 All fonts are explicit open DejaVu/PCF files. No Apple artifacts, screenshots
 or pixel snapshots provide an oracle. Placement/scale checks do not establish
