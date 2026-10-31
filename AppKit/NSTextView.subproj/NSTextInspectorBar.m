@@ -51,7 +51,8 @@ static NSImage *inspectorGlyph(NSTextInspectorGlyph glyph, BOOL selected) {
         if (glyph >= NSTextInspectorLeftGlyph) {
             [color setStroke];
             NSBezierPath *lines = [NSBezierPath bezierPath];
-            [lines setLineWidth:1.5];
+            // Integer centers and a two-point stroke give solid interiors at 1x.
+            [lines setLineWidth:2];
             for (NSUInteger row=0; row<4; row++) {
                 CGFloat width = row%2 ? 8 : 12;
                 CGFloat x = glyph==NSTextInspectorLeftGlyph ? 2 :
