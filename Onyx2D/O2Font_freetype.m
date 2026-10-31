@@ -560,14 +560,16 @@ static NSInteger *copyUnscaledAdvances(FT_Face face, NSInteger glyphCount) {
         _ftEncoding = FT_ENCODING_UNICODE;
     } else if (hasMacRoman) {
         _ftEncoding = FT_ENCODING_APPLE_ROMAN;
-    } else {
+    } else if (numberOfCharMaps > 0) {
         NSLog(@"encoding = %c %c %c %c", face->charmaps[0]->encoding >> 24,
               face->charmaps[0]->encoding >> 16,
               face->charmaps[0]->encoding >> 8, face->charmaps[0]->encoding);
         _ftEncoding = face->charmaps[0]->encoding;
+    } else {
+        _ftEncoding = FT_ENCODING_NONE;
     }
 
-    if (FT_Select_Charmap(face, _ftEncoding) != 0) {
+    if (numberOfCharMaps > 0 && FT_Select_Charmap(face, _ftEncoding) != 0) {
         NSLog(@"FT_Select_Charmap(%d) failed", _ftEncoding);
     }
 
