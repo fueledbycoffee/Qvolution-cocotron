@@ -73,7 +73,8 @@ FcConfig *O2FontSharedFontConfig() {
     return fontConfig;
 }
 
-static FT_Face createFaceForMatch(FcPattern *match, BOOL requireUnicode) {
+static FT_Face createFaceForMatchInLibrary(FcPattern *match, BOOL requireUnicode,
+                                              FT_Library library) {
     FcChar8 *filename = NULL;
     int faceIndex = 0;
     FcResult indexResult = FcPatternGetInteger(match, FC_INDEX, 0, &faceIndex);
@@ -82,7 +83,7 @@ static FT_Face createFaceForMatch(FcPattern *match, BOOL requireUnicode) {
         faceIndex < 0)
         return NULL;
     FT_Face face = NULL;
-    if (FT_New_Face(O2FontSharedFreeTypeLibrary(), (const char *)filename,
+    if (library == NULL || FT_New_Face(library, (const char *)filename,
                     faceIndex, &face) != 0)
         return NULL;
     if (requireUnicode && FT_Select_Charmap(face, FT_ENCODING_UNICODE) != 0) {
@@ -90,6 +91,15 @@ static FT_Face createFaceForMatch(FcPattern *match, BOOL requireUnicode) {
         return NULL;
     }
     return face;
+}
+
+static FT_Face createFaceForMatch(FcPattern *match, BOOL requireUnicode) {
+    return createFaceForMatchInLibrary(match, requireUnicode, O2FontSharedFreeTypeLibrary());
+}
+
+// Metadata callers use their private library and destroy the owned face before that library.
+FT_Face O2FontCreateMetadataFaceForMatch(FcPattern *match, FT_Library library) {
+    return match != NULL ? createFaceForMatchInLibrary(match, NO, library) : NULL;
 }
 
 static FT_Face createMatchingFace(FcPattern *pattern) {
@@ -484,6 +494,10 @@ static NSString *copyFullNameForFace(FT_Face face) {
                                     info.full_name, kCFStringEncodingUTF8);
     }
     return nil;
+}
+
+NSString *O2FontCopyMetadataFullName(FT_Face face) {
+    return face != NULL ? copyFullNameForFace(face) : nil;
 }
 
 - (NSString *) copyPostScriptName {

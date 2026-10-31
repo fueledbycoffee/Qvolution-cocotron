@@ -43,6 +43,10 @@ FT_Face O2FontFreeTypeFace(O2Font_freetype *self);
 FT_Library O2FontSharedFreeTypeLibrary();
 FcConfig *O2FontSharedFontConfig();
 
+// Owned metadata-only face/name; no O2Font instance or glyph cache is constructed.
+FT_Face O2FontCreateMetadataFaceForMatch(FcPattern *match, FT_Library privateLibrary);
+NSString *O2FontCopyMetadataFullName(FT_Face face);
+
 // Returns an owned configured UI face with real requested traits, or nil.
 O2FontRef O2FontCreateForUserInterface(BOOL fixedPitch, BOOL emphasized,
                                       const char *language);
