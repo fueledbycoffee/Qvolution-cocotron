@@ -17,10 +17,7 @@
  * along with Darling.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#import <AppKit/NSView.h>
-
-@interface NSScrubberArrangedView : NSView
-@end
+#import <AppKit/NSScrubberArrangedView.h>
 
 @interface NSScrubberItemView : NSScrubberArrangedView
 @end
