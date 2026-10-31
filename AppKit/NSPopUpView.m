@@ -272,7 +272,7 @@ static const NSTimeInterval kMenuInitialClickThreshold = .3f;
 }
 
 - (void) scrollWheel: (NSEvent *) event {
-    [self scrollBy: -[event deltaY] * _cellSize.height];
+    [self scrollBy: -[event deltaY] * _cellSize.height * 3];
 }
 
 static NSRect boundsToTitleAreaRect(NSRect rect) {
@@ -486,27 +486,21 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
  * item Returns a usable index if the point is on a selectable item
  */
 - (NSInteger) itemIndexForPoint: (NSPoint) point {
-    NSInteger result;
     NSArray *items = [self visibleItemArray];
-    int i, count = [items count];
-
+    NSInteger low = 0, high = [items count];
     point.y -= 2;
-
-    if (point.y < 0) {
-        return NSNotFound;
-    }
-
-    for (i = 0; i < count; i++) {
-        if ([[items objectAtIndex: i] isHidden])
-            continue;
-
-        NSRect itemRect = [self rectForItemAtIndex: i];
-        if (NSPointInRect(point, itemRect)) {
-            if (([[items objectAtIndex: i] isEnabled] == NO) ||
-                ([[items objectAtIndex: i] isSeparatorItem])) {
-                return -1;
-            }
-            return i;
+    while (low < high) {
+        NSInteger middle = low + (high - low) / 2;
+        NSRect rect = [self rectForItemAtIndex: middle];
+        if (point.y < NSMinY(rect))
+            high = middle;
+        else if (point.y >= NSMaxY(rect))
+            low = middle + 1;
+        else {
+            NSMenuItem *item = [items objectAtIndex: middle];
+            if (!NSPointInRect(point, rect))
+                return NSNotFound;
+            return [item isEnabled] && ![item isSeparatorItem] ? middle : -1;
         }
     }
     return NSNotFound;
