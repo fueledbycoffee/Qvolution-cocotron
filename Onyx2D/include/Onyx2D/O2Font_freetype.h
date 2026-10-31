@@ -24,6 +24,8 @@
 
 @interface O2Font_freetype : O2Font {
     FT_Face _face;
+    NSString *_postScriptName;
+    NSString *_fullName;
     FT_Encoding _ftEncoding;
     O2Encoding *_macRomanEncoding;
     O2Encoding *_macExpertEncoding;

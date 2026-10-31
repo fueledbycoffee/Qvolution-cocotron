@@ -18,7 +18,7 @@ int main(void)
         CTFontRef ctFont = CTFontCreateWithName(CFSTR("DejaVu Sans"), 18, NULL);
         NSFont *asFont = (NSFont *)ctFont;
         expect([asFont isKindOfClass:[NSFont class]], @"CTFontCreateWithName returns an NSFont");
-        expect(asFont.pointSize == 18 && [asFont.fontName isEqual:@"DejaVu Sans"], @"it answers NSFont's API");
+        expect(asFont.pointSize == 18 && [asFont.fontName isEqual:@"DejaVuSans"], @"it answers NSFont's API");
         expect(asFont.ascender == CTFontGetAscent(ctFont) && asFont.descender == -CTFontGetDescent(ctFont),
                @"NSFont and CTFont metrics agree");
 
