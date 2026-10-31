@@ -3015,7 +3015,7 @@ static NSTextView *s_targetTextView = nil;
         // converted by the sender
         [_textStorage beginEditing];
 
-        while (nextCharIndex <= maxCharIndex) {
+        while (nextCharIndex < maxCharIndex) {
             NSRange effectiveRange = NSMakeRange(0, 0);
 
             NSFont *font = [_textStorage attribute: NSFontAttributeName
