@@ -35,6 +35,7 @@ typedef NSString *NSDeviceDescriptionKey;
 }
 
 @property(readonly) NSWindowDepth depth;
+@property(readonly, copy) NSString *localizedName;
 @property(readonly, retain) NSColorSpace *colorSpace;
 @property(readonly, copy) NSDictionary<NSDeviceDescriptionKey, id> *deviceDescription;
 

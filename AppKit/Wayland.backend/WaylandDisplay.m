@@ -34,6 +34,7 @@
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSCursor.h>
 #import <AppKit/NSScreen.h>
+#import <CoreFoundation/CFString.h>
 #import <AppKit/NSWindow.h>
 #import <AppKit/NSMenuWindow.h>
 #import <AppKit/NSMenuView.h>
@@ -50,10 +51,13 @@
 @interface WaylandScreen : NSScreen {
 @public
     CGFloat _waylandScale;
+    NSString *_waylandName;
 }
 @end
 @implementation WaylandScreen
 - (CGFloat) backingScaleFactor { return _waylandScale; }
+- (NSString *) localizedName { return _waylandName ?: [super localizedName]; }
+- (void) dealloc { [_waylandName release]; [super dealloc]; }
 @end
 
 // Mode pixels are untransformed. Publish v2 properties together at wl_output.done.
@@ -74,14 +78,52 @@ typedef struct {
     WaylandLogicalOutputState _logicalCurrent, _logicalPending;
     NSArray *_modes;
     NSMutableArray *_pendingModes;
+    NSString *_currentMake, *_currentModel, *_pendingMake, *_pendingModel;
+    NSString *_currentName, *_currentDescription, *_pendingName, *_pendingDescription;
 }
 @end
 
+// Wire strings belong to libwayland only during dispatch. Preserve an immutable
+// copy immediately; never let a later event buffer mutate pending/current names.
+static void WaylandCopyOutputText(NSString **destination, const char *text) {
+    // CF's checked decoder returns NULL for invalid UTF8. Avoid the existing
+    // Foundation initializer path that assumes decoding always succeeded.
+    NSString *copy = text ? (NSString *)CFStringCreateWithCString(
+            kCFAllocatorDefault,text,kCFStringEncodingUTF8) : nil;
+    NSString *trimmed = [[copy stringByTrimmingCharactersInSet:
+            [NSCharacterSet whitespaceAndNewlineCharacterSet]] copy];
+    [copy release];
+    [*destination release];
+    *destination = trimmed;
+}
+
 @implementation WaylandOutput
+
+- (void) publishLogicalText {
+    [_currentName release]; _currentName = [_pendingName copy];
+    [_currentDescription release]; _currentDescription = [_pendingDescription copy];
+}
+
+- (NSString *) displayName {
+    // These are compositor descriptions, not independently verified physical
+    // identities. Selection order is project policy, not observed Mac behavior.
+    if ([_currentDescription length]) return _currentDescription;
+    if ([_currentMake length] && [_currentModel length]) {
+        if ([_currentMake isEqualToString:_currentModel]) return _currentModel;
+        return [NSString stringWithFormat:@"%@ %@",_currentMake,_currentModel];
+    }
+    if ([_currentModel length]) return _currentModel;
+    if ([_currentMake length]) return _currentMake;
+    return [_currentName length] ? _currentName : nil;
+}
 
 - (void) dealloc {
     [_modes release];
     [_pendingModes release];
+    [_currentMake release]; [_currentModel release];
+    [_pendingMake release]; [_pendingModel release];
+    [_currentName release]; [_currentDescription release];
+    [_pendingName release]; [_pendingDescription release];
     [super dealloc];
 }
 
@@ -635,9 +677,16 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
             output->_logicalPending.hasSize = YES;
         }
         break;
+    case WP_LOGICAL_OUTPUT_EV_NAME:
+        WaylandCopyOutputText(&output->_pendingName,args[0].s);
+        break;
+    case WP_LOGICAL_OUTPUT_EV_DESCRIPTION:
+        WaylandCopyOutputText(&output->_pendingDescription,args[0].s);
+        break;
     case WP_LOGICAL_OUTPUT_EV_DONE:
         if (output->_logicalVersion < 3) {
             output->_logicalCurrent = output->_logicalPending;
+            [output publishLogicalText];
             [self invalidateScreens];
         }
         break;
@@ -739,8 +788,12 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
 - (void) publishOutput: (WaylandOutput *) output {
     output->_current = output->_pending;
-    if (output->_logicalVersion >= 3)
+    [output->_currentMake release]; output->_currentMake = [output->_pendingMake copy];
+    [output->_currentModel release]; output->_currentModel = [output->_pendingModel copy];
+    if (output->_logicalVersion >= 3) {
         output->_logicalCurrent = output->_logicalPending;
+        [output publishLogicalText];
+    }
     [output->_modes release];
     output->_modes = [output->_pendingModes copy];
     [self invalidateScreens];
@@ -758,6 +811,8 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 {
     switch (opcode) {
     case WP_OUTPUT_EV_GEOMETRY:
+        WaylandCopyOutputText(&output->_pendingMake,args[5].s);
+        WaylandCopyOutputText(&output->_pendingModel,args[6].s);
         // Geometry's transform is its eighth argument; dispatch avoids native
         // variadic/listener ABI differences. Ignore unknown enum values.
         if (args[7].i >= 0 && args[7].i <= 7)
@@ -1865,6 +1920,7 @@ static NSUInteger modifierDeviceMask(int code) {
         WaylandScreen *screen = [[[WaylandScreen alloc] initWithFrame: frame
                                                visibleFrame: frame] autorelease];
         screen->_waylandScale = output->_current.scale;
+        screen->_waylandName = [[output displayName] copy];
         [screen setCgDirectDisplayID: [screens count] + 1];
         [screens addObject: screen];
         x += frame.size.width;

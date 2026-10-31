@@ -53,6 +53,12 @@ NSNotificationName const NSScreenColorSpaceDidChangeNotification = @"NSScreenCol
     return [[NSDisplay currentDisplay] screens];
 }
 
+- (NSString *) localizedName {
+    // Project fallback for backends without compositor-provided metadata. This
+    // identifies the screen without inventing a physical manufacturer/model.
+    return [NSString stringWithFormat: @"Display %u", [self cgDirectDisplayID]];
+}
+
 - (NSWindowDepth) depth {
     return _depth;
 }
