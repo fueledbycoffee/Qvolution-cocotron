@@ -24,6 +24,7 @@
 
 @interface O2Font_freetype : O2Font {
     FT_Face _face;
+    FT_Long _styleFlags;
     NSString *_postScriptName;
     NSString *_fullName;
     FT_Encoding _ftEncoding;
@@ -39,6 +40,8 @@
 - (FT_Face) face;
 
 FT_Face O2FontFreeTypeFace(O2Font_freetype *self);
+FT_Long O2FontFreeTypeStyleFlags(O2Font_freetype *self);
+BOOL O2FontGetFaceStyleFlags(FT_Face face, FT_Long *flags);
 
 FT_Library O2FontSharedFreeTypeLibrary();
 FcConfig *O2FontSharedFontConfig();
