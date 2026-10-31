@@ -290,7 +290,7 @@ static const CGFloat kTitleBarHeight = 28.0;
 
     if ([[[self window] class]
                 hasMainMenuForStyleMask: [[self window] styleMask]]) {
-        if (![[self window] hasMainMenu])
+        if (![[self window] hasMainMenu] || [menuView isHidden])
             contentFrame.size.height += [NSMainMenuView menuHeight];
     }
 
