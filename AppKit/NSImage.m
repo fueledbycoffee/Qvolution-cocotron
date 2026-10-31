@@ -27,6 +27,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSImage.h>
 #import <AppKit/NSAppearance.h>
 #import "NSImageDrawingCache.h"
+#import "NSImageCoding.h"
 #import <AppKit/NSImageRep.h>
 #import <AppKit/NSPDFImageRep.h>
 #import <AppKit/NSPasteboard.h>
@@ -464,12 +465,78 @@ NSImageName const NSImageNameTouchBarVolumeUpTemplate =
     return image;
 }
 
+static void QVImageValidateRecord(NSDictionary *record, NSString *exception) {
+    QVImageCodingRequire([record isKindOfClass:[NSDictionary class]]&&[[record objectForKey:@"tag"]isEqual:@"QvolutionNSImage"]&&QVImageCodingInteger([record objectForKey:@"version"],INT_MAX,exception)==1,exception,@"Unknown image archive version");
+    QVImageCodingSize([record objectForKey:@"size"],exception);
+    NSArray *flags=QVImageCodingArray([record objectForKey:@"flags"],9,exception);
+    for(id value in flags)QVImageCodingInteger(value,1,exception);
+    QVImageCodingInteger([record objectForKey:@"customAlignment"],1,exception);
+    QVImageCodingInteger([record objectForKey:@"cacheMode"],NSImageCacheNever,exception);
+    QVImageCodingInteger([record objectForKey:@"resizingMode"],NSImageResizingModeStretch,exception);
+    for(NSString *key in @[@"alignment",@"insets"]){NSArray *values=QVImageCodingArray([record objectForKey:key],4,exception);for(id value in values)QVImageCodingFloat(value,exception);}
+    for(NSString *key in @[@"name",@"accessibility"]){id value=[record objectForKey:key];QVImageCodingRequire(!value||[value isKindOfClass:[NSString class]],exception,@"Invalid image archive string");}
+    QVImageCodingRequire([[record objectForKey:@"representations"]isKindOfClass:[NSArray class]],exception,@"Missing image archive representations");
+}
+
 - (void) encodeWithCoder: (NSCoder *) coder {
-    NSUnimplementedMethod();
+    NSString *exception=NSInvalidArchiveOperationException;
+    QVImageCodingRequire([self class]==[NSImage class]&&!_delegate&&!_backgroundColor&&!_symbolConfiguration&&!_systemSymbolName,exception,@"Unsupported image archive state");
+    NSMutableArray *representations=QVImageCodingAllocated([NSMutableArray array],@"Cannot allocate image archive representations");
+    // Preflight every representation before writing the shared object graph.
+    for(NSImageRep *rep in _representations){
+        QVImageCodingRequire([rep class]==[NSBitmapImageRep class],exception,@"Unsupported image archive representation");
+        QVImageCodingRequire([coder allowsKeyedCoding]||[coder versionForClassName:@"NSImageRep"]<17,exception,@"Unkeyed project bitmap coding requires NSImageRep archive version below17");
+        [(NSBitmapImageRep *)rep _qvolutionBitmapRecord];
+        [representations addObject:rep];
+    }
+    NSMutableDictionary *record=[NSMutableDictionary dictionaryWithDictionary:@{@"tag":@"QvolutionNSImage",@"version":@1,@"representations":representations,
+        @"size":QVImageCodingSizeRecord(_size,exception),@"flags":@[@(_isFlipped!=NO),@(_isTemplate!=NO),@(_scalesWhenResized!=NO),@(_matchesOnMultipleResolution!=NO),@(_usesEPSOnResolutionMismatch!=NO),@(_prefersColorMatch!=NO),@(_isCachedSeparately!=NO),@(_cacheDepthMatchesImageDepth!=NO),@(_isDataRetained!=NO)],
+        @"customAlignment":@(_hasCustomAlignmentRect!=NO),@"alignment":@[@(_alignmentRect.origin.x),@(_alignmentRect.origin.y),@(_alignmentRect.size.width),@(_alignmentRect.size.height)],
+        @"insets":@[@(_capInsets.top),@(_capInsets.left),@(_capInsets.bottom),@(_capInsets.right)],@"cacheMode":@(_cacheMode),@"resizingMode":@(_resizingMode)}];
+    QVImageCodingAllocated(record,@"Cannot allocate image archive record");
+    if(_name)[record setObject:_name forKey:@"name"];if(_accessibilityDescription)[record setObject:_accessibilityDescription forKey:@"accessibility"];
+    QVImageValidateRecord(record,exception);
+    if([coder allowsKeyedCoding])[coder encodeObject:record forKey:@"QvolutionNSImageArchive"];
+    else[coder encodeObject:record];
+}
+
+- (id)_qvolutionInitWithRecord:(NSDictionary *)record {
+    NSMutableArray *representations=nil;
+    @try {
+        QVImageCodingRequire([self class]==[NSImage class],NSInvalidUnarchiveOperationException,@"Unsupported decoded image subclass");
+        QVImageValidateRecord(record,NSInvalidUnarchiveOperationException);
+        for(id rep in [record objectForKey:@"representations"]){
+            QVImageCodingRequire([rep class]==[NSBitmapImageRep class],NSInvalidUnarchiveOperationException,@"Unsupported decoded image representation");
+            [(NSBitmapImageRep *)rep _qvolutionValidateBitmapState:NSInvalidUnarchiveOperationException providerData:NULL];
+        }
+        representations=QVImageCodingAllocated([[record objectForKey:@"representations"]mutableCopy],@"Cannot own decoded image representations");
+        self=[self initWithSize:QVImageCodingSize([record objectForKey:@"size"],NSInvalidUnarchiveOperationException)];
+        QVImageCodingRequire(self!=nil,NSInvalidUnarchiveOperationException,@"Cannot allocate decoded image");
+        [_representations release];_representations=representations;representations=nil;
+        _name=[[record objectForKey:@"name"]copy];_accessibilityDescription=[[record objectForKey:@"accessibility"]copy];
+        if([record objectForKey:@"name"])QVImageCodingAllocated(_name,@"Cannot copy decoded image name");
+        if([record objectForKey:@"accessibility"])QVImageCodingAllocated(_accessibilityDescription,@"Cannot copy decoded image accessibility description");
+        NSArray *flags=[record objectForKey:@"flags"];
+        BOOL *fields[]={&_isFlipped,&_isTemplate,&_scalesWhenResized,&_matchesOnMultipleResolution,&_usesEPSOnResolutionMismatch,&_prefersColorMatch,&_isCachedSeparately,&_cacheDepthMatchesImageDepth,&_isDataRetained};
+        for(NSUInteger i=0;i<sizeof(fields)/sizeof(fields[0]);i++)*fields[i]=[[flags objectAtIndex:i]boolValue];
+        NSArray *rect=[record objectForKey:@"alignment"],*insets=[record objectForKey:@"insets"];
+        _alignmentRect=NSMakeRect([[rect objectAtIndex:0]doubleValue],[[rect objectAtIndex:1]doubleValue],[[rect objectAtIndex:2]doubleValue],[[rect objectAtIndex:3]doubleValue]);
+        _hasCustomAlignmentRect=[[record objectForKey:@"customAlignment"]boolValue];
+        _capInsets=NSEdgeInsetsMake([[insets objectAtIndex:0]doubleValue],[[insets objectAtIndex:1]doubleValue],[[insets objectAtIndex:2]doubleValue],[[insets objectAtIndex:3]doubleValue]);
+        _cacheMode=[[record objectForKey:@"cacheMode"]unsignedIntegerValue];_resizingMode=[[record objectForKey:@"resizingMode"]unsignedIntegerValue];
+        _cacheIsValid=NO;
+    } @catch(NSException *error) { [representations release];[self release];@throw; }
+    return self;
 }
 
 - initWithCoder: (NSCoder *) coder {
     if ([coder allowsKeyedCoding]) {
+        if([coder containsValueForKey:@"QvolutionNSImageArchive"]) {
+            id record=nil;
+            @try { record=[coder decodeObjectForKey:@"QvolutionNSImageArchive"]; }
+            @catch(NSException *error) { [self release];@throw; }
+            return [self _qvolutionInitWithRecord:record];
+        }
         NSKeyedUnarchiver *keyed = (NSKeyedUnarchiver *) coder;
         NSUInteger length;
         const unsigned char *tiff =
@@ -496,9 +563,13 @@ NSImageName const NSImageNameTouchBarVolumeUpTemplate =
         [_representations addObject: rep];
     } else {
         NSInteger version = [coder versionForClassName: @"NSImage"];
+        id first=nil;
+        @try { first=[coder decodeObject]; }
+        @catch(NSException *error) { [self release];@throw; }
+        if([first isKindOfClass:[NSDictionary class]]) return [self _qvolutionInitWithRecord:first];
 
         if (version >= 17) {
-            _name = [[coder decodeObject] retain];
+            _name = [first retain];
 
             NSUnarchiver *unarchiver = (NSUnarchiver *)coder;
 

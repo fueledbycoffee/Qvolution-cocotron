@@ -73,7 +73,7 @@ APPKIT_EXPORT NSBitmapImageRepPropertyKey NSImageLoopCount;
 APPKIT_EXPORT NSBitmapImageRepPropertyKey NSImageCurrentFrameDuration;
 APPKIT_EXPORT NSBitmapImageRepPropertyKey NSImageCurrentFrame;
 
-@interface NSBitmapImageRep : NSImageRep {
+@interface NSBitmapImageRep : NSImageRep <NSCoding> {
     int _samplesPerPixel;
     int _bitsPerPixel;
     int _bytesPerRow;

@@ -18,6 +18,10 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <AppKit/NSBitmapImageRep-Private.h>
+#import "NSImageCoding.h"
+#ifdef DARLING
+#import <Onyx2D/O2Image.h>
+#endif
 #import <AppKit/NSColor.h>
 #import <AppKit/NSGraphicsContextFunctions.h>
 #import <AppKit/NSPasteboard.h>
@@ -356,8 +360,22 @@ NSBitmapImageRepPropertyKey NSImageCurrentFrame = @"NSImageCurrentFrame";
     return [self initWithData: data];
 }
 
+- (void)encodeWithCoder:(NSCoder *)coder {
+    // The preserved legacy >=17 reader expects a DataObject, not this record.
+    QVImageCodingRequire([coder allowsKeyedCoding]||[coder versionForClassName:@"NSImageRep"]<17,NSInvalidArchiveOperationException,@"Unkeyed project bitmap coding requires NSImageRep archive version below17");
+    NSDictionary *record=[self _qvolutionBitmapRecord];
+    if([coder allowsKeyedCoding])[coder encodeObject:record forKey:@"QvolutionNSBitmapImageRepArchive"];
+    else[coder encodeObject:record];
+}
+
 - (instancetype) initWithCoder:(NSCoder *) coder {
     if ([coder allowsKeyedCoding]) {
+        if([coder containsValueForKey:@"QvolutionNSBitmapImageRepArchive"]) {
+            id record=nil;
+            @try { record=[coder decodeObjectForKey:@"QvolutionNSBitmapImageRepArchive"]; }
+            @catch(NSException *error){[self release];@throw;}
+            return [self _qvolutionInitWithBitmapRecord:record];
+        }
         [NSException raise: NSInvalidArgumentException
                     format: @"-[%@ %s] is not implemented for coder %@",
                             [self class], sel_getName(_cmd), coder];
@@ -369,10 +387,10 @@ NSBitmapImageRepPropertyKey NSImageCurrentFrame = @"NSImageCurrentFrame";
             NSData *data = [coder decodeDataObject];
             return [self initWithData: data];
         } else {
-            [NSException raise: NSInvalidArgumentException
-                    format: @"-[%@ %s] is not implemented for coder %@",
-                            [self class], sel_getName(_cmd), coder];
-            return nil;
+            id record=nil;
+            @try { record=[coder decodeObject]; }
+            @catch(NSException *error){[self release];@throw;}
+            return [self _qvolutionInitWithBitmapRecord:record];
         }
     }
 }
@@ -948,6 +966,169 @@ NSBitmapImageRepPropertyKey NSImageCurrentFrame = @"NSImageCurrentFrame";
 - (NSBitmapImageRep *) bitmapImageRepByRetaggingWithColorSpace: (NSColorSpace *) newSpace {
     printf("STUB %s\n", __PRETTY_FUNCTION__);
     return nil;
+}
+
+
+// Validate without recursively serializing or copying children: Foundation's
+// object graph must preserve their identity and mutable classes.
+static void QVImageValidateMetadata(id root, NSString *exception) {
+    if (!root) return;
+    QVImageCodingRequire([root isKindOfClass:[NSDictionary class]],exception,@"Expected bitmap metadata dictionary");
+    NSMutableArray *nodes=[NSMutableArray arrayWithObject:root], *exits=[NSMutableArray arrayWithObject:@NO];
+    NSMutableSet *active=[NSMutableSet set], *visited=[NSMutableSet set];
+    QVImageCodingAllocated(nodes,@"Cannot allocate bitmap metadata traversal");QVImageCodingAllocated(exits,@"Cannot allocate bitmap metadata traversal");
+    QVImageCodingAllocated(active,@"Cannot allocate bitmap metadata cycle guard");QVImageCodingAllocated(visited,@"Cannot allocate bitmap metadata validation");
+    while ([nodes count]) {
+        id node=[[[nodes lastObject]retain]autorelease];BOOL exit=[[exits lastObject]boolValue];
+        [nodes removeLastObject];[exits removeLastObject];
+        NSValue *identity=[NSValue valueWithPointer:node];
+        if ([visited containsObject:identity]) continue;
+        BOOL dictionary=[node isKindOfClass:[NSDictionary class]], array=[node isKindOfClass:[NSArray class]];
+        if (!dictionary&&!array) {
+            BOOL leaf=[node isKindOfClass:[NSString class]]||[node isKindOfClass:[NSData class]]||[node isKindOfClass:[NSNumber class]]||[node isKindOfClass:[NSDate class]];
+            QVImageCodingRequire(leaf&&[NSPropertyListSerialization propertyList:node isValidForFormat:NSPropertyListBinaryFormat_v1_0],exception,@"Unsupported bitmap metadata value");
+            [visited addObject:identity];
+        } else if (!exit) {
+            QVImageCodingRequire(![active containsObject:identity],exception,@"Cyclic bitmap metadata");
+            [active addObject:identity];[nodes addObject:node];[exits addObject:@YES];
+            for (id key in node) {
+                if (dictionary) QVImageCodingRequire([key isKindOfClass:[NSString class]],exception,@"Non-string bitmap metadata key");
+                [nodes addObject:dictionary?[node objectForKey:key]:key];[exits addObject:@NO];
+            }
+        } else {
+            [active removeObject:identity];[visited addObject:identity];
+        }
+    }
+}
+
+static void QVImageValidateBitmapRecord(NSDictionary *record, NSString *exception) {
+    QVImageCodingRequire([record isKindOfClass:[NSDictionary class]]&&[[record objectForKey:@"tag"]isEqual:@"QvolutionBitmap"]&&QVImageCodingInteger([record objectForKey:@"version"],INT_MAX,exception)==1,exception,@"Unknown bitmap archive version");
+    NSUInteger width=QVImageCodingInteger([record objectForKey:@"width"],INT_MAX,exception),height=QVImageCodingInteger([record objectForKey:@"height"],INT_MAX,exception);
+    NSUInteger samples=QVImageCodingInteger([record objectForKey:@"samples"],4,exception),bits=QVImageCodingInteger([record objectForKey:@"bits"],32,exception),stride=QVImageCodingInteger([record objectForKey:@"stride"],INT_MAX,exception);
+    NSUInteger format=QVImageCodingInteger([record objectForKey:@"format"],NSAlphaFirstBitmapFormat|NSAlphaNonpremultipliedBitmapFormat,exception);
+    BOOL alpha=QVImageCodingInteger([record objectForKey:@"alpha"],1,exception);
+    QVImageCodingInteger([record objectForKey:@"opaque"],1,exception);
+    QVImageCodingInteger([record objectForKey:@"bytesPerPlane"],INT_MAX,exception);
+    NSString *space=[record objectForKey:@"colorSpace"], *storage=[record objectForKey:@"storage"];
+    QVImageCodingRequire([space isKindOfClass:[NSString class]]&&([space isEqual:NSDeviceRGBColorSpace]||[space isEqual:NSCalibratedRGBColorSpace]),exception,@"Unsupported bitmap archive color space");
+    QVImageCodingSize([record objectForKey:@"size"],exception);
+    QVImageCodingRequire(QVImagePackedRGBExtent(width,height,samples,bits,stride,format,alpha),exception,@"Invalid packed8 RGB bitmap archive extent");
+    BOOL planes=[storage isEqual:@"plane"]||[storage isEqual:@"both"], cg=[storage isEqual:@"cg"]||[storage isEqual:@"both"];
+    QVImageCodingRequire(planes||cg,exception,@"Unknown bitmap archive storage");
+    if (planes) {
+        NSData *data=[record objectForKey:@"planeData"];
+        QVImageCodingRequire([data isKindOfClass:[NSData class]]&&[data length]==stride*height,exception,@"Truncated bitmap archive plane");
+    }
+    if (cg) {
+        NSData *data=[record objectForKey:@"cgData"];
+        QVImageCodingRequire([data isKindOfClass:[NSData class]]&&[data length]>=(height-1)*stride+width*(bits/8),exception,@"Truncated CG bitmap archive bytes");
+        NSUInteger info=QVImageCodingInteger([record objectForKey:@"cgInfo"],UINT_MAX,exception);
+        QVImageCodingRequire(QVImageCGBitmapLayout(bits,alpha,format,info),exception,@"Unsupported CG bitmap archive layout");
+        QVImageCodingInteger([record objectForKey:@"cgInterpolate"],1,exception);
+        QVImageCodingInteger([record objectForKey:@"cgIntent"],kCGRenderingIntentPerceptual,exception);
+        id name=[record objectForKey:@"cgColorSpace"];
+        QVImageCodingRequire(!name||[name isKindOfClass:[NSString class]],exception,@"Invalid CG bitmap archive color-space name");
+    }
+    QVImageValidateMetadata([record objectForKey:@"properties"],exception);
+}
+
+- (void)_qvolutionValidateBitmapState:(NSString *)exception providerData:(CFDataRef *)providerData {
+    if(providerData)*providerData=NULL;
+    QVImageCodingRequire([self class]==[NSBitmapImageRep class]&&!_isPlanar&&_bitsPerSample==8,exception,@"Unsupported bitmap archive representation");
+    QVImageCodingRequire(QVImagePackedRGBExtent(_pixelsWide,_pixelsHigh,_samplesPerPixel,_bitsPerPixel,_bytesPerRow,_bitmapFormat,_hasAlpha!=NO)&&_bytesPerPlane>=0,exception,@"Invalid packed8 bitmap state");
+    QVImageCodingRequire([_colorSpaceName isKindOfClass:[NSString class]]&&([_colorSpaceName isEqual:NSDeviceRGBColorSpace]||[_colorSpaceName isEqual:NSCalibratedRGBColorSpace])&&QVImageCodingValidSize(_size),exception,@"Unsupported bitmap geometry or color space");
+    QVImageCodingRequire(_bitmapPlanes||_cgImage,exception,@"Missing bitmap archive storage");
+    if(_bitmapPlanes)QVImageCodingRequire(_bitmapPlanes[0]!=NULL,exception,@"Missing bitmap archive plane");
+    CFDataRef bytes=NULL;
+    @try {
+        if(_cgImage){
+#ifdef DARLING
+            QVImageCodingRequire(!O2ImageGetMask((O2ImageRef)_cgImage),exception,@"Unsupported masked CG bitmap archive");
+#else
+            QVImageCodingRequire(NO,exception,@"CG-backed archive requires lossless mask-state inspection");
+#endif
+            QVImageCodingRequire(CGImageGetWidth(_cgImage)==_pixelsWide&&CGImageGetHeight(_cgImage)==_pixelsHigh&&CGImageGetBitsPerComponent(_cgImage)==8&&
+                CGImageGetBitsPerPixel(_cgImage)==_bitsPerPixel&&CGImageGetBytesPerRow(_cgImage)==_bytesPerRow&&CGColorSpaceGetModel(CGImageGetColorSpace(_cgImage))==kCGColorSpaceModelRGB&&
+                !CGImageIsMask(_cgImage)&&!CGImageGetDecode(_cgImage)&&QVImageCGBitmapLayout(_bitsPerPixel,_hasAlpha!=NO,_bitmapFormat,CGImageGetBitmapInfo(_cgImage)),exception,@"Unsupported CG-backed bitmap state");
+            QVImageCodingRequire(CGImageGetRenderingIntent(_cgImage)>=kCGRenderingIntentDefault&&CGImageGetRenderingIntent(_cgImage)<=kCGRenderingIntentPerceptual,exception,@"Invalid CG bitmap rendering intent");
+            CFStringRef name=CGColorSpaceGetName(CGImageGetColorSpace(_cgImage));
+            QVImageCodingRequire(!name||[(id)name isKindOfClass:[NSString class]],exception,@"Invalid CG bitmap color-space name");
+            bytes=CGDataProviderCopyData(CGImageGetDataProvider(_cgImage));
+            NSUInteger needed=(NSUInteger)_bytesPerRow*(_pixelsHigh-1)+(NSUInteger)_pixelsWide*(_bitsPerPixel/8);
+            QVImageCodingRequire(bytes&&CFDataGetLength(bytes)>=0&&(NSUInteger)CFDataGetLength(bytes)>=needed,exception,@"Truncated CG bitmap provider");
+        }
+        QVImageValidateMetadata(_properties,exception);
+        if(providerData){*providerData=bytes;bytes=NULL;}
+    } @finally {if(bytes)CFRelease(bytes);}
+}
+
+- (NSDictionary *)_qvolutionBitmapRecord {
+    NSString *exception=NSInvalidArchiveOperationException;CFDataRef provider=NULL;
+    [self _qvolutionValidateBitmapState:exception providerData:&provider];
+    @try {
+        NSMutableDictionary *record=[NSMutableDictionary dictionaryWithDictionary:@{@"tag":@"QvolutionBitmap",@"version":@1,
+            @"width":@(_pixelsWide),@"height":@(_pixelsHigh),@"samples":@(_samplesPerPixel),@"bits":@(_bitsPerPixel),@"stride":@(_bytesPerRow),@"format":@(_bitmapFormat),
+            @"alpha":@(_hasAlpha!=NO),@"opaque":@(_isOpaque!=NO),@"bytesPerPlane":@(_bytesPerPlane),@"size":QVImageCodingSizeRecord(_size,exception),@"colorSpace":_colorSpaceName,
+            @"storage":(_bitmapPlanes?(_cgImage?@"both":@"plane"):@"cg")}];
+        QVImageCodingAllocated(record,@"Cannot allocate bitmap archive record");
+        if(_bitmapPlanes)[record setObject:[NSData dataWithBytes:_bitmapPlanes[0]length:(NSUInteger)_bytesPerRow*_pixelsHigh]forKey:@"planeData"];
+        if(_cgImage){
+            [record setObject:(NSData *)provider forKey:@"cgData"];
+            [record setObject:@(CGImageGetBitmapInfo(_cgImage))forKey:@"cgInfo"];
+            [record setObject:@(CGImageGetShouldInterpolate(_cgImage)!=NO)forKey:@"cgInterpolate"];
+            [record setObject:@(CGImageGetRenderingIntent(_cgImage))forKey:@"cgIntent"];
+            CFStringRef name=CGColorSpaceGetName(CGImageGetColorSpace(_cgImage));if(name)[record setObject:(NSString *)name forKey:@"cgColorSpace"];
+        }
+        if(_properties)[record setObject:QVImageCodingAllocated([[_properties copy]autorelease],@"Cannot snapshot bitmap property dictionary")forKey:@"properties"];
+        QVImageValidateBitmapRecord(record,exception);
+        return QVImageCodingAllocated([[record copy]autorelease],@"Cannot snapshot bitmap archive record");
+    } @finally {if(provider)CFRelease(provider);}
+}
+
+- (id)_qvolutionInitWithBitmapRecord:(NSDictionary *)record {
+    NSString *exception=NSInvalidUnarchiveOperationException;
+    NSBitmapImageRep *rep=self;
+    @try {
+        QVImageCodingRequire([self class]==[NSBitmapImageRep class],exception,@"Unsupported decoded bitmap subclass");
+        QVImageValidateBitmapRecord(record,exception);
+        int width=[[record objectForKey:@"width"]intValue],height=[[record objectForKey:@"height"]intValue],bits=[[record objectForKey:@"bits"]intValue],stride=[[record objectForKey:@"stride"]intValue];
+        NSString *storage=[record objectForKey:@"storage"];
+        if (![storage isEqual:@"cg"]) {
+            NSData *data=[record objectForKey:@"planeData"];
+            rep=[rep initWithBitmapDataPlanes:NULL pixelsWide:width pixelsHigh:height bitsPerSample:8 samplesPerPixel:[[record objectForKey:@"samples"]intValue]
+                hasAlpha:[[record objectForKey:@"alpha"]boolValue] isPlanar:NO colorSpaceName:[record objectForKey:@"colorSpace"] bitmapFormat:[[record objectForKey:@"format"]unsignedIntegerValue] bytesPerRow:stride bitsPerPixel:bits];
+            QVImageCodingAllocated(rep,@"Cannot allocate decoded bitmap plane");
+            QVImageCodingAllocated(rep->_colorSpaceName,@"Cannot copy decoded bitmap color space");
+            memcpy(rep->_bitmapPlanes[0],[data bytes],[data length]);
+        }
+        if (![storage isEqual:@"plane"]) {
+            NSData *data=[record objectForKey:@"cgData"];
+            id name=[record objectForKey:@"cgColorSpace"];
+            CGColorSpaceRef space=name?CGColorSpaceCreateWithName((CFStringRef)name):CGColorSpaceCreateDeviceRGB();
+            CGDataProviderRef provider=NULL;CGImageRef image=NULL;
+            @try {
+                QVImageCodingRequire(space&&CGColorSpaceGetModel(space)==kCGColorSpaceModelRGB,exception,@"Cannot restore CG bitmap color space");
+                NSData *owned=QVImageCodingAllocated([[data copy]autorelease],@"Cannot copy decoded CG provider bytes");
+                QVImageCodingRequire([owned isKindOfClass:[NSData class]]&&[owned length]==[data length],exception,@"Inconsistent decoded CG provider copy");
+                provider=CGDataProviderCreateWithCFData((CFDataRef)owned);
+                QVImageCodingRequire(provider!=NULL,NSMallocException,@"Cannot create decoded CG provider");
+                image=CGImageCreate(width,height,8,bits,stride,space,[[record objectForKey:@"cgInfo"]unsignedIntValue],provider,NULL,[[record objectForKey:@"cgInterpolate"]boolValue],[[record objectForKey:@"cgIntent"]unsignedIntValue]);
+                QVImageCodingRequire(image!=NULL,exception,@"Cannot restore CG bitmap image");
+                if ([storage isEqual:@"both"]) rep->_cgImage=CGImageRetain(image);
+                else rep=[rep initWithCGImage:image];
+            } @finally { if(image)CGImageRelease(image);if(provider)CGDataProviderRelease(provider);if(space)CGColorSpaceRelease(space); }
+            QVImageCodingRequire(rep!=nil,exception,@"Cannot restore CG-backed bitmap representation");
+            [rep->_colorSpaceName release];rep->_colorSpaceName=[[record objectForKey:@"colorSpace"]copy];
+            QVImageCodingAllocated(rep->_colorSpaceName,@"Cannot copy decoded bitmap color space");
+        }
+        rep->_size=QVImageCodingSize([record objectForKey:@"size"],exception);
+        rep->_isOpaque=[[record objectForKey:@"opaque"]boolValue];
+        rep->_bytesPerPlane=[[record objectForKey:@"bytesPerPlane"]intValue];
+        id metadata=[record objectForKey:@"properties"];
+        rep->_properties=[metadata mutableCopy];
+        if(metadata)QVImageCodingAllocated(rep->_properties,@"Cannot copy decoded bitmap metadata");
+    } @catch(NSException *error) { [rep release];@throw; }
+    return rep;
 }
 
 @end
