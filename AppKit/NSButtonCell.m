@@ -1098,7 +1098,8 @@ static void drawRoundedBezel(CGContextRef context, CGRect frame) {
 }
 
 - (void) drawBezelWithFrame: (NSRect) frame inView: (NSView *) controlView {
-    BOOL defaulted = ([[controlView window] defaultButtonCell] == self);
+    BOOL defaulted = ([[controlView window] defaultButtonCell] == self && [[controlView window] isKeyWindow] &&
+        (_bezelStyle == NSRoundedBezelStyle || _bezelStyle == NSRoundRectBezelStyle || ![self isBordered]));
 
     NSRect adjustment =
             [self getControlSizeAdjustment: [controlView isFlipped]];
@@ -1174,7 +1175,9 @@ static void drawRoundedBezel(CGContextRef context, CGRect frame) {
                     drawUnborderedButtonInRect: frame
                                      defaulted: defaulted];
         } else {
-            if (([self highlightsBy] & NSPushInCellMask) &&
+            if (defaulted)
+                [[_controlView graphicsStyle] drawPushButtonNormalInRect:frame defaulted:YES];
+            else if (([self highlightsBy] & NSPushInCellMask) &&
                 [self isHighlighted])
                 [[_controlView graphicsStyle]
                         drawPushButtonPressedInRect: frame];
@@ -1282,7 +1285,8 @@ static NSSize scaledImageSizeInFrameSize(NSSize imageSize, NSSize frameSize,
        borders. There is some duplication of rect calculation which can be split
        out
      */
-    BOOL defaulted = ([[controlView window] defaultButtonCell] == self);
+    BOOL defaulted = ([[controlView window] defaultButtonCell] == self && [[controlView window] isKeyWindow] &&
+        (_bezelStyle == NSRoundedBezelStyle || _bezelStyle == NSRoundRectBezelStyle || ![self isBordered]));
     NSRect adjustment =
             [self getControlSizeAdjustment: [controlView isFlipped]];
     frame.size.width -= adjustment.size.width;
@@ -1300,6 +1304,12 @@ static NSSize scaledImageSizeInFrameSize(NSSize imageSize, NSSize frameSize,
     }
 
     NSAttributedString *title = [self titleForHighlight];
+    if (defaulted && [self isEnabled] && [title length]) {
+        NSMutableAttributedString *accentTitle=[[title mutableCopy] autorelease];
+        [accentTitle addAttribute:NSForegroundColorAttributeName value:[NSColor selectedMenuItemTextColor]
+                           range:NSMakeRange(0,[title length])];
+        title=accentTitle;
+    }
     NSImage *image = [self imageForHighlight];
     BOOL enabled = [self isEnabled] ? YES : ![self imageDimsWhenDisabled];
     BOOL mixed = ([self state] == NSMixedState) ? YES : NO;

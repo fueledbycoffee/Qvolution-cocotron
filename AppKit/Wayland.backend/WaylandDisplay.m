@@ -1,3 +1,4 @@
+#import "X11DesktopSettings.h"
 /* Permission is hereby granted, free of charge, to any person obtaining a copy of
  this software and associated documentation files (the "Software"), to deal in
  the Software without restriction, including without limitation the rights to
@@ -252,6 +253,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 @implementation WaylandDisplay
 
 - (instancetype) init {
+    [X11DesktopSettings sharedSettings];
     // WaylandBackendSelected() is shared with CoreGraphics' Wayland backend (see
     // WaylandLibrary.h): the two frameworks pick a display server independently, and
     // they must not disagree.

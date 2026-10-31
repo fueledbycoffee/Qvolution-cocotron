@@ -829,6 +829,11 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     return _context;
 }
 
+- (void)desktopSettingsDidChange {
+    _decorationsDirty=YES;
+    [_delegate setViewsNeedDisplay:YES];
+}
+
 - (O2Context *) cgContext {
     return [self createCGContextIfNeeded];
 }

@@ -80,6 +80,8 @@ include_directories(
 )
 
 set(AppKit_sources
+	X11.backend/X11DesktopSettings.m
+	X11.backend/X11DesktopSettingsCore.m
 	NSComboBox.m
 	NSComboBoxCell.m
 	NSWindowScripting.m
@@ -586,6 +588,7 @@ add_framework(AppKit
 		CoreGraphics
 		ImageIO
 		# native libraries
+		dbus
 		FreeType
 		fontconfig
 		jpeg png tiff
@@ -678,6 +681,7 @@ add_backend(X11
 		dbus
 )
 pkg_check_modules(DBUS dbus-1)
+target_include_directories(AppKit PRIVATE ${DBUS_INCLUDE_DIRS})
 target_include_directories(X11_backend PRIVATE ${DBUS_INCLUDE_DIRS})
 
 # Wayland backend, selected at run time with DARLING_APPKIT_BACKEND=wayland.
@@ -760,6 +764,7 @@ if (WAYLAND_CLIENT_FOUND AND WAYLAND_CURSOR_FOUND AND XKBCOMMON_FOUND
 	)
 	target_include_directories(Wayland_backend PRIVATE
 		Wayland.backend
+		${DBUS_INCLUDE_DIRS}
 		${CMAKE_SOURCE_DIR}/src/startup/mldr/elfcalls
 		${WAYLAND_CLIENT_INCLUDE_DIRS}
 		${WAYLAND_CURSOR_INCLUDE_DIRS}

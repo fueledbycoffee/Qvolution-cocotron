@@ -223,7 +223,7 @@ BOOL NSTextInspectorKeepsRulerContext(NSTextView *view, NSResponder *proposed) {
     }
 }
 - (void)drawRect:(NSRect)rect {
-    [[NSColor controlColor] setFill]; NSRectFill(rect);
+    [[NSColor windowBackgroundColor] setFill]; NSRectFill(rect);
     [[NSColor controlShadowColor] setFill];
     NSRectFill(NSMakeRect(0,NSHeight([self bounds])-1,NSWidth([self bounds]),1));
 }

@@ -20,6 +20,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSAlert.h>
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSColorPanel.h>
+#import <AppKit/NSColor.h>
 #import <AppKit/NSDisplay.h>
 #import <AppKit/NSDockTile.h>
 #import <AppKit/NSDocumentController.h>
@@ -49,6 +50,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <pthread.h>
 #import <Foundation/NSHashTable.h>
 #import "NSAppearanceInternal.h"
+#import "X11DesktopSettings.h"
 #import <stdatomic.h>
 #include <stdarg.h>
 
@@ -186,13 +188,27 @@ static void applicationAppearanceDidChange(NSAppearance *previous) {
 }
 
 - (NSAppearance *) effectiveAppearance {
-    static NSAppearance *aqua = nil;
-
     if (_appearance != nil)
         return _appearance;
-    if (aqua == nil)
-        aqua = [[NSAppearance appearanceNamed: NSAppearanceNameAqua] retain];
-    return aqua;
+    return [[X11DesktopSettings sharedSettings] systemAppearance];
+}
+
+- (void)_desktopSettingsDidChangeFrom:(NSAppearance *)previous {
+    [self didChangeValueForKey:@"effectiveAppearance"];
+    applicationAppearanceDidChange(previous);
+    for (NSWindow *window in [self windows]) [window _desktopSettingsDidChange];
+    [[NSNotificationCenter defaultCenter] postNotificationName:NSSystemColorsDidChangeNotification object:nil];
+    if (![[previous name] isEqualToString:[[self effectiveAppearance] name]]) {
+        // De facto compatibility convention from the Qvolution theme spec,
+        // not a documented AppKit interface.
+        NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
+        NSMutableDictionary *domain=[NSMutableDictionary dictionaryWithDictionary:[defaults persistentDomainForName:NSGlobalDomain] ?: @{}];
+        if ([[[self effectiveAppearance] name] rangeOfString:@"Dark"].location != NSNotFound)
+            [domain setObject:@"Dark" forKey:@"AppleInterfaceStyle"];
+        else [domain removeObjectForKey:@"AppleInterfaceStyle"];
+        [defaults setPersistentDomain:domain forName:NSGlobalDomain];
+        [[NSDistributedNotificationCenter defaultCenter] postNotificationName:@"AppleInterfaceThemeChangedNotification" object:nil];
+    }
 }
 
 + (NSApplication *) sharedApplication {
