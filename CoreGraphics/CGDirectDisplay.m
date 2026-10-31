@@ -89,58 +89,73 @@ static CGRect globalRectForFrame(NSArray<NSScreen *> *screens, NSRect frame) {
                       frame.size.width, frame.size.height);
 }
 
-CGDirectDisplayID CGMainDisplayID(void) {
-    NSDisplay *display = currentDisplay();
-    if (!display)
-        return 1;
-
-    NSArray<NSScreen *> *screens = [display screens];
-    if ([screens count] == 0)
-        return 1;
-
-    for (NSScreen *screen in screens) {
-        if (!NSIsEmptyRect([screen frame])) {
+static CGDirectDisplayID mainDisplayForScreens(NSArray<NSScreen *> *screens) {
+    for (NSScreen *screen in screens)
+        if (!NSIsEmptyRect([screen frame]))
             return [screen cgDirectDisplayID];
+    return 1;
+}
+
+CGDirectDisplayID CGMainDisplayID(void) {
+    return mainDisplayForScreens([currentDisplay() screens]);
+}
+
+// One owned backend snapshot supplies both online APIs. Unlike the active list,
+// the online set includes reported screens even when their frame is empty.
+// Backends expose no independent connector/power/mirror topology: preserve their
+// existing virtual display1 fallback, rather than inventing extra hardware.
+static NSArray<NSNumber *> *copyOnlineDisplaySnapshot(void) {
+    NSArray<NSScreen *> *screens = [[currentDisplay() screens] copy];
+    NSMutableArray<NSNumber *> *ids = [[NSMutableArray alloc] init];
+    CGDirectDisplayID mainDisplay = mainDisplayForScreens(screens);
+    if (!ids) { [screens release]; return nil; }
+    NSNumber *number;
+    if (mainDisplay != kCGNullDirectDisplay) {
+        number = [[NSNumber alloc] initWithUnsignedInt:mainDisplay];
+        if (!number) { [ids release]; [screens release]; return nil; }
+        [ids addObject:number]; [number release];
+    }
+    for (NSScreen *screen in screens) {
+        CGDirectDisplayID display = [screen cgDirectDisplayID];
+        if (display != mainDisplay) {
+            number = [[NSNumber alloc] initWithUnsignedInt:display];
+            if (!number) { [ids release]; [screens release]; return nil; }
+            [ids addObject:number]; [number release];
         }
     }
-
-    return 1;
+    [screens release];
+    return ids;
 }
 
 CGError CGGetOnlineDisplayList(uint32_t maxDisplays,
                                CGDirectDisplayID *onlineDisplays,
                                uint32_t *displayCount)
 {
-    NSDisplay *display = currentDisplay();
-    if (!display || [[display screens] count] == 0) {
-        *displayCount = 1;
-        if (maxDisplays > 0 && onlineDisplays)
-            onlineDisplays[0] = 1;
-        return kCGErrorSuccess;
-    }
-
-    NSArray<NSScreen *> *screens = [display screens];
-    const CGDirectDisplayID mainDisplay = CGMainDisplayID();
-
-    *displayCount = 0;
-
-    // Main display should be the first returned
-    if (mainDisplay != kCGNullDirectDisplay) {
-        (*displayCount)++;
-        if (maxDisplays > 0 && onlineDisplays)
-            onlineDisplays[0] = mainDisplay;
-    }
-
-    for (NSScreen *screen in screens) {
-        CGDirectDisplayID displayID = [screen cgDirectDisplayID];
-        if (displayID != mainDisplay) {
-            if (*displayCount < maxDisplays && onlineDisplays)
-                onlineDisplays[*displayCount] = displayID;
-            (*displayCount)++;
-        }
-    }
-
+    NSArray<NSNumber *> *snapshot = copyOnlineDisplaySnapshot();
+    if (!snapshot)
+        return kCGErrorFailure;
+    // Preserve the existing caller-visible full-count/truncated-array policy.
+    // The new predicate does not depend on a racy count-then-allocation sequence.
+    *displayCount = (uint32_t)[snapshot count];
+    if (onlineDisplays)
+        for (uint32_t i = 0; i < maxDisplays && i < [snapshot count]; ++i)
+            onlineDisplays[i] = [[snapshot objectAtIndex:i] unsignedIntValue];
+    [snapshot release];
     return kCGErrorSuccess;
+}
+
+boolean_t CGDisplayIsOnline(CGDirectDisplayID display) {
+    if (display == kCGNullDirectDisplay)
+        return false;
+    NSArray<NSNumber *> *snapshot = copyOnlineDisplaySnapshot();
+    boolean_t online = false;
+    for (NSNumber *number in snapshot)
+        if ([number unsignedIntValue] == display) {
+            online = true;
+            break;
+        }
+    [snapshot release];
+    return online;
 }
 
 size_t CGDisplayPixelsHigh(CGDirectDisplayID displayIndex) {
