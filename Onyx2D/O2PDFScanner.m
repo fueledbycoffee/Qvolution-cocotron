@@ -392,8 +392,9 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
 
     *objectp = NULL;
 
-    for (; position < length; position++) {
-        unsigned char code = bytes[position];
+    for (; position <= length; position++) {
+        if (position == length && state != STATE_NAME) break;
+        unsigned char code = position == length ? ' ' : bytes[position];
 
         switch (state) {
 
@@ -639,11 +640,6 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
                 code == '\t' || code == '\0' || code == '%' || code == '(' ||
                 code == ')' || code == '<' || code == '>' || code == ']' ||
                 code == '[' || code == '{' || code == '}' || code == '/') {
-                if (inlineLocation == position)
-                    return debugError(bytes, length, position,
-                                      @"Invalid character in name, code=0x%02X",
-                                      code);
-
                 byteBuffer = O2PDFByteBufferCreate();
                 for (O2PDFInteger i=inlineLocation; i<position; i++) {
                     unsigned char value=bytes[i];
@@ -658,7 +654,7 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
                     }
                     O2PDFByteBufferAppend(byteBuffer,value);
                 }
-                *objectp = [O2PDFObject_Name pdfObjectWithBytes:(const char *)byteBuffer->bytes length:byteBuffer->length];
+                *objectp = [O2PDFObject_Name pdfObjectWithBytes:byteBuffer->length ? (const char *)byteBuffer->bytes : "" length:byteBuffer->length];
                 O2PDFByteBufferFree(byteBuffer);
                 *lastPosition = position;
                 return YES;
