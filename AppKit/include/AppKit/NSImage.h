@@ -316,4 +316,5 @@ APPKIT_EXPORT NSImage *_NSGetThemePartImages(id arg1, ...);
 
 APPKIT_EXPORT NSImageHintKey const NSImageHintInterpolation;
 APPKIT_EXPORT NSImageHintKey const NSImageHintCTM NS_SWIFT_NAME(ctm);
+APPKIT_EXPORT NSImageHintKey const NSImageHintUserInterfaceLayoutDirection;
 APPKIT_EXPORT NSImageHintKey const NSImageHintSymbolScale;

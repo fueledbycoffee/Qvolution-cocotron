@@ -16,6 +16,7 @@ NSString *const NSAccessibilityEnabledAttribute =
 NSString *const NSAccessibilityFocusedAttribute =
         @"NSAccessibilityFocusedAttribute";
 NSString *const NSAccessibilityHelpAttribute = @"NSAccessibilityHelpAttribute";
+NSString *const NSAccessibilityLanguageAttribute = @"AXLanguage";
 NSString *const NSAccessibilityMaxValueAttribute =
         @"NSAccessibilityMaxValueAttribute";
 NSString *const NSAccessibilityMinValueAttribute =
@@ -444,6 +445,7 @@ NSString *const NSAccessibilitySearchFieldSubrole =
         @"NSAccessibilitySearchFieldSubrole";
 NSString *const NSAccessibilitySecureTextFieldSubrole =
         @"NSAccessibilitySecureTextFieldSubrole";
+NSString *const NSAccessibilitySwitchSubrole = @"AXSwitch";
 NSString *const NSAccessibilityStandardWindowSubrole =
         @"NSAccessibilityStandardWindowSubrole";
 NSString *const NSAccessibilitySystemDialogSubrole =

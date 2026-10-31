@@ -136,6 +136,8 @@ NSImageName const NSImageNameGoForwardTemplate = @"NSGoForwardTemplate";
 
 NSImageHintKey const NSImageHintInterpolation = @"NSImageHintInterpolation";
 NSImageHintKey const NSImageHintCTM = @"NSImageHintCTM";
+NSImageHintKey const NSImageHintUserInterfaceLayoutDirection =
+        @"NSImageHintUserInterfaceLayoutDirection";
 
 NSImageName const NSImageNameTouchBarDeleteTemplate =
         @"NSTouchBarDeleteTemplate";
