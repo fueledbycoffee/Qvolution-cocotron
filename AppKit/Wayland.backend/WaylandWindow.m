@@ -18,6 +18,7 @@
 
 #define GL_GLEXT_PROTOTYPES 1
 #import "WaylandWindow.h"
+#import "WaylandClientCapture.h"
 #import <OpenGL/CGLInternal.h>
 #import <OpenGL/glext.h>
 #import <QuartzCore/CAWindowOpenGLContext.h>
@@ -87,6 +88,9 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     _eglCorrupt = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_EGL_TEST_CORRUPT"] isEqualToString:@"1"];
     if (_eglCorrupt && !_eglVerify)
         [NSException raise:NSInvalidArgumentException format:@"EGL test corruption requires verification"];
+    NSString *captureDirectory=[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_CAPTURE_DIR"];
+    _captureRequested=captureDirectory!=nil;
+    if(captureDirectory) _clientCapture=[[WaylandClientCapture alloc] initWithDirectory:captureDirectory];
     _delegate = delegate;
     _level = [delegate level];
     _styleMask = [delegate styleMask];
@@ -116,6 +120,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     [_display release];
     [_deviceDictionary release];
     [_surfaceOutputs release];
+    [_clientCapture release];
     [_title release];
     [super dealloc];
 }
@@ -928,6 +933,9 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 
 - (NSDictionary *) eglPresentationStatistics {
     return @{@"renderer": _eglRequested ? @"egl" : @"shm", @"swaps": @(_eglSwaps),
+             @"captureRequested": @(_captureRequested), @"captureReady": @(_clientCapture!=nil),
+             @"captureError": @(_captureRequested&&!_clientCapture?1:[_clientCapture errorCode]),
+             @"clientPresents": @(_clientPresents), @"captured": @([_clientCapture writtenCount]),
              @"checks": @(_eglChecks), @"uploadedBytes": @(_eglBytes), @"failures": @(_eglFailures),
              @"width": @(_eglWidth), @"height": @(_eglHeight), @"scale120": @(_renderScale120)};
 }
@@ -1020,6 +1028,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
             if (!_frameCallback || CGLFlushDrawable(_eglContext) != kCGLNoError)
                 failure = @"native EGL swap";
             else {
+                ++_clientPresents;
+                [_clientCapture captureSurface:surface opaque:_isOpaque scale120:_renderScale120];
                 ++_eglSwaps; _eglBytes += (uint64_t)width * height * 4;
                 _needsPresent = NO;
                 [_display flush];
@@ -1094,6 +1104,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
                                          WaylandObjectFrameCallback, self);
 
     sendRequest(_surface, WP_SURFACE_COMMIT, 0);
+    ++_clientPresents;
+    [_clientCapture captureSurface:surface opaque:_isOpaque scale120:_renderScale120];
     buffer->busy = YES;
     _needsPresent = NO;
     [_display flush];

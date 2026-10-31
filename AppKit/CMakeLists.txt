@@ -735,6 +735,7 @@ if (WAYLAND_CLIENT_FOUND AND WAYLAND_CURSOR_FOUND AND XKBCOMMON_FOUND
 			Wayland.backend/WaylandFileURLs.m
 			Wayland.backend/WaylandLibrary.m
 			Wayland.backend/WaylandPasteboard.m
+			Wayland.backend/WaylandClientCapture.m
 			Wayland.backend/WaylandWindow.m
 			Wayland.backend/WaylandSubWindow.m
 			${WAYLAND_PROTOCOL_SOURCES}

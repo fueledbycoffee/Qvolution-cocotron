@@ -23,6 +23,7 @@
 #import "WaylandDisplay.h"
 #import "WaylandFullscreen.h"
 
+@class WaylandClientCapture;
 @class NSWindow, O2Context, WaylandSubWindow, CAWindowOpenGLContext;
 struct wl_egl_window;
 
@@ -39,6 +40,9 @@ struct WaylandBuffer {
 // copied into wl_shm buffers.
 @interface WaylandWindow : CGWindow {
     NSWindow *_delegate;
+    WaylandClientCapture *_clientCapture;
+    uint64_t _clientPresents;
+    BOOL _captureRequested;
     WaylandDisplay *_display;
     BOOL _invalidated;
     NSMutableArray *_subwindows; // nonretained pointers; children retain their parent
