@@ -141,13 +141,11 @@
 }
 - (void)changeAlignment:(NSButton *)sender {
     NSRange range=[_textView rangeForUserParagraphAttributeChange];
-    if (![_textView isRichText] || range.location==NSNotFound ||
-        ![_textView shouldChangeTextInRange:range replacementString:nil]) return;
+    if (![_textView isRichText] || range.location==NSNotFound) return;
     [[_textView window] makeFirstResponder:_textView];
     if ([sender tag]==NSLeftTextAlignment) [_textView alignLeft:sender];
     else if ([sender tag]==NSCenterTextAlignment) [_textView alignCenter:sender];
     else [_textView alignRight:sender];
-    [_textView didChangeText];
     [self sync];
 }
 @end

@@ -2846,11 +2846,14 @@ static NSTextView *s_targetTextView = nil;
 - (void) _setAlignment: (NSTextAlignment) alignment range: (NSRange) range {
     NSMutableParagraphStyle *style = nil;
 
-    if ([[self textStorage] length] > 0)
+    if (range.location < [[self textStorage] length])
         style = [[[[self textStorage] attribute: NSParagraphStyleAttributeName
                                         atIndex: range.location
                                  effectiveRange: NULL] mutableCopy]
                 autorelease];
+    else
+        style = [[[[self typingAttributes] objectForKey: NSParagraphStyleAttributeName]
+                mutableCopy] autorelease];
 
     if (style == nil)
         style = [[[NSParagraphStyle defaultParagraphStyle] mutableCopy]
@@ -2858,9 +2861,10 @@ static NSTextView *s_targetTextView = nil;
 
     [style setAlignment: alignment];
 
-    [self _addAttribute: NSParagraphStyleAttributeName
-                  value: style
-                  range: range];
+    if (range.length > 0)
+        [self _addAttribute: NSParagraphStyleAttributeName
+                      value: style
+                      range: range];
 
     // This method is always been called with the selected range - so update the
     // typing attributes with that
@@ -3062,46 +3066,35 @@ static NSTextView *s_targetTextView = nil;
     }
 }
 
-// making changes to textstorage attributes seems to wipe out the selection in
-// this codebase, the setSelectedRange calls shouldn't be neccessary
-- (void) alignCenter: sender {
+- (void) _alignSelectedParagraph: (NSTextAlignment) alignment {
     NSRange range = [self rangeForUserParagraphAttributeChange];
-    if (range.location == NSNotFound) {
+    if (range.location == NSNotFound ||
+        ![self shouldChangeTextInRange: range replacementString: nil])
         return;
-    }
-    [self _setAlignment: NSCenterTextAlignment
-                  range: [self _rangeForSelectedParagraph]];
-    [self setSelectedRange: range];
+
+    NSRange selection = [self selectedRange];
+    [self _setAlignment: alignment range: [self _rangeForSelectedParagraph]];
+    NSDictionary *attributes = [[self typingAttributes] copy];
+    [self setSelectedRange: selection];
+    [self setTypingAttributes: attributes];
+    [attributes release];
+    [self didChangeText];
+}
+
+- (void) alignCenter: sender {
+    [self _alignSelectedParagraph: NSCenterTextAlignment];
 }
 
 - (void) alignLeft: sender {
-    NSRange range = [self rangeForUserParagraphAttributeChange];
-    if (range.location == NSNotFound) {
-        return;
-    }
-    [self _setAlignment: NSLeftTextAlignment
-                  range: [self _rangeForSelectedParagraph]];
-    [self setSelectedRange: range];
+    [self _alignSelectedParagraph: NSLeftTextAlignment];
 }
 
 - (void) alignRight: sender {
-    NSRange range = [self rangeForUserParagraphAttributeChange];
-    if (range.location == NSNotFound) {
-        return;
-    }
-    [self _setAlignment: NSRightTextAlignment
-                  range: [self _rangeForSelectedParagraph]];
-    [self setSelectedRange: range];
+    [self _alignSelectedParagraph: NSRightTextAlignment];
 }
 
 - (void) alignJustified: sender {
-    NSRange range = [self rangeForUserParagraphAttributeChange];
-    if (range.location == NSNotFound) {
-        return;
-    }
-    [self _setAlignment: NSJustifiedTextAlignment
-                  range: [self _rangeForSelectedParagraph]];
-    [self setSelectedRange: range];
+    [self _alignSelectedParagraph: NSJustifiedTextAlignment];
 }
 
 - (void) underline: sender {
