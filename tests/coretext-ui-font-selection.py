@@ -18,6 +18,8 @@ pre='''#include <fontconfig/fontconfig.h>
 #include <assert.h>
 #include <stdio.h>
 typedef int BOOL;
+#define YES 1
+#define NO 0
 static FT_Library library;
 static FcConfig *config;
 static FT_Library O2FontSharedFreeTypeLibrary(void){return library;}
