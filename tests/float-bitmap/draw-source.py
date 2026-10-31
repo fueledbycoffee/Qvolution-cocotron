@@ -18,7 +18,8 @@ src=r'''
 #include <string.h>
 #include <math.h>
 #include <assert.h>
-typedef float O2Float;typedef long NSInteger;
+typedef float O2Float;typedef long NSInteger;typedef bool BOOL;
+#define COVERAGE_MULTIPLIER 256
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define ONYX2D_STATIC static
@@ -49,7 +50,7 @@ static O2Float *O2ImageReadSpan_Af_MASK(O2Surface *s,int x,int y,O2Float *out,in
  for(int i=0;i<n;i++){O2argb32f p;memcpy(&p,s->bytes[y]+16*(x+i),16);out[i]=p.a;}return out;
 }
 '''
-for file,name in [('O2argb32f.m','void O2BlendSpanNormal_ffff('),('O2Context_builtin.m','ONYX2D_STATIC void O2ApplyCoverageAndMaskToSpan_largb32f_PRE('),('O2Context_builtin.m','ONYX2D_STATIC void O2ApplyCoverageToSpan_largb32f_PRE('),('O2Context_builtin.m','O2RasterizeWriteCoverageSpanffff(')]:src+=('static void ' if name=='O2RasterizeWriteCoverageSpanffff(' else '')+function(file,name)+'\n'
+for file,name in [('O2argb32f.m','void O2BlendSpanCopy_ffff('),('O2argb32f.m','void O2BlendSpanNormal_ffff('),('O2Context_builtin.m','ONYX2D_STATIC void O2ApplyCoverageAndMaskToSpan_largb32f_PRE('),('O2Context_builtin.m','ONYX2D_STATIC void O2ApplyCoverageToSpan_largb32f_PRE('),('O2Context_builtin.m','O2RasterizeWriteCoverageSpanffff(')]:src+=('static void ' if name=='O2RasterizeWriteCoverageSpanffff(' else '')+function(file,name)+'\n'
 src+=function('O2Context_builtin.m','void O2ContextWriteGlyphCoverageSpanFloat(')+'\n'
 src+=ft+r'''
 static void init(O2Surface *s,int width,int height,O2argb32f color) {
@@ -84,7 +85,7 @@ int main(void) {
 }
 '''
 out=Path(tempfile.mkdtemp(prefix='onyx-float-draw-'));(out/'draw.c').write_text(src)
-subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(out/'draw.c'),'-lm','-o',str(out/'draw')],check=True)
+subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-parameter','-fsanitize=address,undefined',str(out/'draw.c'),'-lm','-o',str(out/'draw')],check=True)
 subprocess.run([str(out/'draw')],check=True)
 
 shutil.rmtree(out)

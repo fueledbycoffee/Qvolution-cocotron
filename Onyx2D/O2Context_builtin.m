@@ -1152,6 +1152,9 @@ O2RasterizeWriteCoverageSpanffff(O2Surface *surface, O2Surface *mask,
 {
     O2argb32f dst[256], src[256];
     O2Float maskSpan[256];
+    BOOL fullCopy = coverage == COVERAGE_MULTIPLIER && mask == nil &&
+            blendFunction == O2BlendSpanCopy_ffff &&
+            O2SurfaceCanReadWriteARGB8u(surface);
     while (length > 0) {
         int requested = MIN(length, 256);
         int chunk = O2PaintReadSpan_largb32f_PRE(paint, x, y, src, requested);
@@ -1159,6 +1162,8 @@ O2RasterizeWriteCoverageSpanffff(O2Surface *surface, O2Surface *mask,
             return;
         if (chunk < 0)
             chunk = -chunk;
+        else if (fullCopy)
+            O2SurfaceWriteSpan_largb32f_PRE(surface, x, y, src, chunk);
         else {
             O2Image_read_argb32f(surface, x, y, dst, chunk);
             blendFunction(src, dst, chunk);
