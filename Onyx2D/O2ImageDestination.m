@@ -142,6 +142,10 @@ void O2ImageDestinationSetProperties(O2ImageDestinationRef self,
 void O2ImageDestinationAddImage(O2ImageDestinationRef self, O2ImageRef image,
                                 CFDictionaryRef properties)
 {
+    if (self->_type == O2ImageFilePNG && self->_imageCount != 1) {
+        O2PNGEncoderWriteImage(self->_encoder, NULL, NULL);
+        return;
+    }
     self->_imageCount--;
 
     switch (self->_type) {
@@ -187,6 +191,7 @@ void O2ImageDestinationAddImageFromSource(O2ImageDestinationRef self,
 }
 
 bool O2ImageDestinationFinalize(O2ImageDestinationRef self) {
+    bool success = TRUE;
     switch (self->_type) {
 
     case O2ImageFileUnknown:
@@ -212,6 +217,7 @@ bool O2ImageDestinationFinalize(O2ImageDestinationRef self) {
         break;
 
     case O2ImageFilePNG:
+        success = self->_imageCount == 0 && O2PNGEncoderIsComplete(self->_encoder);
         O2PNGEncoderDealloc(self->_encoder);
         self->_encoder = NULL;
         break;
@@ -226,7 +232,7 @@ bool O2ImageDestinationFinalize(O2ImageDestinationRef self) {
         CFRelease(self->_options);
     self->_options = NULL;
 
-    return TRUE;
+    return success;
 }
 
 @end
