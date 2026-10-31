@@ -152,6 +152,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSScrubberLayoutAttributes.h>
 #import <AppKit/NSScrubberArrangedView.h>
 #import <AppKit/NSScrubberItemView.h>
+#import <AppKit/NSScrubberImageItemView.h>
 #import <AppKit/NSSearchField.h>
 #import <AppKit/NSSearchFieldCell.h>
 #import <AppKit/NSSearchToolbarItem.h>

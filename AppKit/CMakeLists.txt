@@ -474,6 +474,7 @@ set(AppKit_sources
 	NSScrubber.m
 	NSScrubberLayoutAttributes.m
 	NSScrubberItemView.m
+	NSScrubberImageItemView.m
 	NSUserInterfaceItemIdentification.m
 )
 
