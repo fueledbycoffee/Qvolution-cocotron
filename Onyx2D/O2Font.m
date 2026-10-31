@@ -54,6 +54,8 @@ static NSArray *_preferredFontNames = nil;
     [_coveredCharSet release];
     if (_advances != NULL)
         NSZoneFree(NULL, _advances);
+    if (_advanceIsValid != NULL)
+        NSZoneFree(NULL, _advanceIsValid);
     if (_MacRomanEncoding != NULL)
         NSZoneFree(NULL, _MacRomanEncoding);
     O2DataProviderRelease(_provider);
@@ -502,6 +504,14 @@ BOOL O2FontGetGlyphAdvances(O2FontRef self, const O2Glyph *glyphs, size_t count,
 
     if (self->_advances == NULL)
         [self fetchAdvances];
+
+    if (self->_advanceIsValid != NULL) {
+        for (i = 0; i < count; i++) {
+            O2Glyph glyph = glyphs[i];
+            if (glyph >= self->_numberOfGlyphs || !self->_advanceIsValid[glyph])
+                return NO;
+        }
+    }
 
     for (i = 0; i < count; i++) {
         O2Glyph glyph = glyphs[i];

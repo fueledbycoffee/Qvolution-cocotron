@@ -508,24 +508,47 @@ NSString *O2FontCopyMetadataFullName(FT_Face face) {
     return [_fullName copy];
 }
 
-static NSInteger *copyUnscaledAdvances(FT_Face face, NSInteger glyphCount) {
-    if (face == NULL || glyphCount <= 0 || (uintmax_t)glyphCount > UINT_MAX ||
+static NSInteger *copyUnscaledAdvances(FT_Face face, NSInteger glyphCount,
+                                       unsigned char **validity) {
+    if (face == NULL || validity == NULL || glyphCount <= 0 ||
+        glyphCount > face->num_glyphs || (uintmax_t)glyphCount > UINT_MAX ||
         (uintmax_t)glyphCount > SIZE_MAX / sizeof(NSInteger)) {
         [NSException raise:NSInternalInconsistencyException
                     format:@"Font advance cache is not representable"];
         return NULL;
     }
+    BOOL rawCID = FT_IS_CID_KEYED(face) && !FT_IS_SFNT(face);
     NSInteger *advances = NSZoneMalloc(NULL, (size_t)glyphCount * sizeof(NSInteger));
-    if (advances == NULL) {
+    unsigned char *valid = rawCID ? NSZoneMalloc(NULL, (size_t)glyphCount) : NULL;
+    if (advances == NULL || (rawCID && valid == NULL)) {
+        NSZoneFree(NULL, advances);
+        NSZoneFree(NULL, valid);
         [NSException raise:NSMallocException format:@"Cannot allocate font advance cache"];
         return NULL;
     }
+    if (valid != NULL)
+        memset(valid, 1, (size_t)glyphCount);
     FT_Fixed batch[256];
     for (FT_UInt first = 0; first < (FT_UInt)glyphCount;) {
         FT_UInt count = MIN(256, (FT_UInt)glyphCount - first);
         FT_Error error = FT_Get_Advances(face, first, count, FT_LOAD_NO_SCALE, batch);
+        if (rawCID && error == FT_Err_Invalid_Argument) {
+            // Raw CID indices may have documented gaps below num_glyphs.
+            for (FT_UInt index = 0; index < count; index++) {
+                error = FT_Get_Advance(face, first + index, FT_LOAD_NO_SCALE,
+                                       &batch[index]);
+                if (error == FT_Err_Invalid_Argument) {
+                    valid[first + index] = 0;
+                    batch[index] = 0;
+                    error = 0;
+                } else if (error != 0) {
+                    break;
+                }
+            }
+        }
         if (error != 0) {
             NSZoneFree(NULL, advances);
+            NSZoneFree(NULL, valid);
             [NSException raise:NSInternalInconsistencyException
                         format:@"FreeType advance lookup failed: %d", error];
             return NULL;
@@ -535,6 +558,7 @@ static NSInteger *copyUnscaledAdvances(FT_Face face, NSInteger glyphCount) {
             advances[first + index] = batch[index] / (FT_IS_SCALABLE(face) ? 1 : 64);
         first += count;
     }
+    *validity = valid;
     return advances;
 }
 
@@ -597,7 +621,7 @@ static NSInteger *copyUnscaledAdvances(FT_Face face, NSInteger glyphCount) {
     if (FT_IS_SCALABLE(face)) {
         @try {
             // Publish immutable metrics before any renderer can share this face.
-            _advances = copyUnscaledAdvances(face, _numberOfGlyphs);
+            _advances = copyUnscaledAdvances(face, _numberOfGlyphs, &_advanceIsValid);
         } @catch (id exception) {
             [self release];
             @throw;
@@ -712,7 +736,7 @@ FT_Face O2FontFreeTypeFace(O2Font_freetype *self) {
 
 - (void) fetchAdvances {
     if (_advances == NULL)
-        _advances = copyUnscaledAdvances(_face, _numberOfGlyphs);
+        _advances = copyUnscaledAdvances(_face, _numberOfGlyphs, &_advanceIsValid);
 }
 
 - (O2Glyph) glyphWithGlyphName: (NSString *) name {

@@ -62,6 +62,7 @@ typedef enum {
     O2Rect _bbox;
     NSInteger _numberOfGlyphs;
     NSInteger *_advances;
+    unsigned char *_advanceIsValid;
     O2Glyph *_MacRomanEncoding;
 }
 
