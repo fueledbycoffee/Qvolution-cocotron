@@ -103,6 +103,10 @@ NSMapTableKeyCallBacks O2PDFOwnedCStringKeyCallBacks = {O2PDFHashCString,
     return YES;
 }
 
+- (void)removeObjectForKey:(const char *)key {
+    NSMapRemove(_table,key);
+}
+
 - (void) setObjectForKey: (const char *) key value: (O2PDFObject *) object {
     char *keyCopy = NSZoneMalloc(NULL, strlen(key) + 1);
 

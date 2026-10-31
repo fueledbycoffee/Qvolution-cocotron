@@ -28,6 +28,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 + (O2PDFDictionary *) pdfDictionary;
 
+- (void)removeObjectForKey:(const char *)key;
+
 - (void) setObjectForKey: (const char *) key value: (O2PDFObject *) object;
 - (void) setBooleanForKey: (const char *) key value: (O2PDFBoolean) value;
 - (void) setIntegerForKey: (const char *) key value: (O2PDFInteger) value;
