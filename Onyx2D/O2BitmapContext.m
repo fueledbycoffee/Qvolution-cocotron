@@ -132,43 +132,10 @@ size_t O2BitmapContextGetBitsPerComponent(O2ContextRef selfX) {
     return O2ImageGetBitsPerComponent(self->_surface);
 }
 
-size_t O2BitmapContextGetBitsPerPixel(O2ContextRef self) {
-    size_t result = O2BitmapContextGetBitsPerComponent(self) *
-                    O2ColorSpaceGetNumberOfComponents(
-                            O2BitmapContextGetColorSpace(self));
+size_t O2BitmapContextGetBitsPerPixel(O2ContextRef selfX) {
+    O2BitmapContextRef self = (O2BitmapContextRef) selfX;
 
-    switch (O2BitmapContextGetAlphaInfo(self)) {
-
-    case kO2ImageAlphaNone:
-        break;
-
-    case kO2ImageAlphaPremultipliedLast:
-        result += O2BitmapContextGetBitsPerComponent(self);
-        break;
-
-    case kO2ImageAlphaPremultipliedFirst:
-        result += O2BitmapContextGetBitsPerComponent(self);
-        break;
-
-    case kO2ImageAlphaLast:
-        result += O2BitmapContextGetBitsPerComponent(self);
-        break;
-
-    case kO2ImageAlphaFirst:
-        result += O2BitmapContextGetBitsPerComponent(self);
-        break;
-
-    case kO2ImageAlphaNoneSkipLast:
-        break;
-
-    case kO2ImageAlphaNoneSkipFirst:
-        break;
-
-    case kO2ImageAlphaOnly:
-        break;
-    }
-
-    return result;
+    return O2ImageGetBitsPerPixel(self->_surface);
 }
 
 size_t O2BitmapContextGetBytesPerRow(O2ContextRef selfX) {
