@@ -2267,7 +2267,7 @@ static BOOL _allowsAutomaticWindowTabbing;
         [self disableFlushWindow];
         [_backgroundView display];
         [self enableFlushWindow];
-        [self flushWindowIfNeeded];
+        [self flushWindow];
     }
 }
 
