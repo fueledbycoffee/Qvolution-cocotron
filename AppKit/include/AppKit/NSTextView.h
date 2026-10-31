@@ -150,6 +150,7 @@ APPKIT_EXPORT NSString *const NSAllRomanInputSourcesLocaleIdentifier;
     BOOL _automaticTextReplacementEnabled;
 
     BOOL _usesInspectorBar;
+    NSView *_textInspectorBar;
     BOOL _usesAdaptiveColorMappingForDarkAppearance;
     BOOL _importsGraphics;
     BOOL _acceptsGlyphInfo;

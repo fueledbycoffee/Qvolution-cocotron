@@ -25,6 +25,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSRaise.h>
 #import <AppKit/NSRulerView.h>
 #import <AppKit/NSScrollView.h>
+#import "NSTextView.subproj/NSTextInspectorBar.h"
 #import <AppKit/NSScroller.h>
 #import <AppKit/NSTableCornerView.h>
 #import <AppKit/NSWindow.h>
@@ -387,13 +388,37 @@ static Class _rulerViewClass = nil;
     return nil;
 }
 
+- (NSView *) _textInspectorBar { return _textInspectorBar; }
+
+- (void) _setTextInspectorBar: (NSView *) view {
+    if (_textInspectorBar == view) return;
+    [view retain];
+    [_textInspectorBar removeFromSuperview];
+    [_textInspectorBar release];
+    _textInspectorBar = view;
+    if (view) [self addSubview: view];
+    [self tile];
+    [self setNeedsDisplay: YES];
+}
+
+- (NSRect) _scrollContentBounds {
+    NSRect bounds = [self insetBounds];
+    if (_textInspectorBar) {
+        CGFloat height = MIN(NSHeight(bounds),
+                [(_NSTextInspectorBar *)_textInspectorBar preferredHeightForWidth: NSWidth(bounds)]);
+        bounds.origin.y += height;
+        bounds.size.height -= height;
+    }
+    return bounds;
+}
+
 - (NSRect) headerClipViewFrame {
     NSView *headerView = [self _headerView];
 
     if (headerView == nil)
         return NSZeroRect;
 
-    NSRect result = [self insetBounds];
+    NSRect result = [self _scrollContentBounds];
     result.size.height = [headerView bounds].size.height;
     result.size.width -= [NSScroller scrollerWidth];
 
@@ -406,7 +431,7 @@ static Class _rulerViewClass = nil;
     if (headerView == nil)
         return NSZeroRect;
 
-    NSRect bounds = [self insetBounds];
+    NSRect bounds = [self _scrollContentBounds];
     NSRect frame;
     frame.origin.x =
             bounds.origin.x + bounds.size.width - [NSScroller scrollerWidth];
@@ -418,7 +443,7 @@ static Class _rulerViewClass = nil;
 }
 
 - (NSRect) horizontalRulerFrame {
-    NSRect result = [self insetBounds];
+    NSRect result = [self _scrollContentBounds];
 
     result.size.height = [_horizontalRuler requiredThickness];
 
@@ -428,7 +453,7 @@ static Class _rulerViewClass = nil;
 }
 
 - (NSRect) verticalRulerFrame {
-    NSRect result = [self insetBounds];
+    NSRect result = [self _scrollContentBounds];
 
     result.size.width = [_verticalRuler requiredThickness];
     if ([self rulersVisible] && [self hasHorizontalRuler]) {
@@ -441,7 +466,7 @@ static Class _rulerViewClass = nil;
 }
 
 - (NSRect) clipViewFrame {
-    NSRect bounds = [self insetBounds];
+    NSRect bounds = [self _scrollContentBounds];
     NSRect result;
 
     result.origin.x = bounds.origin.x;
@@ -473,7 +498,7 @@ static Class _rulerViewClass = nil;
 }
 
 - (NSRect) verticalScrollerFrame {
-    NSRect bounds = [self insetBounds];
+    NSRect bounds = [self _scrollContentBounds];
     NSRect result;
 
     result.origin.x =
@@ -497,7 +522,7 @@ static Class _rulerViewClass = nil;
 }
 
 - (NSRect) horizontalScrollerFrame {
-    NSRect bounds = [self insetBounds];
+    NSRect bounds = [self _scrollContentBounds];
     NSRect result;
 
     result.origin.x = bounds.origin.x;
@@ -561,6 +586,9 @@ static Class _rulerViewClass = nil;
 }
 
 - (void) dealloc {
+    [_textInspectorBar removeFromSuperview];
+    [_textInspectorBar release];
+    _textInspectorBar = nil;
     [_clipView release];
     [_verticalScroller release];
     [_horizontalScroller release];
@@ -1027,6 +1055,12 @@ static Class _rulerViewClass = nil;
 
 - (void) tile {
     NSRect frame;
+    if (_textInspectorBar) {
+        frame = [self insetBounds];
+        frame.size.height = MIN(NSHeight(frame),
+                [(_NSTextInspectorBar *)_textInspectorBar preferredHeightForWidth: NSWidth(frame)]);
+        [_textInspectorBar setFrame: frame];
+    }
 
     [self createHeaderAndCornerViewsIfNeeded];
     [self createRulerViewsIfNeeded];

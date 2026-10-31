@@ -18,6 +18,7 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE. */
 #import "NSTextViewSharedData.h"
+#import "NSTextInspectorBar.h"
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSAttributedString.h>
 #import <AppKit/NSClipView.h>
@@ -76,6 +77,8 @@ NSString *const NSAllRomanInputSourcesLocaleIdentifier =
 
 @interface NSTextView ()
 - (void) _updateTypingAttributes;
+- (void) _updateInspectorBar;
+- (void) _syncInspectorBar;
 - (void) _replaceCharactersInRange: (NSRange) range
                         withString: (id) string
                useTypingAttributes: (BOOL) useTypingAttributes
@@ -481,6 +484,10 @@ static NSTextView *s_targetTextView = nil;
 }
 
 - (void) dealloc {
+    NSScrollView *inspectorScroll = (NSScrollView *)[_textInspectorBar superview];
+    if ([inspectorScroll _textInspectorBar] == _textInspectorBar)
+        [inspectorScroll _setTextInspectorBar: nil];
+    [_textInspectorBar release];
     if (_delegate) {
         // Be sure to remove our delegate as an observer before we die
         [self setDelegate: nil];
@@ -669,6 +676,7 @@ static NSTextView *s_targetTextView = nil;
     _typingAttributes = attributes;
 
     [self updateRuler];
+    [self _syncInspectorBar];
 }
 
 - (void) setDefaultParagraphStyle: (NSParagraphStyle *) paragraphStyle {
@@ -2789,6 +2797,7 @@ static NSTextView *s_targetTextView = nil;
 
 - (void) setEditable: (BOOL) flag {
     _isEditable = flag;
+    [self _syncInspectorBar];
 }
 
 - (void) setSelectable: (BOOL) flag {
@@ -2797,6 +2806,7 @@ static NSTextView *s_targetTextView = nil;
 
 - (void) setRichText: (BOOL) flag {
     _isRichText = flag;
+    [self _updateInspectorBar];
 }
 
 - (void) setFieldEditor: (BOOL) flag {
@@ -3127,6 +3137,9 @@ static NSTextView *s_targetTextView = nil;
 }
 
 - (BOOL) becomeFirstResponder {
+    [self _updateInspectorBar];
+    _NSTextInspectorBar *bar = (id)[[self enclosingScrollView] _textInspectorBar];
+    if ([self isRichText] && bar) [bar setTextView: self];
     [self updateInsertionPointStateAndRestartTimer: YES];
     if (![self needsDisplay] && [self shouldDrawInsertionPoint])
         [self _displayInsertionPointWithState: YES];
@@ -4459,6 +4472,46 @@ static NSTextView *s_targetTextView = nil;
     return _usesFindBar;
 }
 
+- (void) _syncInspectorBar {
+    _NSTextInspectorBar *bar = (id)[[self enclosingScrollView] _textInspectorBar];
+    if ([bar textView] == self) [bar sync];
+}
+
+- (void) _updateInspectorBar {
+    NSScrollView *scroll = [self enclosingScrollView];
+    NSScrollView *oldScroll = (NSScrollView *)[_textInspectorBar superview];
+    BOOL show = _usesInspectorBar && [self isRichText] && scroll != nil;
+    if ((!show || oldScroll != scroll) &&
+        [oldScroll _textInspectorBar] == _textInspectorBar)
+        [oldScroll _setTextInspectorBar: nil];
+    if (show) {
+        if (!_textInspectorBar)
+            _textInspectorBar = [[_NSTextInspectorBar alloc] initWithTextView: self];
+        [(_NSTextInspectorBar *)_textInspectorBar setTextView: self];
+        [scroll _setTextInspectorBar: _textInspectorBar];
+    }
+}
+
+- (void) viewWillMoveToSuperview: (NSView *) view {
+    if (view != [self superview]) {
+        NSScrollView *scroll = [self enclosingScrollView];
+        _NSTextInspectorBar *bar = (id)[scroll _textInspectorBar];
+        if ([bar textView] == self) [bar setTextView: nil];
+        if (bar == _textInspectorBar) [scroll _setTextInspectorBar: nil];
+    }
+    [super viewWillMoveToSuperview: view];
+}
+
+- (void) viewDidMoveToSuperview {
+    [super viewDidMoveToSuperview];
+    [self _updateInspectorBar];
+}
+
+- (void) viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [self _updateInspectorBar];
+}
+
 - (BOOL) usesInspectorBar {
     return _usesInspectorBar;
 }
@@ -4473,6 +4526,7 @@ static NSTextView *s_targetTextView = nil;
 
 - (void) setUsesInspectorBar: (BOOL) value {
     _usesInspectorBar = value;
+    [self _updateInspectorBar];
 }
 
 - (BOOL) isGrammarCheckingEnabled {
