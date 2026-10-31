@@ -19,6 +19,8 @@ typedef enum {
     id _object;
     O2Rect _rect;
     O2AffineTransform _transform;
+    BOOL _shouldAntialias;
+    int _antialiasingQuality;
 }
 
 O2ClipPhase *O2ClipPhaseInitWithNonZeroPath(O2ClipPhase *self, O2Path *path);
@@ -29,6 +31,11 @@ O2ClipPhase *O2ClipPhaseInitWithNonZeroPath(O2ClipPhase *self, O2Path *path);
 
 O2ClipPhaseType O2ClipPhasePhaseType(O2ClipPhase *self);
 id O2ClipPhaseObject(O2ClipPhase *self);
+void O2ClipPhaseSetAntialiasing(O2ClipPhase *self, BOOL flag, int quality);
+BOOL O2ClipPhaseShouldAntialias(O2ClipPhase *self);
+int O2ClipPhaseAntialiasingQuality(O2ClipPhase *self);
+O2Rect O2ClipPhaseRect(O2ClipPhase *self);
+O2AffineTransform O2ClipPhaseTransform(O2ClipPhase *self);
 
 @end
 

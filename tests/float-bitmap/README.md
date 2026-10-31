@@ -93,7 +93,7 @@ black-composite behavior when alpha is discarded; TIFF retains associated alpha;
 PNG applies its existing unassociation; PDF emits unassociated RGB plus an actual
 gray soft-mask stream. Internal RGB masks use the image-paint red-channel
 convention, sampled at pixel centers; nested PDF mask coverage shares the original
-normalized image position. Public mask/decode compatibility remains unqualified.
+normalized image position. Public clip masks are a separate path with inverse image-mask coverage and stored decode pairs; encoded-image mask/decode compatibility remains unqualified.
 The complete source/mask graph is checked for cycles, row capacity, and signed
 reader bounds before destination count or PDF resources change. Destination
 counts advance only on encoder success. Short writes report failure; already
@@ -101,11 +101,59 @@ written external bytes cannot be rolled back. TIFF row/strip allocations are
 checked heap allocations. JPEG's existing default fatal codec error handler is
 not an allocation-fault recovery guarantee.
 
-Public arbitrary clipping is still an implementation requirement: the builtin
-clip-state path currently reduces paths to their bounds and ignores mask phases.
-Extended-range solid-color paints, managed profile/HLG conversion, decode arrays,
-standalone eight-bit PDF stencil masks, native GDI float text, GPU composition,
-and display/app qualification are also open. GDI rejects an unsupported float
-surface at construction so it does not return a context with a missing native
-device context; Linux tests do not qualify Windows. The enabled FreeType float
-path renders text, images, patterns, and existing internal clip surfaces.
+Public clipping now rasterizes actual saved nonzero/evenodd path phases with the
+existing edge rasterizer. Path clips and drawing geometry share256 samples per
+pixel; path intersections use sample-bit AND before averaging, preserving repeated
+clips and clip(P);fill(P) edges. Scalar gray masks multiply separately. Clip phases
+freeze their antialias policy and mask CTM. Save/restore/reset rebuild from phases.
+Layer drawing uses conditional coverage within inherited path samples, while the
+parent applies that domain and inherited soft masks once at final composition.
+Nested layers and locally reset clip phases retain phase identity rather than
+relying on an absolute phase count.
+
+Clip masks support existing constructible one-bit/eight-bit DeviceGray images with
+no alpha or attached mask, and true image masks. Image masks use1-S, ordinary gray
+images useS, after their decode pair. Derived forward/inverse mappings and source/
+destination corners are checked before image sampling. Unsupported or invalid clip
+masks produce an empty clip. Existing two/four-bit image construction remains
+unsupported; named grayscale/profile conversion is not established by this path.
+
+Public runtime controls (no injected clip surface):
+
+- `public-clipping.m`: triangle, nonzero, evenodd, mask, image-mask, decode,
+  transform, accumulate, restore, reset, image, layer, nested-layer, text. Each
+  runs Copy and SourceOver on a nonzero float destination; optional `byte` argument
+  repeats with a padded byte destination. Every pixel has an independent area/
+  sample/glyph and premultiplied equation oracle.
+- `public-clipping-geometry.m`: repeated, overlap, same-fill, opposite-fill,
+  layer-reset, aa-state. Independent polygon intersection areas and immutable clip
+  policy checks; both blend modes.
+- Prefer `public-clipping-layer-geometry-v4.m`: layer-same, nested-layer-same,
+  layer-overlap, layer-opposite. Inherited/local path edges and group Copy versus
+  SourceOver are checked against independent polygon areas. The frozen prior
+  `public-clipping-layer-geometry.m` is preserved but its layer-overlap setup clips
+  the second path before the layer and has an invalid Copy oracle; do not count
+  that mode as valid evidence. V4 removes that pre-layer clip without changing
+  tolerances.
+
+Native source checks, each with float and LP64 double O2Float adapters:
+
+```
+python3 tests/float-bitmap/raster-samples-source.py
+python3 tests/float-bitmap/public-clip-source.py
+python3 tests/float-bitmap/public-clip-transform-source.py
+```
+
+These execute actual sampling/raster/intersection/layer-domain/normalization and
+transform guards with ASan/UBSan/float-cast-overflow. Native adapters do not prove
+Objective-C phase/CTM ownership, dispatch, actual layers/fonts or public runtime
+behavior. Fixtures are frozen before the corresponding implementation and linked
+against a recorded unchanged-runtime manifest; root must run genuine before and
+exact committed candidate controls. No candidate public runtime pass is claimed
+by compilation or these native checks.
+
+The layer and drawing surfaces retain per-pixel premultiplied color; this is not a
+fully multisampled color pipeline or native Quartz antialiasing equivalence.
+Extended-range solid paints, managed profile/HLG transforms, standalone eight-bit
+PDF stencils, native GDI float text, GPU composition, and display/app qualification
+remain separate. The enabled FreeType path consumes the public clip coverage.

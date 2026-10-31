@@ -36,6 +36,7 @@ O2Rect O2ClipStateIntegralRect(O2ClipState *self);
 O2ClipMask *O2ClipStateIntegralMask(O2ClipState *self);
 
 - (NSArray *) clipPhases;
+- (void) setLastPhaseAntialias: (BOOL) flag quality: (int) quality;
 - (void) addNonZeroWindingPath: (O2Path *) path;
 - (void) addEvenOddWindingPath: (O2Path *) path;
 - (void) addMask: (O2Image *) image

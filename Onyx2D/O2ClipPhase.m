@@ -4,12 +4,16 @@
 
 O2ClipPhase *O2ClipPhaseInitWithNonZeroPath(O2ClipPhase *self, O2Path *path) {
     self->_type = O2ClipPhaseNonZeroPath;
+    self->_shouldAntialias = YES;
+    self->_antialiasingQuality = 64;
     self->_object = [path copy];
     return self;
 }
 
 - initWithEOPath: (O2Path *) path {
     _type = O2ClipPhaseEOPath;
+    _shouldAntialias = YES;
+    _antialiasingQuality = 64;
     _object = [path copy];
     return self;
 }
@@ -19,6 +23,8 @@ O2ClipPhase *O2ClipPhaseInitWithNonZeroPath(O2ClipPhase *self, O2Path *path) {
         transform: (O2AffineTransform) transform
 {
     _type = O2ClipPhaseMask;
+    _shouldAntialias = YES;
+    _antialiasingQuality = 64;
     _object = [mask retain];
     _rect = rect;
     _transform = transform;
@@ -36,6 +42,27 @@ O2ClipPhaseType O2ClipPhasePhaseType(O2ClipPhase *self) {
 
 id O2ClipPhaseObject(O2ClipPhase *self) {
     return self->_object;
+}
+
+void O2ClipPhaseSetAntialiasing(O2ClipPhase *self, BOOL flag, int quality) {
+    self->_shouldAntialias = flag;
+    self->_antialiasingQuality = quality;
+}
+
+BOOL O2ClipPhaseShouldAntialias(O2ClipPhase *self) {
+    return self->_shouldAntialias;
+}
+
+int O2ClipPhaseAntialiasingQuality(O2ClipPhase *self) {
+    return self->_antialiasingQuality;
+}
+
+O2Rect O2ClipPhaseRect(O2ClipPhase *self) {
+    return self->_rect;
+}
+
+O2AffineTransform O2ClipPhaseTransform(O2ClipPhase *self) {
+    return self->_transform;
 }
 
 @end

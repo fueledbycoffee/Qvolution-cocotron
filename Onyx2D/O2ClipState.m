@@ -41,6 +41,12 @@ O2Path *O2ClipStateOnePath(O2ClipState *self) {
     return self->_path;
 }
 
+- (void) setLastPhaseAntialias: (BOOL) flag quality: (int) quality {
+    O2ClipPhase *phase = [_phases lastObject];
+    if (phase != nil)
+        O2ClipPhaseSetAntialiasing(phase, flag, quality);
+}
+
 - (NSArray *) clipPhases {
     return _phases;
 }

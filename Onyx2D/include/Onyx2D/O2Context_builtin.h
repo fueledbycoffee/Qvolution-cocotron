@@ -80,6 +80,9 @@ void O2ContextWriteGlyphCoverageSpanFloat(O2Context_builtin *self,
 
     O2Paint *_paint;
     O2Context_builtin *_clipContext;
+    NSMutableArray *_layerClipPhases;
+    uint32_t *_clipSamples;
+    BOOL _clipIsSoftPhase;
 
     O2BlendSpan_argb8u _blend_argb8u_PRE;
     O2BlendSpan_argb32f _blend_argb32f_PRE;

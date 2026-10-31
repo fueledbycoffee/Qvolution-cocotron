@@ -192,16 +192,22 @@ void O2GStateResetClip(O2GState *self) {
 
 void O2GStateAddClipToPath(O2GState *self, O2Path *path) {
     [self->_clipState addNonZeroWindingPath: path];
+    [self->_clipState setLastPhaseAntialias: self->_shouldAntialias
+                                  quality: self->_antialiasingQuality];
 }
 
 void O2GStateAddEvenOddClipToPath(O2GState *self, O2Path *path) {
     [self->_clipState addEvenOddWindingPath: path];
+    [self->_clipState setLastPhaseAntialias: self->_shouldAntialias
+                                  quality: self->_antialiasingQuality];
 }
 
 void O2GStateAddClipToMask(O2GState *self, O2Image *image, O2Rect rect) {
     [self->_clipState addMask: image
                        inRect: rect
                     transform: self->_deviceSpaceTransform];
+    [self->_clipState setLastPhaseAntialias: self->_shouldAntialias
+                                  quality: self->_antialiasingQuality];
 }
 
 O2ColorRef O2GStateStrokeColor(O2GState *self) {

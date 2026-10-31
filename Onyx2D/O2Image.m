@@ -439,6 +439,18 @@ ONYX2D_STATIC BOOL initFunctionsForParameters(O2Image *self,
         return nil;
     }
 
+    if (decode != NULL) {
+        size_t count = O2ColorSpaceGetNumberOfComponents(colorSpace) * 2;
+        if (count != 0) {
+            _decode = NSZoneMalloc(NULL, count * sizeof(O2Float));
+            if (_decode == NULL) {
+                [self release];
+                return nil;
+            }
+            memcpy(_decode, decode, count * sizeof(O2Float));
+        }
+    }
+
     if (bitsPerComponent == 32) {
         NSData *data = [self directData];
         if ([data bytes] == NULL || [data length] < bytesPerRow * height) {
