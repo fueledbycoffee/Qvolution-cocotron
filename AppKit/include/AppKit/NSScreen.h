@@ -20,6 +20,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <CoreGraphics/CGDirectDisplay.h>
 #import <Foundation/Foundation.h>
 
+@class NSColorSpace;
+
 extern NSNotificationName const NSScreenColorSpaceDidChangeNotification;
 
 typedef NSString *NSDeviceDescriptionKey;
@@ -33,6 +35,7 @@ typedef NSString *NSDeviceDescriptionKey;
 }
 
 @property(readonly) NSWindowDepth depth;
+@property(readonly, retain) NSColorSpace *colorSpace;
 @property(readonly, copy) NSDictionary<NSDeviceDescriptionKey, id> *deviceDescription;
 
 @property (class, readonly, retain) NSScreen *mainScreen;

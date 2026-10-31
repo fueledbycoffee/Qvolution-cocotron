@@ -19,6 +19,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 // Original - Christopher Lloyd <cjwl@objc.net>
 #import <AppKit/NSApplication.h>
+#import <AppKit/NSColorSpace.h>
 #import <AppKit/NSDisplay.h>
 #import <AppKit/NSScreen.h>
 #import <AppKit/NSWindow.h>
@@ -54,6 +55,16 @@ NSNotificationName const NSScreenColorSpaceDidChangeNotification = @"NSScreenCol
 
 - (NSWindowDepth) depth {
     return _depth;
+}
+
+- (NSColorSpace *) colorSpace {
+    CGColorSpaceRef space = CGDisplayCopyColorSpace([self cgDirectDisplayID]);
+    if (space == NULL)
+        return nil;
+    NSColorSpace *result =
+            [[[NSColorSpace alloc] initWithCGColorSpace: space] autorelease];
+    CGColorSpaceRelease(space);
+    return result;
 }
 
 - (NSRect) frame {
