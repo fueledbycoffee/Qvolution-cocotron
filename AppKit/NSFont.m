@@ -29,6 +29,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <Foundation/NSKeyedArchiver.h>
 
 #import <CoreText/KTFont.h>
+#import <CoreText/CoreText.h>
+#import <Onyx2D/O2Font_freetype.h>
 #import <Onyx2D/O2Font.h>
 
 NSNotificationName NSFontSetChangedNotification =
@@ -659,6 +661,13 @@ static NSLock *_cacheLock = nil;
 }
 
 - (NSString *) familyName {
+#ifdef FREETYPE_PRESENT
+    if ([(id)_cgFont isKindOfClass:[O2Font_freetype class]]) {
+        NSString *family = (NSString *)CTFontCopyFamilyName((CTFontRef)self);
+        if (family != nil)
+            return [family autorelease];
+    }
+#endif
     NSString *familyName =
             [[NSFontFamily fontFamilyWithTypefaceName: _name] name];
     if (familyName == nil) {
@@ -682,6 +691,13 @@ static NSLock *_cacheLock = nil;
 }
 
 - (NSString *) displayName {
+#ifdef FREETYPE_PRESENT
+    if ([(id)_cgFont isKindOfClass:[O2Font_freetype class]]) {
+        NSString *fullName = (NSString *)CGFontCopyFullName(_cgFont);
+        if (fullName != nil)
+            return [fullName autorelease];
+    }
+#endif
     NSFontTypeface *typeFace = [NSFontFamily fontTypefaceWithName: _name];
     return [typeFace displayName];
 }
@@ -692,7 +708,7 @@ static NSLock *_cacheLock = nil;
     NSMutableDictionary *traitsDictionary =
             [NSMutableDictionary dictionaryWithCapacity: 4];
     NSFontFamily *family =
-            [NSFontFamily fontFamilyWithTypefaceName: [self fontName]];
+            [NSFontFamily fontFamilyWithName: [self familyName]];
     NSFontTypeface *typeface = [family typefaceWithName: [self fontName]];
     NSFontTraitMask symbolicTraits = [typeface traits];
     [traitsDictionary setObject: [NSNumber numberWithInt: symbolicTraits]
