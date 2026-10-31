@@ -63,7 +63,8 @@ void O2DContextClipAndFillEdges(O2Context_builtin *self, int fillRuleMask);
 }
 
 - initWithSurface: (O2Surface *) surface flipped: (BOOL) flipped {
-    [super initWithSurface: surface flipped: flipped];
+    if ((self = [super initWithSurface: surface flipped: flipped]) == nil)
+        return nil;
 
     _clipContext = nil;
 

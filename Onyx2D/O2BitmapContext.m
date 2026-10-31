@@ -28,6 +28,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 @implementation O2BitmapContext
 
 - initWithSurface: (O2Surface *) surface flipped: (BOOL) flipped {
+    if (surface == nil) {
+        [self release];
+        return nil;
+    }
     O2AffineTransform flip =
             flipped ? O2AffineTransformIdentity
                     : O2AffineTransformMake(1, 0, 0, -1, 0,
@@ -68,8 +72,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                                             colorSpace: colorSpace
                                             bitmapInfo: bitmapInfo];
 
-    [self initWithSurface: surface flipped: NO];
-    [surface release];
+    if (surface == nil) {
+        [self release];
+        return nil;
+    }
+    @try {
+        self = [self initWithSurface: surface flipped: NO];
+    } @finally {
+        [surface release];
+    }
     return self;
 }
 

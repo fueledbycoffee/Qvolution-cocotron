@@ -30,6 +30,7 @@
 #import <Onyx2D/O2DataProvider.h>
 #import <Onyx2D/O2Surface.h>
 #include <stdint.h>
+#import "O2BitmapFormat.h"
 
 @implementation O2Surface
 
@@ -397,6 +398,10 @@ static BOOL initFunctionsForParameters(O2Surface *self, size_t bitsPerComponent,
                                        O2ColorSpaceRef colorSpace,
                                        O2BitmapInfo bitmapInfo)
 {
+    if ((bitsPerComponent == 32 || (bitmapInfo & kO2BitmapFloatComponents)) &&
+        !O2BitmapFormatSupportsFloatRGBA(self->_width, self->_height,
+            bitsPerComponent, bitsPerPixel, self->_bytesPerRow, colorSpace, bitmapInfo))
+        return NO;
     self->_writeargb32f = O2SurfaceWrite_argb32f_to_argb8u_to_ANY; // default
 
     switch (bitsPerComponent) {
@@ -555,7 +560,7 @@ static BOOL initFunctionsForParameters(O2Surface *self, size_t bitsPerComponent,
               bitmapInfo: (O2BitmapInfo) bitmapInfo
 {
     O2DataProvider *provider;
-    int bitsPerPixel = 32;
+    int bitsPerPixel = bitsPerComponent == 32 ? 128 : 32;
 
     // Both local rejection and superclass initialization failure call dealloc.
     // Establish the mutex before either path can destroy it.
@@ -574,20 +579,20 @@ static BOOL initFunctionsForParameters(O2Surface *self, size_t bitsPerComponent,
         return nil;
     }
 
+    bytesPerRow = effectiveRowBytes;
+    if ((bitsPerComponent == 32 || (bitmapInfo & kO2BitmapFloatComponents)) &&
+        !O2BitmapFormatSupportsFloatRGBA(width, height, bitsPerComponent,
+            bitsPerPixel, bytesPerRow, colorSpace, bitmapInfo)) {
+        [self release];
+        return nil;
+    }
+
     if (bytes != NULL) {
         provider = [[[O2DataProvider alloc] initWithBytes: bytes
                                                    length: bytesPerRow * height]
                 autorelease];
         m_ownsData = NO;
     } else {
-        if (bytesPerRow > 0 && bytesPerRow < (width * bitsPerPixel) / 8) {
-            NSLog(@"invalid bytes per row=%zu", bytesPerRow);
-            bytesPerRow = 0;
-        }
-
-        if (bytesPerRow == 0)
-            bytesPerRow = (width * bitsPerPixel) / 8;
-
         NSMutableData *data = [NSMutableData
                 dataWithLength: bytesPerRow * height *
                                 sizeof(uint8_t)]; // this will also zero the
@@ -595,6 +600,12 @@ static BOOL initFunctionsForParameters(O2Surface *self, size_t bitsPerComponent,
         provider =
                 [O2DataProviderCreateWithCFData((CFDataRef) data) autorelease];
         m_ownsData = YES;
+    }
+
+    if (provider == nil || [provider length] < bytesPerRow * height ||
+        ([provider bytes] == NULL && bytesPerRow * height != 0)) {
+        [self release];
+        return nil;
     }
 
     if ([super initWithWidth: width
@@ -615,8 +626,11 @@ static BOOL initFunctionsForParameters(O2Surface *self, size_t bitsPerComponent,
         _pixelBytes = (void *) [provider bytes];
 
     if (!initFunctionsForParameters(self, bitsPerComponent, _bitsPerPixel,
-                                    colorSpace, bitmapInfo))
-        NSLog(@"O2Surface -init error, return");
+                                    colorSpace, bitmapInfo)) {
+        NSLog(@"O2Surface has no writer for the requested bitmap format");
+        [self release];
+        return nil;
+    }
 
     _clampExternalPixels = NO; // only set to yes if premultiplied
     return self;

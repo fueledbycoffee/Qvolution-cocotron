@@ -33,6 +33,7 @@
 #import <Onyx2D/O2Exceptions.h>
 #import <Onyx2D/O2Image.h>
 #import <Onyx2D/O2Surface.h>
+#import "O2BitmapFormat.h"
 
 @implementation O2Image
 
@@ -317,6 +318,10 @@ ONYX2D_STATIC BOOL initFunctionsForParameters(O2Image *self,
         NSLog(@"HLG image decoding requires an implemented color conversion pipeline");
         return NO;
     }
+    if ((bitsPerComponent == 32 || (bitmapInfo & kO2BitmapFloatComponents)) &&
+        !O2BitmapFormatSupportsFloatRGBA(self->_width, self->_height,
+            bitsPerComponent, bitsPerPixel, self->_bytesPerRow, colorSpace, bitmapInfo))
+        return NO;
 
     self->_read_a8u = O2Image_read_a8u_src_argb8u;
     self->_read_a32f = O2ImageRead_ANY_to_A8_to_Af;

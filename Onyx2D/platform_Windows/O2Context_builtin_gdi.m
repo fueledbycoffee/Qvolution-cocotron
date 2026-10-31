@@ -40,7 +40,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 }
 
 - initWithSurface: (O2Surface *) surface flipped: (BOOL) flipped {
-    [super initWithSurface: surface flipped: flipped];
+    if ((self = [super initWithSurface: surface flipped: flipped]) == nil)
+        return nil;
     /* FIX: we need to also override initWithBytes:... and create an
        O2Surface_DIBSection for the pixel format. Right now we just ignore GDI
        stuff if we get a surface which can't handle it.
