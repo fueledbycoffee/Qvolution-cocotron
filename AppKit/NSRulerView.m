@@ -49,6 +49,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 - (CGFloat) _drawingScale;
 @end
 
+static BOOL rulerMarkIntersectsRect(NSRect mark, NSRect dirtyRect) {
+    // NSFrameRect strokes a one-point pen around the rectangle's boundary.
+    return NSIntersectsRect(NSInsetRect(mark, -0.5, -0.5), dirtyRect);
+}
+
 @implementation NSRulerView
 
 + (void) registerUnitWithName: (NSString *) name
@@ -357,6 +362,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
             originalFrame.size.height = clientFrame.size.height * scale;
         }
     }
+    NSRect drawingDirtyRect = dirtyRect;
     // No need to draw outside of this area
     dirtyRect = NSIntersectionRect(dirtyRect, originalFrame);
 
@@ -409,7 +415,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
         // A little visual nudge.. I think it looks better.
         if (i == 0 && scrollViewHasOtherRuler == NO) {
             // Nothing to do
-        } else {
+        } else if (rulerMarkIntersectsRect(frame, drawingDirtyRect)) {
             NSFrameRect(frame);
         }
 
@@ -469,7 +475,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                 // A little visual nudge.. I think it looks better.
                 if (i == 0 && scrollViewHasOtherRuler == NO) {
                     // Nothing to do
-                } else {
+                } else if (rulerMarkIntersectsRect(frame, drawingDirtyRect)) {
                     NSFrameRect(frame);
                 }
 
