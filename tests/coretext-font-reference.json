@@ -1,0 +1,4 @@
+{"fonts":[
+{"postscript":"DejaVuSansMono","units":2048,"glyphs":[{"scalar":65,"glyph":36,"advance":1233},{"scalar":87,"glyph":58,"advance":1233},{"scalar":101,"glyph":72,"advance":1233},{"scalar":233,"glyph":171,"advance":1233},{"scalar":769,"glyph":649,"advance":1233},{"scalar":888,"glyph":0,"advance":0},{"scalar":120120,"glyph":0,"advance":0}]}
+,{"postscript":"DejaVuSans","units":2048,"glyphs":[{"scalar":65,"glyph":36,"advance":1401},{"scalar":87,"glyph":58,"advance":2025},{"scalar":101,"glyph":72,"advance":1260},{"scalar":233,"glyph":171,"advance":1260},{"scalar":769,"glyph":690,"advance":0},{"scalar":888,"glyph":0,"advance":0},{"scalar":120120,"glyph":5495,"advance":1517}]}
+]}

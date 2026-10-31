@@ -494,6 +494,36 @@ static NSString *copyFullNameForFace(FT_Face face) {
     return [_fullName copy];
 }
 
+static NSInteger *copyUnscaledAdvances(FT_Face face, NSInteger glyphCount) {
+    if (face == NULL || glyphCount <= 0 || (uintmax_t)glyphCount > UINT_MAX ||
+        (uintmax_t)glyphCount > SIZE_MAX / sizeof(NSInteger)) {
+        [NSException raise:NSInternalInconsistencyException
+                    format:@"Font advance cache is not representable"];
+        return NULL;
+    }
+    NSInteger *advances = NSZoneMalloc(NULL, (size_t)glyphCount * sizeof(NSInteger));
+    if (advances == NULL) {
+        [NSException raise:NSMallocException format:@"Cannot allocate font advance cache"];
+        return NULL;
+    }
+    FT_Fixed batch[256];
+    for (FT_UInt first = 0; first < (FT_UInt)glyphCount;) {
+        FT_UInt count = MIN(256, (FT_UInt)glyphCount - first);
+        FT_Error error = FT_Get_Advances(face, first, count, FT_LOAD_NO_SCALE, batch);
+        if (error != 0) {
+            NSZoneFree(NULL, advances);
+            [NSException raise:NSInternalInconsistencyException
+                        format:@"FreeType advance lookup failed: %d", error];
+            return NULL;
+        }
+        for (FT_UInt index = 0; index < count; index++)
+            // Bitmap strikes keep 26.6 advances even with FT_LOAD_NO_SCALE.
+            advances[first + index] = batch[index] / (FT_IS_SCALABLE(face) ? 1 : 64);
+        first += count;
+    }
+    return advances;
+}
+
 - (instancetype) initWithFace: (FT_Face) face {
     _face = face;
     _platformType = O2FontPlatformTypeFreeType;
@@ -548,6 +578,15 @@ static NSString *copyFullNameForFace(FT_Face face) {
     // FreeType name APIs may lazily mutate the face; snapshot before publication.
     _postScriptName = copyPostScriptNameForFace(face);
     _fullName = copyFullNameForFace(face);
+    if (FT_IS_SCALABLE(face)) {
+        @try {
+            // Publish immutable metrics before any renderer can share this face.
+            _advances = copyUnscaledAdvances(face, _numberOfGlyphs);
+        } @catch (id exception) {
+            [self release];
+            @throw;
+        }
+    }
     return self;
 }
 
@@ -656,24 +695,8 @@ FT_Face O2FontFreeTypeFace(O2Font_freetype *self) {
 }
 
 - (void) fetchAdvances {
-    NSInteger *advances = NSZoneMalloc(NULL, sizeof(NSInteger) * _numberOfGlyphs);
-    FT_Fixed batch[256];
-
-    for (FT_UInt first = 0; first < _numberOfGlyphs;) {
-        FT_UInt count = MIN(256, _numberOfGlyphs - first);
-        FT_Error error = FT_Get_Advances(_face, first, count, FT_LOAD_NO_SCALE, batch);
-        if (error != 0) {
-            NSZoneFree(NULL, advances);
-            [NSException raise: NSInternalInconsistencyException
-                        format: @"FreeType advance lookup failed: %d", error];
-            return;
-        }
-        for (FT_UInt index = 0; index < count; index++)
-            // Bitmap strikes keep 26.6 advances even with FT_LOAD_NO_SCALE.
-            advances[first + index] = batch[index] / (FT_IS_SCALABLE(_face) ? 1 : 64);
-        first += count;
-    }
-    _advances = advances;
+    if (_advances == NULL)
+        _advances = copyUnscaledAdvances(_face, _numberOfGlyphs);
 }
 
 - (O2Glyph) glyphWithGlyphName: (NSString *) name {
