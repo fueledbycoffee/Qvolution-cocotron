@@ -492,6 +492,42 @@ NSBitmapImageRepPropertyKey NSImageCurrentFrame = @"NSImageCurrentFrame";
     return self;
 }
 
+- copyWithZone:(NSZone *)zone {
+    int count=_isPlanar?_samplesPerPixel:1;
+    NSUInteger length=0;
+    if (_bitmapPlanes) {
+        if (count<=0||_bytesPerRow<=0||_pixelsHigh<=0||
+                (NSUInteger)count>NSUIntegerMax/sizeof(unsigned char *)||
+                (NSUInteger)_pixelsHigh>NSUIntegerMax/(NSUInteger)_bytesPerRow)
+            [NSException raise:NSInvalidArgumentException format:@"Invalid bitmap copy plane extent"];
+        length=(NSUInteger)_bytesPerRow*(NSUInteger)_pixelsHigh;
+        for(int i=0;i<count;i++)if(!_bitmapPlanes[i])
+            [NSException raise:NSInvalidArgumentException format:@"Missing bitmap copy plane"];
+    }
+    NSBitmapImageRep *result=NSCopyObject(self,0,zone);
+    if(!result)return nil;
+    // NSCopyObject initially aliases these pointers. Detach all of them before
+    // copying/retaining anything that can throw, so cleanup owns only new state.
+    result->_colorSpaceName=nil;result->_bitmapPlanes=NULL;result->_cgImage=NULL;result->_properties=nil;result->_freeWhenDone=YES;
+    @try {
+        result->_colorSpaceName=[_colorSpaceName copyWithZone:zone];
+        if(_colorSpaceName&&!result->_colorSpaceName)[NSException raise:NSMallocException format:@"Cannot copy bitmap color space"];
+        result->_cgImage=CGImageRetain(_cgImage);
+        result->_properties=[_properties mutableCopyWithZone:zone];
+        if(_properties&&!result->_properties)[NSException raise:NSMallocException format:@"Cannot copy bitmap properties"];
+        if(_bitmapPlanes){
+            result->_bitmapPlanes=NSZoneCalloc(NULL,count,sizeof(unsigned char *));
+            if(!result->_bitmapPlanes)[NSException raise:NSMallocException format:@"Cannot allocate bitmap copy plane table"];
+            for(int i=0;i<count;i++){
+                result->_bitmapPlanes[i]=NSZoneMalloc(NULL,length);
+                if(!result->_bitmapPlanes[i])[NSException raise:NSMallocException format:@"Cannot allocate bitmap copy plane"];
+                memcpy(result->_bitmapPlanes[i],_bitmapPlanes[i],length);
+            }
+        }
+    } @catch(NSException *error){[result release];@throw;}
+    return result;
+}
+
 - (void) dealloc {
     if (_freeWhenDone) {
         if (_bitmapPlanes != NULL) {
@@ -506,6 +542,8 @@ NSBitmapImageRepPropertyKey NSImageCurrentFrame = @"NSImageCurrentFrame";
         NSZoneFree(NULL, _bitmapPlanes);
     }
     CGImageRelease(_cgImage);
+    [_properties release];
+    [_colorSpaceName release];
     [super dealloc];
 }
 
@@ -659,7 +697,10 @@ NSBitmapImageRepPropertyKey NSImageCurrentFrame = @"NSImageCurrentFrame";
 }
 
 - (void) setProperty: (NSString *) property withValue: value {
-    [_properties setObject: value forKey: property];
+    if(value){
+        if(!_properties)_properties=[NSMutableDictionary new];
+        [_properties setObject:value forKey:property];
+    }else [_properties removeObjectForKey:property];
 }
 
 - (void) colorizeByMappingGray: (CGFloat) gray
