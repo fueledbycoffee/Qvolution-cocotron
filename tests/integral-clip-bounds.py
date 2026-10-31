@@ -6,7 +6,7 @@ recognition is stubbed: these cases test bounds after the existing shape check.
 import pathlib,subprocess,sys,tempfile
 source=pathlib.Path(sys.argv[1]) if len(sys.argv)>1 else pathlib.Path(__file__).resolve().parents[1]/'Onyx2D/O2Context_builtin.m'
 text=source.read_text();helper=text.split('static BOOL clipToIntegralRects(',1)[1].split('\n- (void) clipToState:',1)[0]
-helper='static BOOL clipToIntegralRects('+helper
+helper='static BOOL clipToIntegralRects('+helper.split('\nstatic BOOL hasViewportClip',1)[0]
 helper=helper.replace('for (O2ClipPhase *phase in phases)', 'for (O2ClipPhase *phase : *phases)')
 prelude=r'''
 #include <algorithm>

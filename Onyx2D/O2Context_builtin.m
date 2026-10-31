@@ -568,6 +568,11 @@ static BOOL clipToIntegralRects(O2Context_builtin *self, NSArray *phases) {
     return YES;
 }
 
+static BOOL hasViewportClip(O2Context_builtin *self) {
+    return self->_clipContext == nil &&
+            [[O2GStateClipState(O2ContextCurrentGState(self)) clipPhases] count] != 0;
+}
+
 - (void) clipToState: (O2ClipState *) clipState {
     NSArray *phases = [clipState clipPhases];
     NSArray *inherited = [_layerClipPhases lastObject];
@@ -1683,7 +1688,8 @@ void O2DContextClipAndFillEdges(O2Context_builtin *self, int fillRuleMask) {
     else
         surface = self->_surface;
 
-    if (self->_clipContext != nil && self->_clipContext->_clipSamples != NULL) {
+    if ((self->_clipContext != nil && self->_clipContext->_clipSamples != NULL) ||
+            hasViewportClip(self)) {
         O2GState *state = O2ContextCurrentGState(self);
         O2RasterizerSetShouldAntialias(self, state->_shouldAntialias,
                 state->_shouldAntialias ? MAX_SAMPLES : 1);
@@ -1832,7 +1838,7 @@ void O2ContextSetupPaintAndBlendMode(O2Context_builtin *self, O2PaintRef paint,
 
     O2Surface *surface = [self->_layerStack count] > 0
             ? O2LayerGetSurface([self->_layerStack lastObject]) : self->_surface;
-    if (self->_clipContext != nil ||
+    if (self->_clipContext != nil || hasViewportClip(self) ||
         !O2SurfaceCanReadWriteARGB8u(surface) ||
         paint->_paint_largb8u_PRE == NULL) {
         self->_writeCoverage_argb8u_PRE = NULL;
