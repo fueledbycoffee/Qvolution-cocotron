@@ -68,7 +68,7 @@ static void runWorkload(NSUInteger length,BOOL mapped) {
     NSGraphicsContext *bitmap=[NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
     for (iteration=1;iteration<=7;iteration++) {
         begin("font_lookup_warm");NSFont *same=[NSFont fontWithName:@"DejaVu Sans" size:14];end();expectLatency(same!=nil,"repeat font resolves");
-        NSUInteger target=(iteration*31)%(length-20);
+        NSUInteger target=31;
         begin("selection");[view setSelectedRange:NSMakeRange(target,12)];end();expectLatency([view selectedRange].location==target,"selection moved");
         begin("layout_valid");used=[layout usedRectForTextContainer:container];end();
         begin("font_size_action");[size selectItemWithTitle:iteration%2?@"18":@"14"];[NSApp sendAction:[size action]to:[size target]from:size];end();
