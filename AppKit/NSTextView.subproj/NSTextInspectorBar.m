@@ -21,6 +21,7 @@
 #import <AppKit/NSFont.h>
 #import <AppKit/NSFontManager.h>
 #import <AppKit/NSGraphics.h>
+#import <AppKit/NSGraphicsStyle.h>
 #import <AppKit/NSImage.h>
 #import <AppKit/NSRulerView.h>
 #import <AppKit/NSStringDrawing.h>
@@ -35,7 +36,7 @@ typedef NS_ENUM(NSUInteger, NSTextInspectorGlyph) {
     NSTextInspectorLeftGlyph, NSTextInspectorCenterGlyph, NSTextInspectorRightGlyph
 };
 
-static NSImage *inspectorGlyph(NSTextInspectorGlyph glyph, BOOL selected) {
+static NSImage *inspectorGlyph(NSTextInspectorGlyph glyph) {
     NSString *title=nil;
     NSFont *font=nil;
     if (glyph < NSTextInspectorLeftGlyph) {
@@ -46,8 +47,8 @@ static NSImage *inspectorGlyph(NSTextInspectorGlyph glyph, BOOL selected) {
         if (!font) return nil;
     }
     return [NSImage imageWithSize:NSMakeSize(16,16) flipped:YES drawingHandler:^BOOL(NSRect rect) {
-        // Match the existing textured bezel's light/off and dark/on interiors.
-        NSColor *color = selected ? [NSColor whiteColor] : [NSColor blackColor];
+        // Selected buttons get a light tint, so the glyph keeps its colour.
+        NSColor *color = [NSColor labelColor];
         if (glyph >= NSTextInspectorLeftGlyph) {
             [color setStroke];
             NSBezierPath *lines = [NSBezierPath bezierPath];
@@ -113,10 +114,9 @@ static NSImage *inspectorGlyph(NSTextInspectorGlyph glyph, BOOL selected) {
 - (void)drawRect:(NSRect)rect {
     [super drawRect:rect];
     if ([[self window] firstResponder]==self) {
-        // Image-only buttons still need a keyboard-focus indicator.
-        [([self state] ? [NSColor whiteColor] : [NSColor blackColor]) setStroke];
-        NSBezierPath *focus=[NSBezierPath bezierPathWithRoundedRect:NSInsetRect([self bounds],2,2) xRadius:3 yRadius:3];
-        CGFloat dash[]={1,2};[focus setLineDash:dash count:2 phase:0];[focus setLineWidth:1];[focus stroke];
+        // Image-only buttons still need a keyboard-focus indicator. The bar
+        // packs them edge to edge, so the ring sits on the bezel's rim.
+        [[self graphicsStyle] drawFocusRingAroundRect:NSInsetRect([self bounds],3,3) radius:2];
     }
 }
 @end
@@ -135,8 +135,9 @@ BOOL NSTextInspectorKeepsRulerContext(NSTextView *view, NSResponder *proposed) {
     [button setToolTip:identifier];
     [button setButtonType:NSOnOffButton];
     [button setBezelStyle:NSTexturedRoundedBezelStyle];
-    [button setImage:inspectorGlyph(glyph,NO)];
-    [button setAlternateImage:inspectorGlyph(glyph,YES)];
+    NSImage *image=inspectorGlyph(glyph);
+    [button setImage:image];
+    [button setAlternateImage:image];
     [button setImagePosition:NSImageOnly];
     NSButtonCell *cell=[button cell];
     [cell setShowsStateBy:[cell showsStateBy]|NSContentsCellMask];
