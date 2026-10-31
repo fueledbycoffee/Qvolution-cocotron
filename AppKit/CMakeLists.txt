@@ -137,6 +137,7 @@ set(AppKit_sources
 	NSErrors.m
 	NSPopover.m
 	NSRunningApplication.m
+	NSAccessibilityCustomAction.m
 	NSAccessibilityCustomChooser.m
 
 	nib.subproj/NSButtonImageSource.m
