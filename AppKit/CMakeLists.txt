@@ -749,6 +749,7 @@ if (WAYLAND_CLIENT_FOUND AND WAYLAND_CURSOR_FOUND AND XKBCOMMON_FOUND
 			Onyx2D
 			CoreGraphics
 			OpenGL
+			QuartzCore
 			# WaylandDisplay subclasses X11Display for its backend-independent parts.
 			X11_backend
 	)

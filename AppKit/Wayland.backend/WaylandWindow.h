@@ -23,7 +23,8 @@
 #import "WaylandDisplay.h"
 #import "WaylandFullscreen.h"
 
-@class NSWindow, O2Context, WaylandSubWindow;
+@class NSWindow, O2Context, WaylandSubWindow, CAWindowOpenGLContext;
+struct wl_egl_window;
 
 struct WaylandBuffer {
     struct wl_proxy *buffer;
@@ -84,6 +85,13 @@ struct WaylandBuffer {
     WaylandFullscreenTracker _fullscreenTracker;
     BOOL _configureUpdatePending;
     NSUInteger _surfaceGeneration;
+    BOOL _eglRequested, _eglVerify, _eglCorrupt, _eglFailed;
+    CGLContextObj _eglContext;
+    void *_eglDrawable;
+    struct wl_egl_window *_eglWindow;
+    CAWindowOpenGLContext *_eglPresenter;
+    uint64_t _eglSwaps, _eglChecks, _eglBytes, _eglFailures;
+    int32_t _eglWidth, _eglHeight;
 }
 
 - (instancetype) initWithDelegate: (NSWindow *) delegate;
@@ -114,6 +122,7 @@ struct WaylandBuffer {
 - (uint32_t) popupGrabSerial;
 - (struct wl_proxy *) xdgSurface;
 - (void) unmap;
+- (NSDictionary *) eglPresentationStatistics;
 - (NSPoint) contentOffset;
 - (BOOL) isDecorationPoint: (CGPoint) point;
 - (BOOL) decorationButton: (uint32_t) button pressed: (BOOL) pressed

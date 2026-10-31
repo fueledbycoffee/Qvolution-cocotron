@@ -16,7 +16,11 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE. */
 
+#define GL_GLEXT_PROTOTYPES 1
 #import "WaylandWindow.h"
+#import <OpenGL/CGLInternal.h>
+#import <OpenGL/glext.h>
+#import <QuartzCore/CAWindowOpenGLContext.h>
 #import "WaylandSubWindow.h"
 #import "WaylandLibrary.h"
 #import "../X11.backend/X11GlobalMenu.h"
@@ -75,6 +79,14 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     if ((self = [super init]) == nil)
         return nil;
 
+    NSString *renderer = [[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_RENDERER"];
+    if (renderer && ![renderer isEqualToString:@"shm"] && ![renderer isEqualToString:@"egl"])
+        [NSException raise:NSInvalidArgumentException format:@"Unknown DARLING_APPKIT_RENDERER: %@", renderer];
+    _eglRequested = [renderer isEqualToString:@"egl"];
+    _eglVerify = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_EGL_VERIFY"] isEqualToString:@"1"];
+    _eglCorrupt = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_EGL_TEST_CORRUPT"] isEqualToString:@"1"];
+    if (_eglCorrupt && !_eglVerify)
+        [NSException raise:NSInvalidArgumentException format:@"EGL test corruption requires verification"];
     _delegate = delegate;
     _level = [delegate level];
     _styleMask = [delegate styleMask];
@@ -365,6 +377,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
         return;
 
     [_display unmapPopupsForParent: self];
+    [self destroyEGLPresenter];
 
     if (_frameCallback != NULL) {
         WL.wl_proxy_destroy(_frameCallback);
@@ -913,6 +926,112 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     return reusable;
 }
 
+- (NSDictionary *) eglPresentationStatistics {
+    return @{@"renderer": _eglRequested ? @"egl" : @"shm", @"swaps": @(_eglSwaps),
+             @"checks": @(_eglChecks), @"uploadedBytes": @(_eglBytes), @"failures": @(_eglFailures),
+             @"width": @(_eglWidth), @"height": @(_eglHeight), @"scale120": @(_renderScale120)};
+}
+
+- (void) destroyEGLPresenter {
+    if (!_eglContext && !_eglWindow) return;
+    CGLContextObj previous = CGLGetCurrentContext();
+    if (previous == _eglContext) previous = NULL;
+    if (CGLGetCurrentContext() == _eglContext) CGLSetCurrentContext(NULL);
+    [_eglPresenter release]; _eglPresenter = nil;
+    // EGL drawable must die before its wl_egl_window, then the wl_surface.
+    if (_eglDrawable) CGLDestroyWindow(_eglDrawable);
+    _eglDrawable = NULL;
+    if (_eglWindow) WL.wl_egl_window_destroy(_eglWindow);
+    _eglWindow = NULL;
+    if (_eglContext) CGLReleaseContext(_eglContext);
+    _eglContext = NULL;
+    _eglWidth = _eglHeight = 0;
+    if (CGLGetCurrentContext() != previous && CGLSetCurrentContext(previous) != kCGLNoError)
+        NSLog(@"AppKit EGL: cannot restore caller context during teardown");
+}
+
+- (void) failEGLPresentation: (NSString *) reason {
+    ++_eglFailures; _eglFailed = YES;
+    if (_frameCallback) { WL.wl_proxy_destroy(_frameCallback); _frameCallback = NULL; }
+    [NSException raise:NSInternalInconsistencyException format:@"Requested AppKit EGL presentation failed: %@", reason];
+}
+
+- (BOOL) ensureEGLPresenterWidth: (int32_t) width height: (int32_t) height {
+    if (!_display->_eglAvailable) return NO;
+    if (!_eglContext) {
+        CGLPixelFormatAttribute attributes[] = {kCGLPFAAccelerated, 0};
+        CGLPixelFormatObj format = NULL; GLint count = 0;
+        CGLError error = CGLChoosePixelFormat(attributes, &format, &count);
+        if (error == kCGLNoError && format && count)
+            error = CGLCreateContext(format, NULL, &_eglContext);
+        if (format) CGLReleasePixelFormat(format);
+        if (error != kCGLNoError || !_eglContext) return NO;
+        _eglWindow = WL.wl_egl_window_create((struct wl_surface *)_surface, width, height);
+        if (!_eglWindow) return NO;
+        _eglDrawable = CGLGetWindowForContext(_eglContext, _eglWindow);
+        if (!_eglDrawable) return NO;
+    }
+    WL.wl_egl_window_resize(_eglWindow, width, height, 0, 0);
+    if (CGLContextMakeCurrentAndAttachToWindow(_eglContext, _eglDrawable) != kCGLNoError) return NO;
+    GLint interval = 0;
+    if (CGLSetParameter(_eglContext, kCGLCPSwapInterval, &interval) != kCGLNoError) return NO;
+    const char *name = (const char *)glGetString(GL_RENDERER), *version = (const char *)glGetString(GL_VERSION);
+    if (!name || !version || strtol(version, NULL, 10) < 3) return NO;
+    NSString *renderer = [[NSString stringWithUTF8String:name] lowercaseString];
+    for (NSString *software in @[@"llvmpipe", @"softpipe", @"swrast", @"software", @"swiftshader", @"lavapipe"])
+        if ([renderer rangeOfString:software].location != NSNotFound) return NO;
+    GLint red, green, blue, alpha;
+    glGetIntegerv(GL_RED_BITS, &red); glGetIntegerv(GL_GREEN_BITS, &green);
+    glGetIntegerv(GL_BLUE_BITS, &blue); glGetIntegerv(GL_ALPHA_BITS, &alpha);
+    if (red < 8 || green < 8 || blue < 8 || alpha < 8) return NO;
+    if (!_eglPresenter) {
+        _eglPresenter = [[CAWindowOpenGLContext alloc] initWithCGLContext:_eglContext];
+        NSLog(@"AppKit EGL experimental CPU-raster/GPU-presentation renderer: %s", name);
+    }
+    _eglWidth = width; _eglHeight = height;
+    return YES;
+}
+
+- (void) presentEGLSurface: (O2Surface *) surface {
+    if (_eglFailed) return;
+    size_t width = O2SurfaceGetWidth(surface), height = O2SurfaceGetHeight(surface);
+    CGLContextObj previous = CGLGetCurrentContext();
+    NSString *failure = nil;
+    @try {
+        if (width > INT32_MAX || height > INT32_MAX || ![self ensureEGLPresenterWidth:(int32_t)width height:(int32_t)height])
+            failure = @"hardware RGBA8 EGL drawable unavailable";
+        else if (![_eglPresenter presentSurface:surface opaque:_isOpaque verify:_eglVerify corrupt:_eglCorrupt])
+            failure = @"texture upload, GPU output or CPU reference verification";
+        else {
+            if (_eglVerify) ++_eglChecks;
+            if (_display->_compositorVersion >= 3) {
+                union wl_argument scale[] = {{.i = _fractionalScale ? 1 : _bufferScale}};
+                WaylandMarshal(_surface, WP_SURFACE_SET_BUFFER_SCALE, NULL, 0, scale);
+            }
+            NSSize logical = [self logicalSurfaceSize];
+            if (_viewport) {
+                union wl_argument destination[] = {{.i = (int32_t)logical.width}, {.i = (int32_t)logical.height}};
+                WaylandMarshal(_viewport, WP_VIEWPORT_SET_DESTINATION, NULL, 0, destination);
+            }
+            // Request pacing before swap's implicit surface commit. Never commit twice.
+            union wl_argument args[] = {{.o = NULL}};
+            _frameCallback = WaylandCreateObject(_surface, WP_SURFACE_FRAME,
+                &wl_callback_interface, args, WaylandObjectFrameCallback, self);
+            if (!_frameCallback || CGLFlushDrawable(_eglContext) != kCGLNoError)
+                failure = @"native EGL swap";
+            else {
+                ++_eglSwaps; _eglBytes += (uint64_t)width * height * 4;
+                _needsPresent = NO;
+                [_display flush];
+            }
+        }
+    } @finally {
+        if (CGLSetCurrentContext(previous) != kCGLNoError)
+            failure = @"restore caller CGL context";
+    }
+    if (failure) [self failEGLPresentation:failure];
+}
+
 // Copies the current content into a shm buffer and commits it, at most once
 // per frame callback.
 - (void) presentIfPossible {
@@ -927,6 +1046,11 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     const uint8_t *pixels = O2SurfaceGetPixelBytes(surface);
     if (pixels == NULL || width == 0 || height == 0 || sourceStride < width * 4)
         return;
+
+    if (_eglRequested) {
+        [self presentEGLSurface:surface];
+        return;
+    }
 
     // Onyx2D's premultiplied, little-endian ARGB is wl_shm's ARGB8888.
     uint32_t format = _isOpaque ? WP_SHM_FORMAT_XRGB8888 : WP_SHM_FORMAT_ARGB8888;
