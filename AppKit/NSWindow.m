@@ -278,9 +278,12 @@ static BOOL _allowsAutomaticWindowTabbing;
 - (void)_appearanceDidChangeFrom:(NSAppearance *)previous {
     if (previous == [self effectiveAppearance])
         return;
-    if ([_backgroundView appearance] == nil)
-        [_backgroundView _appearanceDidChangeFrom:previous];
-    [self setViewsNeedDisplay:YES];
+    [self retain];
+    @try {
+        if ([_backgroundView appearance] == nil)
+            [_backgroundView _appearanceDidChangeFrom:previous];
+        [self setViewsNeedDisplay:YES];
+    } @finally { [self release]; }
 }
 
 - (void)_applicationAppearanceDidChangeFrom:(NSAppearance *)previous {

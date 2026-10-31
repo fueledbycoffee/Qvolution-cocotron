@@ -3678,9 +3678,11 @@ static NSMutableArray *installedViewConstraints(NSView *view, BOOL create) {
 - (void)_appearanceDidChangeFrom:(NSAppearance *)previous {
     if (previous == [self effectiveAppearance])
         return;
+    [self retain];
     NSUInteger generation = ++_appearanceChangeGeneration;
-    NSArray *children = [_subviews copy];
+    NSArray *children = nil;
     @try {
+        children = [_subviews copy];
         [self setNeedsDisplay:YES];
         [self viewDidChangeEffectiveAppearance];
         for (NSView *child in children) {
@@ -3689,7 +3691,7 @@ static NSMutableArray *installedViewConstraints(NSView *view, BOOL create) {
             if ([child superview] == self && [child appearance] == nil)
                 [child _appearanceDidChangeFrom:previous];
         }
-    } @finally { [children release]; }
+    } @finally { [children release]; [self release]; }
 }
 
 @end

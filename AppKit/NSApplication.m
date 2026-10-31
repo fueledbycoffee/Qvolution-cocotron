@@ -174,10 +174,11 @@ static void applicationAppearanceDidChange(NSAppearance *previous) {
         return;
     NSAppearance *previous = [[self effectiveAppearance] retain];
     [appearance retain]; [_appearance release]; _appearance = appearance;
+    [self retain];
     @try {
         if (previous != [self effectiveAppearance])
             applicationAppearanceDidChange(previous);
-    } @finally { [previous release]; }
+    } @finally { [previous release]; [self release]; }
 }
 
 - (NSAppearance *) effectiveAppearance {

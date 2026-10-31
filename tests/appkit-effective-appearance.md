@@ -69,3 +69,5 @@ calling user code. This is not a general concurrent NSView property guarantee.
 The AppKit-owned snapshot avoids depending on generic selector-notification
 recipient lifetime. Foundation notification semantics are not changed or claimed
 fixed by this work; a separate source-level known-issue record is handed to root.
+
+`appkit-appearance-direct-lifetime.m` (default, `--window` and `--throw`, link AppKit) directly releases the last external owner of a detached view/private deferred window from its appearance callback and drains a nested autorelease pool. The receiver must remain alive throughout the callback/transaction and deallocate afterward. The `--throw` case also checks propagation of an original deliberate callback exception and cleanup during unwinding. Explicit retain/finally-release protects direct propagation; the app-wide recipient snapshot alone cannot protect direct setters. The app setter also retains its receiver through broadcast. Existing reentrancy and deliberate drawing exceptions remain separate regression cases.
