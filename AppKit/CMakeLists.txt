@@ -673,6 +673,7 @@ add_backend(X11
 		XRandR
 		Xcursor
 		fontconfig
+		FreeType
 		xkbfile
 		dbus
 )
