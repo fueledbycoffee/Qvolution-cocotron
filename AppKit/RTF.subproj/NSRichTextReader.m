@@ -435,7 +435,7 @@ static inline void flushPreviousString(NSRichTextReader *self) {
         NSFont *font = [_currentAttributes objectForKey: NSFontAttributeName];
 
         font = [[NSFontManager sharedFontManager] convertFont: font
-                                                       toSize: argument / 2];
+                                                       toSize: argument / 2.0];
         [_currentAttributes setObject: font forKey: NSFontAttributeName];
     } else if ([self isEqualToString: @"cf"]) {
         NSColor *c = [self colorAtIndex: argument];
@@ -667,23 +667,19 @@ static inline void flushPreviousString(NSRichTextReader *self) {
                 flushPreviousString(self);
                 _state = STATE_SKIPLAST;
                 break;
-            } else if (code == '\\') {
-                flushPreviousString(self);
+            } else if (code == '\\' || code == '{' || code == '}') {
+                // RTF control symbols escape these bytes without changing group state.
+                // Preserve the current destination's normal buffered decoding path.
+                if (_bufferIn == nil)
+                    _bufferIn = [[NSMutableData alloc] init];
+                [_bufferIn appendBytes: &code length: 1];
                 _state = STATE_SKIPLAST;
                 break;
             } else if (code == '_') {
                 flushPreviousString(self);
                 _state = STATE_SKIPLAST;
                 break;
-            } else if (code == '{') {
-                flushPreviousString(self);
-                _state = STATE_SKIPLAST;
-                break;
             } else if (code == '|') {
-                flushPreviousString(self);
-                _state = STATE_SKIPLAST;
-                break;
-            } else if (code == '}') {
                 flushPreviousString(self);
                 _state = STATE_SKIPLAST;
                 break;
