@@ -1035,10 +1035,15 @@ static int compareFontPatterns(const void *a, const void *b) {
                 if (native->style_name != NULL)
                     traitName = (NSString *)CFStringCreateWithCString(NULL, native->style_name,
                                                                      kCFStringEncodingUTF8);
+                FT_Long styleFlags;
+                if (!O2FontGetFaceStyleFlags(native, &styleFlags)) {
+                    NSLog(@"Cannot read actual font style metadata");
+                    continue;
+                }
                 NSFontTraitMask traits = fontTraitsOfPattern(p);
                 traits &= ~(NSBoldFontMask | NSItalicFontMask | NSFixedPitchFontMask);
-                if (native->style_flags & FT_STYLE_FLAG_BOLD) traits |= NSBoldFontMask;
-                if (native->style_flags & FT_STYLE_FLAG_ITALIC) traits |= NSItalicFontMask;
+                if (styleFlags & FT_STYLE_FLAG_BOLD) traits |= NSBoldFontMask;
+                if (styleFlags & FT_STYLE_FLAG_ITALIC) traits |= NSItalicFontMask;
                 if (FT_IS_FIXED_WIDTH(native)) traits |= NSFixedPitchFontMask;
                 NSFontTypeface *face = [[NSFontTypeface alloc]
                         initWithName: name displayName: displayName ?: name

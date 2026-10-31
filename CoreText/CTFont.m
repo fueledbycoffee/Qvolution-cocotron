@@ -446,10 +446,11 @@ CTFontSymbolicTraits CTFontGetSymbolicTraits(CTFontRef font)
     FT_Face face = fontTraitFace(font);
     if (face == NULL)
         return 0;
+    FT_Long styleFlags = O2FontFreeTypeStyleFlags((O2Font_freetype *)graphicsFont(font));
     CTFontSymbolicTraits traits = 0;
-    if (face->style_flags & FT_STYLE_FLAG_ITALIC)
+    if (styleFlags & FT_STYLE_FLAG_ITALIC)
         traits |= kCTFontTraitItalic;
-    if (face->style_flags & FT_STYLE_FLAG_BOLD)
+    if (styleFlags & FT_STYLE_FLAG_BOLD)
         traits |= kCTFontTraitBold;
     if (FT_IS_FIXED_WIDTH(face))
         traits |= kCTFontTraitMonoSpace;

@@ -10,6 +10,7 @@
 #import FT_SFNT_NAMES_H
 #import FT_TRUETYPE_IDS_H
 #import FT_TYPE1_TABLES_H
+#import FT_MULTIPLE_MASTERS_H
 
 @implementation O2Font_freetype
 
@@ -35,6 +36,53 @@ FT_Library O2FontSharedFreeTypeLibrary() {
     }
 
     return library;
+}
+
+BOOL O2FontGetFaceStyleFlags(FT_Face face, FT_Long *flags) {
+    if (face == NULL || flags == NULL || face->glyph == NULL)
+        return NO;
+    FT_Long result = face->style_flags & (FT_STYLE_FLAG_BOLD | FT_STYLE_FLAG_ITALIC);
+    if (!FT_IS_SFNT(face) || !FT_HAS_MULTIPLE_MASTERS(face)) {
+        *flags = result;
+        return YES;
+    }
+    FT_MM_Var *variation = NULL;
+    FT_Error error = FT_Get_MM_Var(face, &variation);
+    if (error != 0 || variation == NULL)
+        return NO;
+    FT_Fixed *coordinates = NULL;
+    BOOL success = NO;
+    if (variation->num_axis > 0 && sizeof(FT_Fixed) <= SIZE_MAX / variation->num_axis) {
+        coordinates = malloc((size_t)variation->num_axis * sizeof(FT_Fixed));
+        if (coordinates != NULL &&
+                FT_Get_Var_Design_Coordinates(face, variation->num_axis, coordinates) == 0) {
+            BOOL hasItalic = NO, italic = NO, hasSlant = NO, slanted = NO;
+            for (FT_UInt index = 0; index < variation->num_axis; index++) {
+                FT_ULong tag = variation->axis[index].tag;
+                FT_Fixed value = coordinates[index];
+                if (tag == FT_MAKE_TAG('w', 'g', 'h', 't')) {
+                    // Project classification policy on the registered OpenType scale.
+                    result &= ~FT_STYLE_FLAG_BOLD;
+                    if (value >= 700L * 65536L) result |= FT_STYLE_FLAG_BOLD;
+                } else if (tag == FT_MAKE_TAG('i', 't', 'a', 'l')) {
+                    hasItalic = YES;
+                    italic = value != 0;
+                } else if (tag == FT_MAKE_TAG('s', 'l', 'n', 't')) {
+                    hasSlant = YES;
+                    slanted = value != 0;
+                }
+            }
+            if (hasItalic || hasSlant) {
+                result &= ~FT_STYLE_FLAG_ITALIC;
+                if (italic || slanted) result |= FT_STYLE_FLAG_ITALIC;
+            }
+            success = YES;
+        }
+    }
+    free(coordinates);
+    FT_Done_MM_Var(face->glyph->library, variation);
+    if (success) *flags = result;
+    return success;
 }
 
 static void addAppFont(FcConfig *config, NSString *path) {
@@ -150,14 +198,19 @@ O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
     // Coverage is mandatory below; these properties rank suitable substitutes.
     // Do not add the base file/index: that would pin selection to the old face.
     if (baseFace != NULL) {
+        FT_Long styleFlags;
+        if (!O2FontGetFaceStyleFlags(baseFace, &styleFlags)) {
+            FcPatternDestroy(pattern);
+            return nil;
+        }
         if (baseFace->family_name != NULL)
             added = FcPatternAddString(pattern, FC_FAMILY,
                     (const FcChar8 *)baseFace->family_name);
         added = added && FcPatternAddInteger(pattern, FC_WEIGHT,
-                baseFace->style_flags & FT_STYLE_FLAG_BOLD
+                styleFlags & FT_STYLE_FLAG_BOLD
                         ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
         added = added && FcPatternAddInteger(pattern, FC_SLANT,
-                baseFace->style_flags & FT_STYLE_FLAG_ITALIC
+                styleFlags & FT_STYLE_FLAG_ITALIC
                         ? FC_SLANT_ITALIC : FC_SLANT_ROMAN);
         if (FT_IS_FIXED_WIDTH(baseFace))
             added = added && FcPatternAddInteger(pattern, FC_SPACING, FC_MONO);
@@ -221,9 +274,11 @@ static FT_Face createUserInterfaceFace(BOOL fixedPitch, BOOL emphasized,
         face = createFaceForMatch(candidates->fonts[index], YES);
         if (face == NULL)
             continue;
-        if (face->units_per_EM > 0 && face->num_glyphs > 0 &&
+        FT_Long styleFlags;
+        if (O2FontGetFaceStyleFlags(face, &styleFlags) &&
+                face->units_per_EM > 0 && face->num_glyphs > 0 &&
                 (!fixedPitch || FT_IS_FIXED_WIDTH(face)) &&
-                (!emphasized || (face->style_flags & FT_STYLE_FLAG_BOLD)))
+                (!emphasized || (styleFlags & FT_STYLE_FLAG_BOLD)))
             break;
         FT_Done_Face(face);
         face = NULL;
@@ -564,6 +619,11 @@ static NSInteger *copyUnscaledAdvances(FT_Face face, NSInteger glyphCount,
 
 - (instancetype) initWithFace: (FT_Face) face {
     _face = face;
+    if (!O2FontGetFaceStyleFlags(face, &_styleFlags)) {
+        NSLog(@"Cannot read actual FreeType style metadata");
+        [self release];
+        return nil;
+    }
     _platformType = O2FontPlatformTypeFreeType;
     _glyphCache = [NSMutableDictionary new];
 
@@ -732,6 +792,10 @@ static NSInteger *copyUnscaledAdvances(FT_Face face, NSInteger glyphCount,
 
 FT_Face O2FontFreeTypeFace(O2Font_freetype *self) {
     return self->_face;
+}
+
+FT_Long O2FontFreeTypeStyleFlags(O2Font_freetype *self) {
+    return self->_styleFlags;
 }
 
 - (void) fetchAdvances {
