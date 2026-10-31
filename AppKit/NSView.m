@@ -2433,30 +2433,40 @@ static NSView *viewBeingPrinted = nil;
     CGContextRef graphicsPort = [context graphicsPort];
 
     [NSGraphicsContext saveGraphicsState];
-    [NSGraphicsContext setCurrentContext: context];
+    BOOL focusPushed = NO, stateSaved = NO;
+    @try {
+        [NSGraphicsContext setCurrentContext: context];
 
-    [[context focusStack] addObject: self];
+        [[context focusStack] addObject: self];
+        focusPushed = YES;
 
-    CGContextSaveGState(graphicsPort);
-    CGContextResetClip(graphicsPort);
+        CGContextSaveGState(graphicsPort);
+        stateSaved = YES;
+        CGContextResetClip(graphicsPort);
 
-    if (context == windowContext) {
-        CGContextSetCTM(graphicsPort, [self transformToWindow]);
-        CGContextClipToRect(graphicsPort, [self visibleRect]);
-    } else {
-        CGAffineTransform transform = CGAffineTransformIdentity;
-        if (viewBeingPrinted != nil) {
-            transform = CGAffineTransformConcat(
-                    [self transformToWindow],
-                    [viewBeingPrinted transformFromWindow]);
+        if (context == windowContext) {
+            CGContextSetCTM(graphicsPort, [self transformToWindow]);
+            CGContextClipToRect(graphicsPort, [self visibleRect]);
+        } else {
+            CGAffineTransform transform = CGAffineTransformIdentity;
+            if (viewBeingPrinted != nil) {
+                transform = CGAffineTransformConcat(
+                        [self transformToWindow],
+                        [viewBeingPrinted transformFromWindow]);
+            }
+            NSView *targetView = viewBeingPrinted == nil ? self : viewBeingPrinted;
+            transform = CGAffineTransformConcat(transform,
+                                                [targetView transformToLayer]);
+            CGContextSetCTM(graphicsPort, transform);
         }
-        NSView *targetView = viewBeingPrinted == nil ? self : viewBeingPrinted;
-        transform = CGAffineTransformConcat(transform,
-                                            [targetView transformToLayer]);
-        CGContextSetCTM(graphicsPort, transform);
-    }
 
-    [self setUpGState];
+        [self setUpGState];
+    } @catch (...) {
+        if (stateSaved) CGContextRestoreGState(graphicsPort);
+        if (focusPushed) [[context focusStack] removeLastObject];
+        [NSGraphicsContext restoreGraphicsState];
+        @throw;
+    }
 }
 
 - (void) lockFocus {
@@ -2741,41 +2751,43 @@ static NSView *viewBeingPrinted = nil;
         if ([self canDraw]) {
             // This view must be locked/unlocked prior to drawing subviews otherwise
             // gState changes may affect subviews.
-            [self lockFocus];
+            [[self effectiveAppearance] performAsCurrentDrawingAppearance:^{
+                [self lockFocus];
+                @try {
+                    NSGraphicsContext *context = [NSGraphicsContext currentContext];
+                    CGContextRef graphicsPort = [context graphicsPort];
 
-            NSGraphicsContext *context = [NSGraphicsContext currentContext];
-            CGContextRef graphicsPort = [context graphicsPort];
+                    CGContextClipToRect(graphicsPort, rect);
 
-            CGContextClipToRect(graphicsPort, rect);
+                    const NSRect *rects;
+                    NSInteger rectsCount;
+                    [self getRectsBeingDrawn: &rects count: &rectsCount];
+                    // If there is only one rect, it's the visible rect - it's already
+                    // clipped
+                    if (rectsCount > 1)
+                        CGContextClipToRects(graphicsPort, rects, rectsCount);
 
-            const NSRect *rects;
-            NSInteger rectsCount;
-            [self getRectsBeingDrawn: &rects count: &rectsCount];
-            // If there is only one rect, it's the visible rect - it's already
-            // clipped
-            if (rectsCount > 1)
-                CGContextClipToRects(graphicsPort, rects, rectsCount);
+                    // [_window dirtyRect:[self convertRect:rect toView:nil]];
+                    if ([NSGraphicsContext inQuartzDebugMode]) {
+                        [[NSColor yellowColor] set];
+                        NSRectFill(rect);
+                    } else {
+                        if (_layer != nil && [self wantsUpdateLayer]) {
+                            [self updateLayer];
+                            // A custom backing layer may implement -display (e.g. a Metal
+                            // blit layer). View invalidation must also invalidate that layer.
+                            [_layer setNeedsDisplay];
+                        }
+                        else
+                            [self drawRect: rect];
+                        if (NSShowAllViews) {
+                            [[self _borderColorForNSShowAllViews] set];
+                            NSFrameRect(rect);
+                        }
+                    }
 
-            // [_window dirtyRect:[self convertRect:rect toView:nil]];
-            if ([NSGraphicsContext inQuartzDebugMode]) {
-                [[NSColor yellowColor] set];
-                NSRectFill(rect);
-            } else {
-                if (_layer != nil && [self wantsUpdateLayer]) {
-                    [self updateLayer];
-                    // A custom backing layer may implement -display (e.g. a Metal
-                    // blit layer). View invalidation must also invalidate that layer.
-                    [_layer setNeedsDisplay];
-                }
-                else
-                    [self drawRect: rect];
-                if (NSShowAllViews) {
-                    [[self _borderColorForNSShowAllViews] set];
-                    NSFrameRect(rect);
-                }
-            }
-
-            [self unlockFocus];
+                } @finally { [self unlockFocus]; }
+            }];
 
             NSEnumerator *viewEnumerator = [self _subviewsInDisplayOrderEnumerator];
 

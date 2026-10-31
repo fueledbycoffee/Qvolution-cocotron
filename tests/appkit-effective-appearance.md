@@ -28,3 +28,25 @@ coverage; no screenshot or proprietary asset provides the expected output.
 
 The original parent fixture fails detached-root app inheritance. Candidate runtime
 results must be recorded independently; compilation alone is not a pass.
+
+## Automatic view drawing scope and focus cleanup
+
+`appkit-view-drawing-appearance.m` exercises actual displayRectIgnoringOpacity
+and production focus machinery routed to its own CPU bitmap. It does not invoke
+an appearance-scope helper manually. Dynamic providers return known red/blue
+colors for light/dark, and the test checks actual pixel bytes and observed
+provider appearance. Nested explicit light and dark views must restore the
+parent scope. A real CALayer marker exercises updateLayer dispatch without a
+native window or GPU context. Modes are --draw, --layer, --throw and --setup-throw.
+Deliberate draw/setup exceptions must restore context, focus and thread appearance.
+
+The first parent runs of all four modes failed earlier at nil context restoration,
+so they are not provider-pixel mismatch evidence. Separate public regression
+`appkit-graphics-context-nil-state.m` covers nil/non-nil context saves, nested
+CGContext state, repeated nil saves and unchanged empty-stack restoration.
+Candidate pixel/scope/exception results must be recorded after that prerequisite.
+
+The implementation scopes automatic view drawing, including setUpGState, drawRect
+and updateLayer, using the existing thread-local appearance block. It does not
+change palettes, claim native macOS pixels, add global system appearance policy,
+or qualify arbitrary manual lockFocus/drawing outside the automatic display path.
