@@ -111,6 +111,7 @@ set(AppKit_sources
 	NSCellUndoManager.m
 	NSFontPanelCell.m
 	NSThemeFrame.m
+	NSTitlebarRenderer.m
 	NSStringDrawer.m
 	NSAffineTransform.m
 	NSMeasurementUnit.m
