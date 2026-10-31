@@ -4485,6 +4485,12 @@ static NSTextView *s_targetTextView = nil;
     }
 }
 
+- (void) removeFromSuperviewWithoutNeedingDisplay {
+    // NSView's removal path does not send the superview lifecycle callbacks.
+    [self viewWillMoveToSuperview: nil];
+    [super removeFromSuperviewWithoutNeedingDisplay];
+}
+
 - (void) viewWillMoveToSuperview: (NSView *) view {
     if (view != [self superview]) {
         NSScrollView *scroll = [self enclosingScrollView];
