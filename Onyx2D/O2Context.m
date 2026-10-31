@@ -1133,12 +1133,16 @@ void O2ContextStrokeRectWithWidth(O2ContextRef self, O2Rect rect, O2Float width)
     if (self == nil)
         return;
 
-    O2ContextSaveGState(self);
+    O2GState *gState = O2ContextCurrentGState(self);
+    O2Float savedWidth = gState->_lineWidth;
     O2ContextSetLineWidth(self, width);
-    O2ContextBeginPath(self);
-    O2ContextAddRect(self, rect);
-    O2ContextStrokePath(self);
-    O2ContextRestoreGState(self);
+    @try {
+        O2ContextBeginPath(self);
+        O2ContextAddRect(self, rect);
+        O2ContextStrokePath(self);
+    } @finally {
+        O2GStateSetLineWidth(gState, savedWidth);
+    }
 }
 
 void O2ContextStrokeEllipseInRect(O2ContextRef self, O2Rect rect) {
