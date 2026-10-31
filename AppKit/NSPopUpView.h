@@ -37,6 +37,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 - (void) selectItemAtIndex: (NSInteger) index;
 
 - (NSSize) sizeForContents;
+- (CGFloat)heightForMaximumVisibleRows:(NSUInteger)rows;
 - (NSRect) rectForSelectedItem;
 - (void) scrollSelectedItemToVisible;
 - (void) scrollBy: (CGFloat) delta;

@@ -36,6 +36,7 @@ typedef enum {
     NSPopUpArrowPosition _arrowPosition;
     NSRectEdge _preferredEdge;
     BOOL _syncTitleNeeded;
+    NSUInteger _maximumVisibleRows;
 }
 
 - initTextCell: (NSString *) string pullsDown: (BOOL) pullDown;

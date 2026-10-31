@@ -22,6 +22,7 @@
 #import <AppKit/NSGraphics.h>
 #import <AppKit/NSParagraphStyle.h>
 #import <AppKit/NSPopUpButton.h>
+#import <AppKit/NSPopUpButtonCellPrivate.h>
 #import <AppKit/NSTextView.h>
 #import <AppKit/NSWindow.h>
 
@@ -41,6 +42,8 @@
     _textView=view;
     [self setIdentifier:@"NSTextViewInspectorBar"];
     _family=[[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    // Qvolution UX policy: retain every family in a compact scrolling viewport.
+    [[_family cell] _setMaximumVisibleRows:16];
     [_family setIdentifier:@"Font family"];
     [_family setToolTip:@"Font family"];
     [_family addItemsWithTitles:[[[NSFontManager sharedFontManager] availableFontFamilies]

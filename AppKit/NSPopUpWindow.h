@@ -23,9 +23,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 @interface NSPopUpWindow : NSPanel {
     NSPopUpView *_view;
+    NSUInteger _maximumVisibleRows;
 }
 
 - initWithFrame: (NSRect) frame;
+
+- (void)setMaximumVisibleRows:(NSUInteger)rows;
 
 - (void) setMenu: (NSMenu *) menu;
 - (void) setFont: (NSFont *) font;
