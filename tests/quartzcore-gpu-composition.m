@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
         const char *version=(const char *)glGetString(GL_VERSION);
         checkComposition(renderer && vendor && version,"renderer identity");
         printf("renderer=%s\nvendor=%s\nversion=%s\n",renderer,vendor,version);
-        checkComposition(strtod(version,NULL)>=2.1,"probe requires desktop GL 2.1 pixel-unpack buffers");
+        checkComposition(strtod(version,NULL)>=3,"probe requires desktop GL 3 framebuffer bindings");
         NSString *identity=[NSString stringWithUTF8String:renderer];
         for (NSString *software in @[@"llvmpipe",@"softpipe",@"swrast",@"swiftshader",@"software"])
             checkComposition([identity rangeOfString:software options:NSCaseInsensitiveSearch].location==NSNotFound,"software renderer rejected");
@@ -188,9 +188,28 @@ int main(int argc, char **argv) {
             checkComposition(child && [child nativeWindow],"native EGL child");
             drawable=CGLGetWindowForContext(context,[child nativeWindow]); checkComposition(drawable!=NULL,"native EGL drawable");
             checkComposition(CGLContextMakeCurrentAndAttachToWindow(context,drawable)==kCGLNoError,"attach actual native drawable");
+            GLint state;
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&state);checkComposition(state==(GLint)fbo,"first native attach preserves draw FBO");
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&state);checkComposition(state==(GLint)fbo,"first native attach preserves read FBO");
+            glGetIntegerv(GL_DRAW_BUFFER,&state);checkComposition(state==GL_COLOR_ATTACHMENT0,"first native attach preserves FBO draw selection");
+            glGetIntegerv(GL_READ_BUFFER,&state);checkComposition(state==GL_COLOR_ATTACHMENT0,"first native attach preserves FBO read selection");
             glBindFramebuffer(GL_FRAMEBUFFER,0);
+            glGetIntegerv(GL_DRAW_BUFFER,&state);checkComposition(state==GL_BACK,"first native default draw buffer initialized");
+            glGetIntegerv(GL_READ_BUFFER,&state);checkComposition(state==GL_BACK,"first native default read buffer initialized");
             CGSize pixels=[(id)child drawablePixelSize]; checkComposition(pixels.width>0 && pixels.height>0,"native drawable size");
             renderAndCheck(composition,pixels.width,pixels.height,1,"native-preswap");
+            glDrawBuffer(GL_NONE);glReadBuffer(GL_NONE);
+            checkComposition(CGLContextMakeCurrentAndAttachToWindow(context,drawable)==kCGLNoError,"repeat native attach");
+            glGetIntegerv(GL_DRAW_BUFFER,&state);checkComposition(state==GL_NONE,"repeat native attach preserves explicit draw NONE");
+            glGetIntegerv(GL_READ_BUFFER,&state);checkComposition(state==GL_NONE,"repeat native attach preserves explicit read NONE");
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,fbo);
+            checkComposition(CGLContextMakeCurrentAndAttachToWindow(context,drawable)==kCGLNoError,"repeat native attach with separate FBOs");
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&state);checkComposition(state==(GLint)fbo,"repeat attach preserves nondefault draw FBO");
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&state);checkComposition(state==0,"repeat attach preserves independent read FBO");
+            glGetIntegerv(GL_DRAW_BUFFER,&state);checkComposition(state==GL_COLOR_ATTACHMENT0,"repeat attach preserves FBO draw selection");
+            glGetIntegerv(GL_READ_BUFFER,&state);checkComposition(state==GL_NONE,"repeat attach preserves independent read selection");
+            glBindFramebuffer(GL_FRAMEBUFFER,0);glDrawBuffer(GL_BACK);glReadBuffer(GL_BACK);
+            renderAndCheck(composition,pixels.width,pixels.height,1,"native-after-rebind");
             checkComposition(CGLFlushDrawable(context)==kCGLNoError,"native EGL swap"); [child flush];
             puts("PASS: native EGL child swap and parent commit submitted; compositor-visible acceptance separate");
             if (hold) [NSApp run];

@@ -19,7 +19,7 @@ uses a 77-byte stride to exercise row repacking when OpenGL cannot express that
 stride as a pixel count. It also seeds unpack alignment, row length, row/pixel
 skip, byte swap and a bound unpack buffer; the upload must both ignore those
 caller states when reading CPU memory and restore them afterward. The probe
-requires desktop GL 2.1 or later for its unpack-buffer check. Production upload
+requires desktop GL 3 or later for its separate framebuffer-binding checks. Production upload
 code checks the current context's version/extensions before touching PBO state.
 This change handles supported 8-bit-component, 32-bit image layouts; it does not
 claim general image pixel-format conversion support.
@@ -36,6 +36,14 @@ same oracle at the actual drawable pixel size; a successful CGL swap and child
 flush then submit the native child and synchronized parent commit. Renderer
 identity is printed and recognized software renderers are rejected. Require an
 observed hardware identity matching the host device before claiming GPU work.
+
+The first native attachment must preserve the already-bound offscreen read/draw
+FBOs and their selections, and initialize the window default buffers to BACK.
+Only after asserting those defaults does the scene render/read back. Repeated
+attachment must preserve explicit NONE selections and independently bound
+read/draw FBOs. The test then chooses BACK itself to resume presentation and
+reruns the same oracle. There is no diagnostic buffer forcing before the first
+native image check; the CGL production path must establish a usable drawable.
 
 `--hold` performs that native path and leaves the app event loop running for
 coordinator-authorized compositor-visible inspection/capture. No screenshot or
