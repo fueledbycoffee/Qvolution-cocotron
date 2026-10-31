@@ -251,6 +251,24 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
 
     if (!member) return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 
+    if (_waylandApplicationMenu && dbus_message_is_signal(message, DBUS_INTERFACE_DBUS, "NameOwnerChanged") &&
+        path && strcmp(path, DBUS_PATH_DBUS) == 0 && dbus_message_get_sender(message) &&
+        strcmp(dbus_message_get_sender(message), DBUS_SERVICE_DBUS) == 0 &&
+        dbus_message_has_signature(message, "sss")) {
+        DBusMessageIter iter;
+        const char *name = NULL, *newOwner = NULL;
+        dbus_message_iter_init(message, &iter);
+        dbus_message_iter_get_basic(&iter, &name);
+        dbus_message_iter_next(&iter);
+        dbus_message_iter_next(&iter);
+        dbus_message_iter_get_basic(&iter, &newOwner);
+        if (strcmp(name, "space.unmade.GlobalMenu") != 0)
+            return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+        if (newOwner && *newOwner)
+            [self registerWaylandApplicationMenu: _currentMenu];
+        return DBUS_HANDLER_RESULT_HANDLED;
+    }
+
     if (strcmp(member, "Introspect") == 0) {
         static const char *kIntrospectXML =
             "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n"
@@ -337,7 +355,7 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
     }
 
     if (strcmp(member, "GetLayout") == 0) {
-        if (!_globalMenuEngaged) {
+        if (!_waylandApplicationMenu && !_globalMenuEngaged) {
             _globalMenuEngaged = YES;
             dispatch_async(dispatch_get_main_queue(), ^{
                 for (NSWindow *window in [NSApp windows]) {
@@ -452,6 +470,40 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
         dbus_connection_send(_connection, sig, NULL);
         dbus_message_unref(sig);
     }
+}
+
+// Orbit resolves this connection's host PID through the bus daemon. No X11 ID is sent.
+- (void) registerWaylandApplicationMenu: (NSMenu *) menu {
+    _waylandApplicationMenu = YES;
+    _globalMenuEngaged = NO;
+    if (!_available || !_connection)
+        return;
+    [self updateMenu: menu];
+    if (!_orbitOwnerMatchAdded) {
+        DBusError error;
+        dbus_error_init(&error);
+        dbus_bus_add_match(_connection,
+            "type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',"
+            "member='NameOwnerChanged',path='/org/freedesktop/DBus',arg0='space.unmade.GlobalMenu'", &error);
+        if (dbus_error_is_set(&error)) {
+            NSLog(@"Orbit global menu: cannot watch the daemon: %s", error.message);
+            dbus_error_free(&error);
+            return;
+        }
+        _orbitOwnerMatchAdded = YES;
+    }
+    DBusMessage *message = dbus_message_new_method_call("space.unmade.GlobalMenu",
+        "/space/unmade/GlobalMenu", "space.unmade.GlobalMenu", "RegisterWaylandMenu");
+    if (message) {
+        const char *path = "/MenuBar";
+        appendBasic(message, DBUS_TYPE_OBJECT_PATH, &path);
+        dbus_message_set_no_reply(message, TRUE);
+        dbus_connection_send(_connection, message, NULL);
+        dbus_message_unref(message);
+        dbus_connection_flush(_connection);
+    }
+    // Orbit 1.1.3 has no presentation acknowledgement. Keep the local menu visible,
+    // including while the daemon or Shell extension is unavailable or restarting.
 }
 
 - (void) registerWindow: (Window) x11Window forMenu: (NSMenu *) menu {

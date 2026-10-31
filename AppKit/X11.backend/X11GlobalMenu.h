@@ -17,6 +17,8 @@ typedef struct DBusConnection DBusConnection;
     unsigned int _revision;
     BOOL _available;
     BOOL _globalMenuEngaged;
+    BOOL _waylandApplicationMenu;
+    BOOL _orbitOwnerMatchAdded;
 }
 
 + (instancetype) sharedGlobalMenu;
@@ -25,5 +27,6 @@ typedef struct DBusConnection DBusConnection;
 - (void) registerWindow: (Window) x11Window forMenu: (NSMenu *) menu;
 - (void) unregisterWindow: (Window) x11Window;
 - (void) updateMenu: (NSMenu *) menu;
+- (void) registerWaylandApplicationMenu: (NSMenu *) menu;
 
 @end

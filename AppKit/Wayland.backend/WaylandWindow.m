@@ -19,6 +19,7 @@
 #import "WaylandWindow.h"
 #import "WaylandSubWindow.h"
 #import "WaylandLibrary.h"
+#import "../X11.backend/X11GlobalMenu.h"
 #import "WaylandProtocol.h"
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSWindow.h>
@@ -236,6 +237,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
         args[0].s = [[[NSProcessInfo processInfo] processName] UTF8String];
         if (args[0].s != NULL)
             WaylandMarshal(_toplevel, WP_TOPLEVEL_SET_APP_ID, NULL, 0, args);
+        if (!menu && ![_delegate isKindOfClass: NSClassFromString(@"NSPanel")])
+            [[X11GlobalMenu sharedGlobalMenu] registerWaylandApplicationMenu: [NSApp mainMenu]];
         _fullscreenRequested = NO;
         [self updateFullscreen];
         [self updateSizeLimits];
