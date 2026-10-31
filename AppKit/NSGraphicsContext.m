@@ -208,16 +208,15 @@ NSMutableArray *NSCurrentFocusStack() {
 + (void) saveGraphicsState {
     NSGraphicsContext *current = _currentContext();
 
-    if (current != nil) {
-        [_contextStack() addObject: current];
-        [current saveGraphicsState];
-    }
+    [_contextStack() addObject: current != nil ? (id)current : (id)[NSNull null]];
+    [current saveGraphicsState];
 }
 
 + (void) restoreGraphicsState {
-    NSGraphicsContext *current = [_contextStack() lastObject];
+    id saved = [_contextStack() lastObject];
 
-    if (current != nil) {
+    if (saved != nil) {
+        NSGraphicsContext *current = saved == [NSNull null] ? nil : saved;
         [self setCurrentContext: current];
         [_contextStack() removeLastObject];
         [current restoreGraphicsState];
