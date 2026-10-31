@@ -242,7 +242,7 @@ NSMapTableKeyCallBacks O2PDFOwnedCStringKeyCallBacks = {O2PDFHashCString,
 
     [encoder appendString: @"<<\n"];
     while (NSNextMapEnumeratorPair(&state, (void **) &key, (void **) &value)) {
-        [encoder appendFormat: @"/%s ", key];
+        [[O2PDFObject_Name pdfObjectWithCString:key] encodeWithPDFContext:encoder];
         [encoder encodePDFObject: value];
     }
     [encoder appendString: @">>\n"];

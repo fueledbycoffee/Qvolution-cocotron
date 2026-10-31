@@ -40,6 +40,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <stddef.h>
 #import <limits.h>
+#import <stdlib.h>
+#import <errno.h>
+#import <math.h>
+#import <xlocale.h>
 #import <Foundation/NSSet.h>
 #import <Foundation/NSValue.h>
 
@@ -339,13 +343,31 @@ BOOL O2PDFScanVersion(const char *bytes, unsigned length,
     return YES;
 }
 
+static BOOL O2PDFNumber(const char *bytes, O2PDFInteger start, O2PDFInteger end,
+        BOOL real, O2PDFObject **object) {
+    unsigned char next=bytes[end];
+    if (next && next!=' ' && next!='\t' && next!=LF && next!=CR && next!=FF &&
+            !strchr("()<>[]{}/%",next)) return NO;
+    NSString *token=[[NSString alloc] initWithBytes:bytes+start length:end-start encoding:NSASCIIStringEncoding];
+    const char *text=[token UTF8String]; char *last=NULL;
+    BOOL valid=NO; errno=0;
+    if (real) {
+        double value=strtod_l(text,&last,LC_C_LOCALE);
+        valid=last!=text && *last=='\0' && isfinite(value);
+        if (valid) *object=[O2PDFObject_Real pdfObjectWithReal:value];
+    } else {
+        long long value=strtoll_l(text,&last,10,LC_C_LOCALE);
+        valid=last!=text && *last=='\0' && errno!=ERANGE && value>=NSIntegerMin && value<=NSIntegerMax;
+        if (valid) *object=[O2PDFObject_Integer pdfObjectWithInteger:value];
+    }
+    [token release]; return valid;
+}
+
 // Returns YES and *objectp==NULL on end of stream
 BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
                      O2PDFInteger *lastPosition, O2PDFObject **objectp)
 {
-    O2PDFInteger currentSign = 1, currentInt = 0;
-    O2PDFReal currentReal = 0, currentFraction = 0;
-    int inlineLocation = 0;
+    O2PDFInteger inlineLocation = 0;
     O2PDFByteBuffer *byteBuffer = NULL;
 
     enum {
@@ -391,14 +413,12 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
 
             case '-':
                 state = STATE_INTEGER;
-                currentSign = -1;
-                currentInt = 0;
+                inlineLocation = position;
                 break;
 
             case '+':
                 state = STATE_INTEGER;
-                currentSign = 1;
-                currentInt = 0;
+                inlineLocation = position;
                 break;
 
             case '0':
@@ -412,15 +432,12 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
             case '8':
             case '9':
                 state = STATE_INTEGER;
-                currentSign = 1;
-                currentInt = code - '0';
+                inlineLocation = position;
                 break;
 
             case '.':
                 state = STATE_REAL;
-                currentSign = 1;
-                currentReal = 0;
-                currentFraction = 0.1;
+                inlineLocation = position;
                 break;
 
             case '(':
@@ -470,29 +487,17 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
             break;
 
         case STATE_INTEGER:
-            if (code == '.') {
-                state = STATE_REAL;
-                currentReal = currentInt;
-                currentFraction = 0.1;
-            } else if (code >= '0' && code <= '9')
-                currentInt = currentInt * 10 + code - '0';
-            else {
-                *objectp = [O2PDFObject_Integer
-                        pdfObjectWithInteger: currentSign * currentInt];
+            if (code == '.') state = STATE_REAL;
+            else if (code < '0' || code > '9') {
                 *lastPosition = position;
-                return YES;
+                return O2PDFNumber(bytes, inlineLocation, position, NO, objectp);
             }
             break;
 
         case STATE_REAL:
-            if (code >= '0' && code <= '9') {
-                currentReal += currentFraction * (code - '0');
-                currentFraction *= 0.1;
-            } else {
-                *objectp = [O2PDFObject_Real
-                        pdfObjectWithReal: currentSign * currentReal];
+            if (code < '0' || code > '9') {
                 *lastPosition = position;
-                return YES;
+                return O2PDFNumber(bytes, inlineLocation, position, YES, objectp);
             }
             break;
 
@@ -507,7 +512,7 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
                 *lastPosition = position + 1;
                 return YES;
             } else if (code == '\\') {
-                int pos;
+                O2PDFInteger pos;
 
                 byteBuffer = O2PDFByteBufferCreate();
                 for (pos = inlineLocation; pos < position; pos++)
@@ -598,12 +603,8 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
                 return YES;
             } else {
                 byteBuffer = O2PDFByteBufferCreate();
-                if (O2PDFByteBufferAppendHighNibble(byteBuffer, code))
-                    state = STATE_HEX_STRING_NIBBLE2;
-                else
-                    return debugError(bytes, length, position,
-                                      @"Invalid hex character code=0x%02X",
-                                      code);
+                state = STATE_HEX_STRING_NIBBLE1;
+                position--;
             }
             break;
 
@@ -643,9 +644,22 @@ BOOL O2PDFScanObject(const char *bytes, unsigned length, O2PDFInteger position,
                                       @"Invalid character in name, code=0x%02X",
                                       code);
 
-                *objectp = [O2PDFObject_Name
-                        pdfObjectWithBytes: bytes + inlineLocation
-                                    length: (position - inlineLocation)];
+                byteBuffer = O2PDFByteBufferCreate();
+                for (O2PDFInteger i=inlineLocation; i<position; i++) {
+                    unsigned char value=bytes[i];
+                    if (value=='#') {
+                        if (i+2>=position) { O2PDFByteBufferFree(byteBuffer); return NO; }
+                        unsigned char high=O2PDFByteBufferDecodeNibble(bytes[++i]);
+                        unsigned char low=O2PDFByteBufferDecodeNibble(bytes[++i]);
+                        if (high==0xFF || low==0xFF || (high==0 && low==0)) {
+                            O2PDFByteBufferFree(byteBuffer); return NO;
+                        }
+                        value=(high<<4)|low;
+                    }
+                    O2PDFByteBufferAppend(byteBuffer,value);
+                }
+                *objectp = [O2PDFObject_Name pdfObjectWithBytes:(const char *)byteBuffer->bytes length:byteBuffer->length];
+                O2PDFByteBufferFree(byteBuffer);
                 *lastPosition = position;
                 return YES;
             }

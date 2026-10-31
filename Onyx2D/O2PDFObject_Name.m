@@ -64,7 +64,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 }
 
 - (void) encodeWithPDFContext: (O2PDFContext *) encoder {
-    [encoder appendFormat: @"/%s ", _bytes];
+    [encoder appendCString:"/"];
+    for (unsigned i=0;i<_length;i++) {
+        unsigned char byte=_bytes[i];
+        if (byte<=32 || byte>=127 || strchr("()<>[]{}/%#",byte))
+            [encoder appendFormat:@"#%02X",byte];
+        else [encoder appendBytes:&byte length:1];
+    }
+    [encoder appendCString:" "];
 }
 
 - (NSString *) description {
