@@ -12,11 +12,13 @@
 #define PHASE_H 160
 #define REQUIRE(c, message) do { if (!(c)) { fprintf(stderr,"FAIL: %s\n",message); return 1; } } while (0)
 typedef struct { double mass,x,y; uint8_t alpha[PHASE_W*PHASE_H]; } PhaseMask;
-typedef enum {PhaseDefault,PhaseEnabled,PhaseOff,PhaseAllowOff,PhaseQuantized,PhaseQuantAllowOff,PhaseRestoreShould,PhaseRestoreAllow,PhaseRestoreQuant} PhaseMode;
+typedef enum {PhaseDefault,PhaseEnabled,PhaseOff,PhaseAllowOff,PhaseQuantized,PhaseQuantAllowOff,PhaseRestoreShould,PhaseRestoreAllow,PhaseRestoreQuant,PhaseAAOff,PhaseAAAllowOff} PhaseMode;
 static void phaseConfigure(CGContextRef c,PhaseMode mode) {
     if(mode==PhaseDefault)return;
     CGContextSetAllowsFontSubpixelPositioning(c,true); CGContextSetShouldSubpixelPositionFonts(c,true);
     CGContextSetAllowsFontSubpixelQuantization(c,true); CGContextSetShouldSubpixelQuantizeFonts(c,false);
+    if(mode==PhaseAAOff)CGContextSetShouldAntialias(c,false);
+    if(mode==PhaseAAAllowOff)CGContextSetAllowsAntialiasing(c,false);
     if(mode==PhaseOff)CGContextSetShouldSubpixelPositionFonts(c,false);
     if(mode==PhaseAllowOff)CGContextSetAllowsFontSubpixelPositioning(c,false);
     if(mode==PhaseQuantized)CGContextSetShouldSubpixelQuantizeFonts(c,true);

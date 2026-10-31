@@ -18,7 +18,7 @@ int main(int argc,char **argv){
         REQUIRE(fabs(shifted.x-base.x-.5*scale)<.15,"negative user origin preserves translation");
     }
     REQUIRE(phaseRender(font,glyph,1,10.5,40.25,0,PhaseDefault,&legacy),"fractional default renders");
-    const PhaseMode disabled[]={PhaseOff,PhaseAllowOff,PhaseQuantized,PhaseRestoreAllow};
+    const PhaseMode disabled[]={PhaseOff,PhaseAllowOff,PhaseQuantized,PhaseRestoreAllow,PhaseAAOff,PhaseAAAllowOff};
     for(size_t i=0;i<sizeof(disabled)/sizeof(disabled[0]);i++){
         REQUIRE(phaseRender(font,glyph,1,10.5,40.25,0,disabled[i],&shifted),"disabled/legacy branch renders");
         REQUIRE(phaseEqual(&legacy,&shifted),"default/disallowed/quantized branch preserves legacy mask");

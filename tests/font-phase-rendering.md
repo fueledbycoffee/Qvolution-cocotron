@@ -15,7 +15,8 @@ Official parameter contracts:
 
 Those pages and the vendored headers do not establish native defaults or a
 numeric quantization grid. Preserve existing Cocotron zero defaults. Implement
-the explicit allowed+enabled positioning path when quantization is not both
+the explicit allowed+enabled positioning path when both antialiasing flags permit
+antialiased drawing and quantization is not both
 allowed and requested. Quantization-enabled placement retains the previous
 integral behavior pending a separate implementation; no quarter-pixel policy
 or native compatibility claim is invented. Rendering remains grayscale, with

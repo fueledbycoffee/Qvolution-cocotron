@@ -257,8 +257,8 @@ static BOOL splitGlyphOrigin(O2Float value, NSInteger *anchor, uint8_t *phase) {
 
     const O2Size *useAdvances = (advances != NULL) ? advances : defaultAdvances;
 
-    BOOL position = _allowsFontSubpixelPositioning &&
-            gState->_shouldSubpixelPositionFonts && FT_IS_SCALABLE(face) &&
+    BOOL position = _allowsAntialiasing && gState->_shouldAntialias &&
+            _allowsFontSubpixelPositioning && gState->_shouldSubpixelPositionFonts && FT_IS_SCALABLE(face) &&
             !(_allowsFontSubpixelQuantization && gState->_shouldSubpixelQuantizeFonts);
     for (i = 0; i < count; i++) {
         uint8_t phaseX = 0, phaseY = 0;
