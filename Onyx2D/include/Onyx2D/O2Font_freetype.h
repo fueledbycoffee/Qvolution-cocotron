@@ -43,6 +43,10 @@ FT_Face O2FontFreeTypeFace(O2Font_freetype *self);
 FT_Library O2FontSharedFreeTypeLibrary();
 FcConfig *O2FontSharedFontConfig();
 
+// Returns an owned configured UI face with real requested traits, or nil.
+O2FontRef O2FontCreateForUserInterface(BOOL fixedPitch, BOOL emphasized,
+                                      const char *language);
+
 // Returns an owned font covering all supplied Unicode scalar values, or nil.
 O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
                                            size_t count, FT_Face baseFace,

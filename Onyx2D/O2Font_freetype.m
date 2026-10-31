@@ -73,6 +73,39 @@ FcConfig *O2FontSharedFontConfig() {
     return fontConfig;
 }
 
+static FT_Face createFaceForMatch(FcPattern *match) {
+    FcChar8 *filename = NULL;
+    int faceIndex = 0;
+    FcResult indexResult = FcPatternGetInteger(match, FC_INDEX, 0, &faceIndex);
+    if (FcPatternGetString(match, FC_FILE, 0, &filename) != FcResultMatch ||
+        (indexResult != FcResultMatch && indexResult != FcResultNoMatch) ||
+        faceIndex < 0)
+        return NULL;
+    FT_Face face = NULL;
+    if (FT_New_Face(O2FontSharedFreeTypeLibrary(), (const char *)filename,
+                    faceIndex, &face) != 0)
+        return NULL;
+    if (FT_Select_Charmap(face, FT_ENCODING_UNICODE) != 0) {
+        FT_Done_Face(face);
+        return NULL;
+    }
+    return face;
+}
+
+static FT_Face createMatchingFace(FcPattern *pattern) {
+    FcConfig *config = O2FontSharedFontConfig();
+    if (config == NULL || !FcConfigSubstitute(config, pattern, FcMatchPattern))
+        return NULL;
+    FcDefaultSubstitute(pattern);
+    FcResult result;
+    FcPattern *match = FcFontMatch(config, pattern, &result);
+    if (match == NULL)
+        return NULL;
+    FT_Face face = createFaceForMatch(match);
+    FcPatternDestroy(match);
+    return face;
+}
+
 O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
                                            size_t count, FT_Face baseFace,
                                            const char *language) {
@@ -127,37 +160,10 @@ O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
         return nil;
     }
 
-    FcConfig *config = O2FontSharedFontConfig();
-    if (config == NULL || !FcConfigSubstitute(config, pattern, FcMatchPattern)) {
-        FcPatternDestroy(pattern);
-        return nil;
-    }
-    FcDefaultSubstitute(pattern);
-    FcResult result;
-    FcPattern *match = FcFontMatch(config, pattern, &result);
+    FT_Face face = createMatchingFace(pattern);
     FcPatternDestroy(pattern);
-    if (match == NULL)
+    if (face == NULL)
         return nil;
-
-    FcChar8 *filename = NULL;
-    int faceIndex = 0;
-    FcResult indexResult = FcPatternGetInteger(match, FC_INDEX, 0, &faceIndex);
-    if (FcPatternGetString(match, FC_FILE, 0, &filename) != FcResultMatch ||
-        (indexResult != FcResultMatch && indexResult != FcResultNoMatch) ||
-        faceIndex < 0) {
-        FcPatternDestroy(match);
-        return nil;
-    }
-    FT_Face face = NULL;
-    FT_Error error = FT_New_Face(O2FontSharedFreeTypeLibrary(),
-                                 (const char *)filename, faceIndex, &face);
-    FcPatternDestroy(match);
-    if (error != 0)
-        return nil;
-    if (FT_Select_Charmap(face, FT_ENCODING_UNICODE) != 0) {
-        FT_Done_Face(face);
-        return nil;
-    }
     for (size_t index = 0; index < count; ++index) {
         if (FT_Get_Char_Index(face, codePoints[index]) == 0) {
             FT_Done_Face(face);
@@ -165,6 +171,68 @@ O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
         }
     }
     return [[O2Font_freetype alloc] initWithFace: face];
+}
+
+static FT_Face createUserInterfaceFace(BOOL fixedPitch, BOOL emphasized,
+                                      const char *language) {
+    FcPattern *pattern = FcPatternCreate();
+    if (pattern == NULL)
+        return NULL;
+    FcBool added = FcPatternAddString(pattern, FC_FAMILY,
+            (const FcChar8 *)(fixedPitch ? "monospace" : "sans-serif")) &&
+            FcPatternAddInteger(pattern, FC_WEIGHT,
+                    emphasized ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
+    if (fixedPitch)
+        added = added && FcPatternAddInteger(pattern, FC_SPACING, FC_MONO);
+    if (language != NULL) {
+        FcLangSet *languages = FcLangSetCreate();
+        if (languages == NULL) {
+            FcPatternDestroy(pattern);
+            return NULL;
+        }
+        added = added && FcLangSetAdd(languages, (const FcChar8 *)language) &&
+                FcPatternAddLangSet(pattern, FC_LANG, languages);
+        FcLangSetDestroy(languages);
+    }
+    FcConfig *config = O2FontSharedFontConfig();
+    if (!added || config == NULL || !FcConfigSubstitute(config, pattern, FcMatchPattern)) {
+        FcPatternDestroy(pattern);
+        return NULL;
+    }
+    FcDefaultSubstitute(pattern);
+    FcResult result;
+    // Do not trim equal-coverage faces: a later one may supply required real traits.
+    FcFontSet *candidates = FcFontSort(config, pattern, FcFalse, NULL, &result);
+    FcPatternDestroy(pattern);
+    if (candidates == NULL)
+        return NULL;
+    FT_Face face = NULL;
+    for (int index = 0; index < candidates->nfont; ++index) {
+        face = createFaceForMatch(candidates->fonts[index]);
+        if (face == NULL)
+            continue;
+        if (face->units_per_EM > 0 && face->num_glyphs > 0 &&
+                (!fixedPitch || FT_IS_FIXED_WIDTH(face)) &&
+                (!emphasized || (face->style_flags & FT_STYLE_FLAG_BOLD)))
+            break;
+        FT_Done_Face(face);
+        face = NULL;
+    }
+    FcFontSetSortDestroy(candidates);
+    return face;
+}
+
+O2FontRef O2FontCreateForUserInterface(BOOL fixedPitch, BOOL emphasized,
+                                      const char *language) {
+    FT_Face face = createUserInterfaceFace(fixedPitch, emphasized, language);
+    if (face == NULL)
+        return nil;
+    O2Font_freetype *font = [O2Font_freetype alloc];
+    if (font == nil) {
+        FT_Done_Face(face);
+        return nil;
+    }
+    return [font initWithFace:face];
 }
 
 + (NSString *) filenameForPattern: (NSString *) pattern {

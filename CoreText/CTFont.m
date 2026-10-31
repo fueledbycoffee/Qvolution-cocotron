@@ -26,6 +26,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <objc/runtime.h>
 #import <Onyx2D/O2Font_freetype.h>
 #include <pthread.h>
+#include <math.h>
+#include <stdlib.h>
+#include <limits.h>
+#include <stdint.h>
 
 #ifdef DARLING
 #define __linux__
@@ -182,12 +186,64 @@ CTFontRef CTFontCreateWithFontDescriptorAndOptions(CTFontDescriptorRef descripto
 CTFontRef CTFontCreateUIFontForLanguage(CTFontUIFontType uiFontType,
                                         CGFloat size, CFStringRef language)
 {
-    // Only the menu fonts have a known face here.
-    if (uiFontType != kCTFontMenuTitleFontType && uiFontType != kCTFontMenuItemFontType)
+    if (!isfinite(size) || size < 0.0)
         return NULL;
-    CGFontRef cgFont = CGFontCreateWithFontName(CFSTR("San Francisco"));
-    CTFontRef result = createFont(cgFont, size > 0.0 ? size : 12.0);
-    CGFontRelease(cgFont);
+    BOOL fixedPitch = NO, emphasized = NO;
+    CGFloat defaultSize;
+    // Existing project UI sizes, not measured native Mac defaults.
+    switch (uiFontType) {
+    case kCTFontUIFontUserFixedPitch:
+        fixedPitch = YES;
+        defaultSize = 12.0;
+        break;
+    case kCTFontUIFontEmphasizedSystem:
+        emphasized = YES;
+        defaultSize = 12.0;
+        break;
+    case kCTFontUIFontSystem:
+    case kCTFontUIFontViews:
+    case kCTFontUIFontMenuTitle:
+    case kCTFontUIFontMenuItem:
+    case kCTFontUIFontWindowTitle:
+    case kCTFontUIFontPushButton:
+        defaultSize = 12.0;
+        break;
+    case kCTFontUIFontSmallSystem:
+    case kCTFontUIFontSmallToolbar:
+    case kCTFontUIFontToolTip:
+        defaultSize = 10.0;
+        break;
+    case kCTFontUIFontMiniSystem:
+        defaultSize = 9.0;
+        break;
+    default:
+        return NULL;
+    }
+    char *languageBytes = NULL;
+    if (language != NULL) {
+        if (CFGetTypeID(language) != CFStringGetTypeID())
+            return NULL;
+        CFIndex length = CFStringGetLength(language);
+        if (length <= 0)
+            return NULL;
+        for (CFIndex index = 0; index < length; ++index)
+            if (CFStringGetCharacterAtIndex(language, index) == 0)
+                return NULL;
+        CFIndex maximum = CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8);
+        if (maximum < 0 || maximum == LONG_MAX || (uintmax_t)maximum >= SIZE_MAX)
+            return NULL;
+        languageBytes = malloc((size_t)maximum + 1);
+        if (languageBytes == NULL)
+            return NULL;
+        if (!CFStringGetCString(language, languageBytes, maximum + 1, kCFStringEncodingUTF8)) {
+            free(languageBytes);
+            return NULL;
+        }
+    }
+    O2FontRef graphics = O2FontCreateForUserInterface(fixedPitch, emphasized, languageBytes);
+    free(languageBytes);
+    CTFontRef result = createFont((CGFontRef)graphics, size > 0.0 ? size : defaultSize);
+    CGFontRelease((CGFontRef)graphics);
     return result;
 }
 
