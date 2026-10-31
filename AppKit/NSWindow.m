@@ -1828,7 +1828,7 @@ static BOOL _allowsAutomaticWindowTabbing;
     NSRect result = [[NSDisplay currentDisplay] outsetRect: contentRect
                             forNativeWindowBorderWithStyle: [self styleMask]];
 
-    if ([self hasMainMenu]) {
+    if ([self hasMainMenu] && ![_menuView isHidden]) {
         result.size.height += [NSMainMenuView menuHeight];
     }
 
@@ -1845,7 +1845,7 @@ static BOOL _allowsAutomaticWindowTabbing;
     NSRect result = [[NSDisplay currentDisplay] insetRect: frameRect
                            forNativeWindowBorderWithStyle: [self styleMask]];
 
-    if ([self hasMainMenu]) {
+    if ([self hasMainMenu] && ![_menuView isHidden]) {
         result.size.height -= [NSMainMenuView menuHeight];
     }
 
@@ -3198,6 +3198,7 @@ static BOOL _allowsAutomaticWindowTabbing;
     frame.size.height += delta;
     // No display because setMenu: is called before awakeFromNib.
     [self setFrame: frame display: NO];
+    [_backgroundView resizeSubviewsWithOldSize: backSize];
     // Do we even need this?
     [_backgroundView setNeedsDisplay: YES];
 }
@@ -3282,7 +3283,7 @@ static BOOL _allowsAutomaticWindowTabbing;
                floor((frame.size.width - sheetFrame.size.width) / 2);
 
     if ([self toolbar] != nil) {
-        if (_menuView != nil)
+        if (_menuView != nil && ![_menuView isHidden])
             origin.y -= [_menuView frame].size.height;
 
         origin.y -= [[[self toolbar] _view] frame].size.height;

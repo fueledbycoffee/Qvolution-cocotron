@@ -52,6 +52,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <stdatomic.h>
 #include <stdarg.h>
 
+@interface NSObject (GlobalMenuPresentation)
+- (BOOL) isEngaged;
+@end
+
 @interface NSEvent (LocalMonitorsInternal)
 + (NSEvent *) _filterEventWithLocalMonitors: (NSEvent *) event;
 @end
@@ -1549,7 +1553,11 @@ static void _hookXcodeDevTools(void)
         [self postEvent: requeue atStart: YES];
     }
 
-    [[session modalWindow] _showMenuViewIfNeeded];
+    id globalMenu = [NSClassFromString(@"X11GlobalMenu") performSelector: @selector(sharedGlobalMenu)];
+    if (![[session modalWindow] isKindOfClass: [NSPanel class]] && [globalMenu isEngaged])
+        [[session modalWindow] _hideMenuViewIfNeeded];
+    else
+        [[session modalWindow] _showMenuViewIfNeeded];
     [_modalStack removeLastObject];
 }
 

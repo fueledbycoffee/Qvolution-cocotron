@@ -28,6 +28,7 @@
 #import "WaylandProtocol.h"
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSWindow.h>
+#import <AppKit/NSWindow-Private.h>
 #import <AppKit/NSGraphicsContext.h>
 #import <AppKit/NSGraphics.h>
 #import <AppKit/NSBezierPath.h>
@@ -254,8 +255,6 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
         args[0].s = [[[NSProcessInfo processInfo] processName] UTF8String];
         if (args[0].s != NULL)
             WaylandMarshal(_toplevel, WP_TOPLEVEL_SET_APP_ID, NULL, 0, args);
-        if (!menu && ![_delegate isKindOfClass: NSClassFromString(@"NSPanel")])
-            [[X11GlobalMenu sharedGlobalMenu] registerWaylandApplicationMenu: [NSApp mainMenu]];
         _fullscreenRequested = NO;
         [self updateFullscreen];
         [self updateSizeLimits];
@@ -285,6 +284,14 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     _configured = NO;
     _needsPresent = _context != nil;
     [_display flush];
+    if (!menu && ![_delegate isKindOfClass: NSClassFromString(@"NSPanel")]) {
+        [self retain];
+        X11GlobalMenu *globalMenu = [X11GlobalMenu sharedGlobalMenu];
+        [globalMenu registerWaylandApplicationMenu: [NSApp mainMenu]];
+        if ([globalMenu isEngaged] && !_invalidated)
+            [_delegate _hideMenuViewIfNeeded];
+        [self release];
+    }
 }
 
 - (CGSize) maximumPopupSize {

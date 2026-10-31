@@ -11,7 +11,7 @@ The fixture owns Orbit's name on a second private bus connection, calls the real
 exporter registration method, and checks the native method's signature `o`,
 endpoint `/MenuBar`, actual bus sender identity and no-reply flag. No X11 ID is
 supplied. It invokes real GetLayout handling and requires local-menu engagement
-to remain false, then releases/reacquires the fake Orbit owner and requires a
+to remain false without a GNOME Shell extension service, then releases/reacquires the fake Orbit owner and requires a
 fresh registration. The parent reports the registration method missing.
 
 Counterpart: the Orbit 1.1.3 companion patch accepts RegisterWaylandMenu(o) on
@@ -20,9 +20,13 @@ its canonical menu reader via GetMenuForProcess(u)->(so). Focus PID comes from
 Meta.Window.get_pid(), never a guessed XID. Ambiguous or unavailable PIDs fail
 closed. The installed extension and daemon are not changed by this fixture.
 
-The native in-window menu deliberately remains visible even if Orbit reads the
-layout. Orbit 1.1.3 has no rendering acknowledgement; hiding duplicates is a
-later protocol/visual acceptance step. No consumer means no loss of access.
+The native in-window menu remains visible on this private bus, which has no
+GNOME Shell. With GNOME reporting Orbit ACTIVE and its current daemon reading
+the actual layout, the user-selected policy hides the duplicate bar.
+`appkit-orbit-presentation-host.py` covers that policy and fallback transitions
+using production source methods and a private bus. Orbit 1.1.3 has no rendering
+acknowledgement, and this policy does not claim one. No consumer retains the
+local fallback.
 
 This does not verify a real GNOME top-bar menu, host/guest focus PID equivalence,
 action clicks, menu mutation/toggle state, or GPU rendering. Those need an

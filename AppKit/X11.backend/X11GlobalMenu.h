@@ -19,6 +19,15 @@ typedef struct DBusConnection DBusConnection;
     BOOL _globalMenuEngaged;
     BOOL _waylandApplicationMenu;
     BOOL _orbitOwnerMatchAdded;
+    BOOL _orbitProgressFailed;
+    BOOL _orbitOwnerWatchReady;
+    BOOL _orbitStateWatchReady;
+    BOOL _orbitExtensionActive;
+    BOOL _orbitMenuRead;
+    NSString *_orbitOwner;
+    NSString *_orbitShellOwner;
+    unsigned int _orbitShellGeneration;
+    unsigned int _orbitOwnerGeneration;
 }
 
 + (instancetype) sharedGlobalMenu;
