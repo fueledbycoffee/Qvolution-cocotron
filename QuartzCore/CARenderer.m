@@ -1,3 +1,4 @@
+#define GL_GLEXT_PROTOTYPES 1
 #import <CoreVideo/CoreVideo.h>
 #import <Onyx2D/O2Color.h>
 #import <Onyx2D/O2Surface.h>
@@ -7,6 +8,10 @@
 #import <QuartzCore/CARenderer.h>
 #import <QuartzCore/CASpringAnimation.h>
 #import "CALayerInternal.h"
+#include <limits.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 @interface CASpringAnimation (Private)
 - (CGFloat) _springProgressAtTime: (CFTimeInterval) t;
@@ -250,6 +255,32 @@ static void applyLayerTransform(CATransform3D t) {
     glMultMatrixf(matrix);
 }
 
+static BOOL supportsPixelUnpackBuffer(void) {
+    const char *version = (const char *)glGetString(GL_VERSION);
+    if (version == NULL)
+        return NO;
+    char *end;
+    long major = strtol(version, &end, 10);
+    long minor = *end == '.' ? strtol(end + 1, NULL, 10) : 0;
+    if (major > 2 || (major == 2 && minor >= 1))
+        return YES;
+    const char *extensions = (const char *)glGetString(GL_EXTENSIONS);
+    if (extensions == NULL)
+        return NO;
+    const char *names[] = {"GL_ARB_pixel_buffer_object", "GL_EXT_pixel_buffer_object"};
+    for (unsigned i = 0; i < 2; ++i) {
+        const char *match = extensions;
+        size_t length = strlen(names[i]);
+        while ((match = strstr(match, names[i])) != NULL) {
+            if ((match == extensions || match[-1] == ' ') &&
+                (match[length] == ' ' || match[length] == '\0'))
+                return YES;
+            match += length;
+        }
+    }
+    return NO;
+}
+
 void CATexImage2DCGImage(CGImageRef image) {
     if (image == NULL)
         return;
@@ -316,8 +347,57 @@ void CATexImage2DCGImage(CGImageRef image) {
         break;
     }
 
+    size_t stride = CGImageGetBytesPerRow(image);
+    if (CGImageGetBitsPerPixel(image) != 32 || CGImageGetBitsPerComponent(image) != 8 || imageWidth > INT_MAX ||
+        imageHeight > INT_MAX || imageWidth > SIZE_MAX / 4 ||
+        stride < imageWidth * 4 ||
+        imageHeight - 1 > (SIZE_MAX - imageWidth * 4) / stride ||
+        (imageHeight - 1) * stride + imageWidth * 4 > (size_t)CFDataGetLength(data)) {
+        NSLog(@"CARenderer: invalid or unsupported image row layout");
+        CFRelease(data);
+        return;
+    }
+    uint8_t *packed = NULL;
+    GLint rowLength = 0;
+    if (stride % 4 == 0 && stride / 4 <= INT_MAX) {
+        rowLength = (GLint)(stride / 4);
+    } else {
+        packed = malloc(imageWidth * 4 * imageHeight);
+        if (packed == NULL) {
+            NSLog(@"CARenderer: cannot allocate packed image rows");
+            CFRelease(data);
+            return;
+        }
+        for (size_t row = 0; row < imageHeight; ++row)
+            memcpy(packed + row * imageWidth * 4, pixelBytes + row * stride, imageWidth * 4);
+        pixelBytes = packed;
+    }
+    BOOL hasUnpackBuffer = supportsPixelUnpackBuffer();
+    GLint alignment, oldRowLength, skipRows, skipPixels, swapBytes, unpackBuffer = 0;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
+    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &oldRowLength);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS, &skipRows);
+    glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &skipPixels);
+    glGetIntegerv(GL_UNPACK_SWAP_BYTES, &swapBytes);
+    if (hasUnpackBuffer) {
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBuffer);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    }
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, rowLength);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, imageWidth, imageHeight, 0,
                  glFormat, glType, pixelBytes);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, oldRowLength);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, skipRows);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, skipPixels);
+    glPixelStorei(GL_UNPACK_SWAP_BYTES, swapBytes);
+    if (hasUnpackBuffer)
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpackBuffer);
+    free(packed);
     CFRelease(data);
 }
 
