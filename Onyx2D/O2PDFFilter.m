@@ -30,6 +30,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <Onyx2D/O2PDFObject.h>
 #import <Onyx2D/O2zlib.h>
 #import <string.h>
+#import <stdlib.h>
 
 @implementation O2PDFFilter
 
@@ -71,82 +72,87 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
         return nil;
     }
 
-    O2PDFInteger predictor = 0;
-
-    if ([parameters getIntegerForKey: "Predictor" value: &predictor]) {
-        if (predictor > 1) {
-            NSMutableData *mutable = [NSMutableData data];
-            const char *bytes = [data bytes];
-            unsigned length = [data length];
-            O2PDFInteger colors;
-            O2PDFInteger bitsPerComponent;
-            O2PDFInteger columns;
-            int bytesPerRow;
-            int row, rowLength, numberOfRows;
-
-            if (![parameters getIntegerForKey: "Colors" value: &colors])
-                colors = 1;
-            if (![parameters getIntegerForKey: "BitsPerComponent"
-                                        value: &bitsPerComponent])
-                bitsPerComponent = 8;
-            if (![parameters getIntegerForKey: "Columns" value: &columns])
-                columns = 1;
-
-            // NSLog(@"predictor=%d,colors=%d,bpc=%d,columns=%d,length=%d",predictor,colors,bitsPerComponent,columns,length);
-
-            bytesPerRow = (((colors * bitsPerComponent) * columns) + 7) / 8;
-            rowLength = bytesPerRow + 1;
-            numberOfRows = length / rowLength;
-
-            if (pBytesPerRow != NULL) {
-                *pBytesPerRow = bytesPerRow;
-            }
-
-#if 0
-      if((length%rowLength)!=0)
-       ;//NSLog(@"length mod rowLength=%d",length%rowLength);
-
-#endif
-            char *change = __builtin_alloca(rowLength);
-
-            for (row = 0; row < numberOfRows; row++) {
-                int i, filter = bytes[0];
-
-                for (i = 0; i < rowLength - 1; i++)
-                    change[i] = bytes[1 + i];
-
-                if (filter == 0) {
-                    // do nothing
-                } else if (filter == 1) {
-                    int last = change[0];
-
-                    for (i = 1; i < rowLength - 1; i++) {
-                        last = last + change[i];
-                        change[i] = last;
-                    }
-                } else if (filter == 2) {
-                    int last = change[0];
-
-                    for (i = 1; i < rowLength - 1; i++) {
-                        last = last - change[i];
-                        change[i] = last;
-                    }
-                } else {
-                    NSLog(@"unsupported filter %d for predictor %d", filter,
-                          predictor);
+    if (data == nil)
+        return nil;
+    O2PDFInteger predictor = 1;
+    [parameters getIntegerForKey: "Predictor" value: &predictor];
+    if (predictor == 1)
+        return data;
+    O2PDFInteger colors = 1, bits = 8, columns = 1;
+    [parameters getIntegerForKey: "Colors" value: &colors];
+    [parameters getIntegerForKey: "BitsPerComponent" value: &bits];
+    [parameters getIntegerForKey: "Columns" value: &columns];
+    if (colors <= 0 || columns <= 0 ||
+            (bits != 1 && bits != 2 && bits != 4 && bits != 8 && bits != 16) ||
+            (NSUInteger) colors > NSUIntegerMax / bits) {
+        O2PDFError(__FILE__, __LINE__, @"Invalid PDF predictor dimensions");
+        return nil;
+    }
+    NSUInteger pixelBits = (NSUInteger) colors * bits;
+    if ((NSUInteger) columns > (NSUIntegerMax - 7) / pixelBits)
+        return nil;
+    NSUInteger rowBytes = (pixelBits * columns + 7) / 8;
+    NSUInteger pixelBytes = ((NSUInteger) colors * bits + 7) / 8;
+    const unsigned char *source = [data bytes];
+    NSUInteger length = [data length];
+    if (predictor == 2) {
+        if (length % rowBytes)
+            return nil;
+        NSMutableData *output = [NSMutableData dataWithData: data];
+        unsigned char *bytes = [output mutableBytes];
+        for (NSUInteger row = 0; row < length; row += rowBytes) {
+            for (NSUInteger sample = colors; sample < (NSUInteger) colors * columns; ++sample) {
+                unsigned value = 0, previous = 0;
+                for (unsigned bit = 0; bit < bits; ++bit) {
+                    NSUInteger currentBit = sample * bits + bit;
+                    NSUInteger previousBit = (sample - colors) * bits + bit;
+                    value = (value << 1) | ((bytes[row + currentBit / 8] >> (7 - currentBit % 8)) & 1);
+                    previous = (previous << 1) | ((bytes[row + previousBit / 8] >> (7 - previousBit % 8)) & 1);
                 }
-
-                [mutable appendBytes: change length: rowLength - 1];
-                bytes += rowLength;
-                length -= rowLength;
+                value += previous;
+                for (unsigned bit = 0; bit < bits; ++bit) {
+                    NSUInteger currentBit = sample * bits + bit;
+                    unsigned mask = 1u << (7 - currentBit % 8);
+                    unsigned char *byte = bytes + row + currentBit / 8;
+                    *byte = (*byte & ~mask) | (((value >> (bits - bit - 1)) & 1) ? mask : 0);
+                }
             }
-            if (length > 1)
-                [mutable appendBytes: bytes length: length - 1];
-            data = mutable;
+        }
+        if (pBytesPerRow != NULL)
+            *pBytesPerRow = rowBytes;
+        return output;
+    }
+    if (predictor < 10 || predictor > 15 || rowBytes == NSUIntegerMax ||
+            length % (rowBytes + 1)) {
+        O2PDFError(__FILE__, __LINE__, @"Invalid PDF PNG predictor data");
+        return nil;
+    }
+    NSUInteger rows = length / (rowBytes + 1);
+    NSMutableData *output = [NSMutableData dataWithLength: rows * rowBytes];
+    unsigned char *bytes = [output mutableBytes];
+    for (NSUInteger row = 0; row < rows; ++row) {
+        unsigned filter = *source++;
+        if (filter > 4)
+            return nil;
+        for (NSUInteger i = 0; i < rowBytes; ++i) {
+            int left = i >= pixelBytes ? bytes[row * rowBytes + i - pixelBytes] : 0;
+            int above = row ? bytes[(row - 1) * rowBytes + i] : 0;
+            int upperLeft = row && i >= pixelBytes ? bytes[(row - 1) * rowBytes + i - pixelBytes] : 0;
+            int prediction = 0;
+            if (filter == 1) prediction = left;
+            else if (filter == 2) prediction = above;
+            else if (filter == 3) prediction = (left + above) / 2;
+            else if (filter == 4) {
+                int p = left + above - upperLeft;
+                int a = abs(p - left), b = abs(p - above), c = abs(p - upperLeft);
+                prediction = a <= b && a <= c ? left : b <= c ? above : upperLeft;
+            }
+            bytes[row * rowBytes + i] = *source++ + prediction;
         }
     }
-
-    return data;
+    if (pBytesPerRow != NULL)
+        *pBytesPerRow = rowBytes;
+    return output;
 }
 
 @end
