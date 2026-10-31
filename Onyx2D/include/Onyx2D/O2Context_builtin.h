@@ -107,6 +107,10 @@ void O2ContextWriteGlyphCoverageSpanFloat(O2Context_builtin *self,
     O2Float samplesInitialY;
     O2Float samplesDeltaY;
     int alias;
+
+    NSArray *_viewportClipPhases;
+    size_t _viewportClipWidth, _viewportClipHeight;
+    int _viewportClipX, _viewportClipY, _viewportClipW, _viewportClipH;
 }
 
 - (void) setWidth: (size_t) width

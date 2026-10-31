@@ -108,6 +108,7 @@ static inline O2AffineTransform createImageToSurfaceTransform(O2ImageRef image,
 
 - (void) dealloc {
     [_clipContext release];
+    [_viewportClipPhases release];
     [_layerClipPhases release];
     free(_clipSamples);
     [_paint release];
@@ -249,6 +250,8 @@ static inline O2AffineTransform createImageToSurfaceTransform(O2ImageRef image,
 }
 
 void O2ContextDeviceClipReset_builtin(O2Context_builtin *self) {
+    [self->_viewportClipPhases release];
+    self->_viewportClipPhases = nil;
     [self->_clipContext release];
     self->_clipContext = nil;
     O2RasterizerSetViewport(self, 0, 0, O2ImageGetWidth(self->_surface),
@@ -575,11 +578,30 @@ static BOOL hasViewportClip(O2Context_builtin *self) {
 
 - (void) clipToState: (O2ClipState *) clipState {
     NSArray *phases = [clipState clipPhases];
+    size_t width = O2ImageGetWidth(_surface), height = O2ImageGetHeight(_surface);
+    // Saved states share immutable phases. Only reuse exact integral viewports;
+    // masks and transparency domains still replay their coverage operations.
+    if (_viewportClipPhases != nil && [_layerClipPhases count] == 0 &&
+            _clipContext == nil && width == _viewportClipWidth &&
+            height == _viewportClipHeight &&
+            _vpx == _viewportClipX && _vpy == _viewportClipY &&
+            _vpwidth == _viewportClipW && _vpheight == _viewportClipH &&
+            (phases == nil ? [_viewportClipPhases count] == 0 :
+                    [phases isEqualToArray: _viewportClipPhases]))
+        return;
     NSArray *inherited = [_layerClipPhases lastObject];
     O2ContextDeviceClipReset_builtin(self);
     // Integral device rectangles cover whole pixels; the viewport is exact.
-    if ([_layerClipPhases count] == 0 && clipToIntegralRects(self, phases))
+    if ([_layerClipPhases count] == 0 && clipToIntegralRects(self, phases)) {
+        _viewportClipPhases = phases != nil ? [phases copy] : [[NSArray alloc] init];
+        _viewportClipWidth = width;
+        _viewportClipHeight = height;
+        _viewportClipX = _vpx;
+        _viewportClipY = _vpy;
+        _viewportClipW = _vpwidth;
+        _viewportClipH = _vpheight;
         return;
+    }
     // Layer drawing uses conditional coverage within inherited path samples.
     // The parent applies that domain and inherited soft masks once at composite.
     for (O2ClipPhase *phase in inherited) {
