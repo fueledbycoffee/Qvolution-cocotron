@@ -148,6 +148,11 @@ ONYX2D_STATIC BOOL initFunctionsForRGBColorSpace(O2Image *self,
                 }
                 break;
 
+            case kO2ImageAlphaFirst:
+                if ((bitmapInfo & kO2BitmapByteOrderMask) == kO2BitmapByteOrder16Little ||
+                        (bitmapInfo & kO2BitmapByteOrderMask) == kO2BitmapByteOrder16Big)
+                    break;
+                // Fall through to the shared first-alpha byte layouts.
             case kO2ImageAlphaPremultipliedFirst:
                 switch (bitmapInfo & kO2BitmapByteOrderMask) {
                 case kO2BitmapByteOrder16Little:
@@ -157,13 +162,10 @@ ONYX2D_STATIC BOOL initFunctionsForRGBColorSpace(O2Image *self,
 
                 case kO2BitmapByteOrder16Big:
                 case kO2BitmapByteOrder32Big:
-                    // A, R, G, B bytes; the XRGB reader keeps the first byte as alpha.
+                    // A, R, G, B byte order.
                     self->_read_argb8u = O2ImageRead_XRGB8888_to_argb8u;
                     return YES;
                 }
-                break;
-
-            case kO2ImageAlphaFirst:
                 break;
 
             case kO2ImageAlphaNoneSkipLast:
@@ -994,6 +996,7 @@ O2argb8u *O2ImageRead_RGBA8888_to_argb8u(O2Image *self, int x, int y,
 {
     const uint8_t *scanline = scanlineAtY(self, y);
     int i;
+    O2ImageAlphaInfo alpha = self->_bitmapInfo & kO2BitmapAlphaInfoMask;
 
     if (scanline == NULL)
         return NULL;
@@ -1006,7 +1009,9 @@ O2argb8u *O2ImageRead_RGBA8888_to_argb8u(O2Image *self, int x, int y,
         result.g = scanline[1];
         result.b = scanline[2];
         result.a = scanline[3];
-        if ((self->_bitmapInfo & kO2BitmapAlphaInfoMask) == kO2ImageAlphaLast) {
+        if (alpha == kO2ImageAlphaNoneSkipLast)
+            result.a = 255;
+        else if (alpha == kO2ImageAlphaLast) {
             result.r = (result.r * result.a + 127) / 255;
             result.g = (result.g * result.a + 127) / 255;
             result.b = (result.b * result.a + 127) / 255;
@@ -1022,6 +1027,7 @@ O2argb8u *O2ImageRead_ABGR8888_to_argb8u(O2Image *self, int x, int y,
 {
     const uint8_t *scanline = scanlineAtY(self, y);
     int i;
+    O2ImageAlphaInfo alpha = self->_bitmapInfo & kO2BitmapAlphaInfoMask;
 
     if (scanline == NULL)
         return NULL;
@@ -1034,7 +1040,9 @@ O2argb8u *O2ImageRead_ABGR8888_to_argb8u(O2Image *self, int x, int y,
         result.b = *scanline++;
         result.g = *scanline++;
         result.r = *scanline++;
-        if ((self->_bitmapInfo & kO2BitmapAlphaInfoMask) == kO2ImageAlphaLast) {
+        if (alpha == kO2ImageAlphaNoneSkipLast)
+            result.a = 255;
+        else if (alpha == kO2ImageAlphaLast) {
             result.r = (result.r * result.a + 127) / 255;
             result.g = (result.g * result.a + 127) / 255;
             result.b = (result.b * result.a + 127) / 255;
@@ -1049,13 +1057,15 @@ O2argb8u *O2ImageRead_BGRA8888_to_argb8u(O2Image *self, int x, int y,
 {
     const uint8_t *scanline = scanlineAtY(self, y);
     int i;
+    O2ImageAlphaInfo alpha = self->_bitmapInfo & kO2BitmapAlphaInfoMask;
 
     if (scanline == NULL)
         return NULL;
 
     scanline += x * 4;
 #ifdef __LITTLE_ENDIAN__
-    return (O2argb8u *) scanline;
+    if (alpha == kO2ImageAlphaPremultipliedFirst)
+        return (O2argb8u *) scanline;
 #endif
 
     for (i = 0; i < length; i++) {
@@ -1065,6 +1075,11 @@ O2argb8u *O2ImageRead_BGRA8888_to_argb8u(O2Image *self, int x, int y,
         result.g = *scanline++;
         result.r = *scanline++;
         result.a = *scanline++;
+        if (alpha == kO2ImageAlphaFirst) {
+            result.r = (result.r * result.a + 127) / 255;
+            result.g = (result.g * result.a + 127) / 255;
+            result.b = (result.b * result.a + 127) / 255;
+        }
         *span++ = result;
     }
     return NULL;
@@ -1122,6 +1137,7 @@ O2argb8u *O2ImageRead_XRGB8888_to_argb8u(O2Image *self, int x, int y,
 {
     const uint8_t *scanline = scanlineAtY(self, y);
     int i;
+    O2ImageAlphaInfo alpha = self->_bitmapInfo & kO2BitmapAlphaInfoMask;
 
     if (scanline == NULL)
         return NULL;
@@ -1135,6 +1151,13 @@ O2argb8u *O2ImageRead_XRGB8888_to_argb8u(O2Image *self, int x, int y,
         result.r = *scanline++;
         result.g = *scanline++;
         result.b = *scanline++;
+        if (alpha == kO2ImageAlphaNoneSkipFirst)
+            result.a = 255;
+        else if (alpha == kO2ImageAlphaFirst) {
+            result.r = (result.r * result.a + 127) / 255;
+            result.g = (result.g * result.a + 127) / 255;
+            result.b = (result.b * result.a + 127) / 255;
+        }
         *span++ = result;
     }
     return NULL;
