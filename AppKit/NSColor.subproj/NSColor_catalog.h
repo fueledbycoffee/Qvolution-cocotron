@@ -19,8 +19,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <AppKit/NSColor.h>
 
+@class NSNumber;
+
 @interface NSColor_catalog : NSColor {
     NSColor *_color;
+    NSNumber *_alphaOverride;
 }
 
 + (NSColor *) colorWithCatalogName: (NSColorListName) catalogName
