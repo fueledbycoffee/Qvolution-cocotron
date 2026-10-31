@@ -96,6 +96,9 @@ static inline O2Float O2Float32FromByte(uint8_t i) {
 }
 
 static inline uint8_t O2ByteFromFloat(O2Float c) {
+    // Bound the value before the integer cast, including NaN and infinities.
+    if (!(c > 0.0f)) return 0;
+    if (c >= 1.0f) return 255;
     return RI_INT_MIN(RI_INT_MAX(RI_FLOOR_TO_INT(c * (O2Float) 0xFF + 0.5f), 0),
                       0xFF);
 }

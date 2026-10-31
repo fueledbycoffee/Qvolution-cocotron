@@ -37,28 +37,40 @@
 
 @implementation O2Image
 
-ONYX2D_STATIC O2argb8u *O2ImageRead_G1_to_argb8u(O2Image *self, NSInteger x, NSInteger y, O2argb8u *span) {
-    const uint8_t *src = (const uint8_t *)self->_directBytes + (y * self->_bytesPerRow) + (x / 8);
-    for (NSInteger i = 0; i < (NSInteger)self->_width - x; ++i) {
-        NSInteger bitIndex = (x + i) % 8;
-        uint8_t byte = src[(x + i) / 8 - (x / 8)];
-        uint8_t val = (byte & (0x80 >> bitIndex)) ? 255 : 0;
-        span[i].r = val;
-        span[i].g = val;
-        span[i].b = val;
+ONYX2D_STATIC_INLINE const void *scanlineAtY(O2Image *self, int y);
+
+ONYX2D_STATIC O2argb8u *O2ImageRead_G1_to_argb8u(O2Image *self, int x,
+        int y, O2argb8u *span, int length) {
+    if (x < 0 || y < 0 || length <= 0 || (size_t)y >= self->_height ||
+            (size_t)x > self->_width || (size_t)length > self->_width - x)
+        return NULL;
+    const uint8_t *row = scanlineAtY(self, y);
+    if (row == NULL)
+        return NULL;
+    for (int i = 0; i < length; i++) {
+        size_t bit = (size_t)x + i;
+        uint8_t value = (row[bit / 8] & (0x80 >> (bit % 8))) ? 255 : 0;
+        span[i].r = value;
+        span[i].g = value;
+        span[i].b = value;
         span[i].a = 255;
     }
-    return span;
+    return NULL;
 }
 
-ONYX2D_STATIC uint8_t *O2ImageRead_G1_to_A8(O2Image *self, NSInteger x, NSInteger y, uint8_t *alpha) {
-    const uint8_t *src = (const uint8_t *)self->_directBytes + (y * self->_bytesPerRow) + (x / 8);
-    for (NSInteger i = 0; i < (NSInteger)self->_width - x; ++i) {
-        NSInteger bitIndex = (x + i) % 8;
-        uint8_t byte = src[(x + i) / 8 - (x / 8)];
-        alpha[i] = (byte & (0x80 >> bitIndex)) ? 255 : 0;
+ONYX2D_STATIC uint8_t *O2ImageRead_G1_to_A8(O2Image *self, int x,
+        int y, uint8_t *alpha, int length) {
+    if (x < 0 || y < 0 || length <= 0 || (size_t)y >= self->_height ||
+            (size_t)x > self->_width || (size_t)length > self->_width - x)
+        return NULL;
+    const uint8_t *row = scanlineAtY(self, y);
+    if (row == NULL)
+        return NULL;
+    for (int i = 0; i < length; i++) {
+        size_t bit = (size_t)x + i;
+        alpha[i] = (row[bit / 8] & (0x80 >> (bit % 8))) ? 255 : 0;
     }
-    return alpha;
+    return NULL;
 }
 
 ONYX2D_STATIC BOOL initFunctionsForMonochrome(O2Image *self,
@@ -86,6 +98,22 @@ ONYX2D_STATIC BOOL initFunctionsForMonochrome(O2Image *self,
     return NO;
 }
 
+static O2Float *O2ImageRead_argb32f_to_Af(O2Image *self, int x, int y,
+                                          O2Float *alpha, int length)
+{
+    O2argb32f span[256];
+    while (length > 0) {
+        int chunk = MIN(length, 256);
+        O2Image_read_argb32f(self, x, y, span, chunk);
+        for (int i = 0; i < chunk; i++)
+            alpha[i] = span[i].a;
+        alpha += chunk;
+        x += chunk;
+        length -= chunk;
+    }
+    return NULL;
+}
+
 ONYX2D_STATIC BOOL initFunctionsForRGBColorSpace(O2Image *self,
                                                  size_t bitsPerComponent,
                                                  size_t bitsPerPixel,
@@ -95,6 +123,8 @@ ONYX2D_STATIC BOOL initFunctionsForRGBColorSpace(O2Image *self,
     switch (bitsPerComponent) {
 
     case 32:
+        self->_read_a8u = NULL;
+        self->_read_a32f = O2ImageRead_argb32f_to_Af;
         switch (bitsPerPixel) {
         case 32:
             break;
@@ -409,6 +439,13 @@ ONYX2D_STATIC BOOL initFunctionsForParameters(O2Image *self,
         return nil;
     }
 
+    if (bitsPerComponent == 32) {
+        NSData *data = [self directData];
+        if ([data bytes] == NULL || [data length] < bytesPerRow * height) {
+            [self release];
+            return nil;
+        }
+    }
     return self;
 }
 
@@ -1382,8 +1419,9 @@ O2ImageReadTileSpanExtendEdge_largb8u_PRE(O2Image *self, int u, int v,
             span[i] = direct[0];
     }
 
-    int chunk = RI_MIN(length - i, self->_width - u);
-    direct = self->_read_argb8u(self, u, v, span + i, chunk);
+    int chunk = (i < length && u >= 0 && (size_t)u < self->_width)
+            ? MIN((size_t)(length - i), self->_width - (size_t)u) : 0;
+    direct = chunk > 0 ? self->_read_argb8u(self, u, v, span + i, chunk) : NULL;
     if (direct != NULL) {
         int k;
 
@@ -1416,8 +1454,9 @@ void O2ImageReadTileSpanExtendEdge__largb32f_PRE(O2Image *self, int u, int v,
             span[i] = direct[0];
     }
 
-    int chunk = RI_MIN(length - i, self->_width - u);
-    direct = O2Image_read_argb32f(self, u, v, span + i, chunk);
+    int chunk = (i < length && u >= 0 && (size_t)u < self->_width)
+            ? MIN((size_t)(length - i), self->_width - (size_t)u) : 0;
+    direct = chunk > 0 ? O2Image_read_argb32f(self, u, v, span + i, chunk) : NULL;
     if (direct != NULL) {
         int k;
 

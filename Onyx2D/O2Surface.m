@@ -730,6 +730,10 @@ O2ImageRef O2SurfaceCreateImage(O2Surface *self) {
     return result;
 }
 
+BOOL O2SurfaceCanReadWriteARGB8u(O2Surface *surface) {
+    return surface != nil && surface->_read_argb8u != NULL && surface->_writeargb8u != NULL;
+}
+
 void O2SurfaceWriteSpan_argb8u_PRE(O2Surface *self, int x, int y,
                                    O2argb8u *span, int length)
 {

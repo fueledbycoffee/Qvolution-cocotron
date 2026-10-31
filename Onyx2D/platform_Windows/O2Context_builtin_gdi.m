@@ -40,6 +40,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 }
 
 - initWithSurface: (O2Surface *) surface flipped: (BOOL) flipped {
+    // Native GDI text requires a byte DIB. Do not return a context that accepts
+    // float pixels but has no device context for its native-font renderer.
+    if (!O2SurfaceCanReadWriteARGB8u(surface)) {
+        [self release];
+        return nil;
+    }
     if ((self = [super initWithSurface: surface flipped: flipped]) == nil)
         return nil;
     /* FIX: we need to also override initWithBytes:... and create an

@@ -59,6 +59,13 @@ static inline void O2PaintApplyGlobalAlpha32f(O2argb32f *span, int length, float
     }
 }
 
+static void O2PaintApplyMaskSpan32f(O2argb32f *span, O2argb32f *maskSpan,
+                                     int length)
+{
+    for (int i = 0; i < length; i++)
+        span[i] = O2argb32fMultiplyByFloat(span[i], maskSpan[i].r);
+}
+
 ONYX2D_STATIC int O2PaintReadResampledLowSpan_largb32f_PRE(O2Paint *selfX,
                                                            int x, int y,
                                                            O2argb32f *span,
@@ -68,6 +75,12 @@ ONYX2D_STATIC int O2PaintReadResampledLowSpan_largb32f_PRE(O2Paint *selfX,
 
     O2ImageBilinear_largb32f_PRE(self->_image, x, y, span, length,
                                  self->m_surfaceToPaintMatrix);
+    if (self->_mask != NULL) {
+        O2argb32f maskSpan[length];
+        O2ImageBilinear_largb32f_PRE(self->_mask, x, y, maskSpan, length,
+                                      self->_surfaceToMask);
+        O2PaintApplyMaskSpan32f(span, maskSpan, length);
+    }
     O2PaintApplyGlobalAlpha32f(span, length, self->_alpha);
     return length;
 }
@@ -81,6 +94,12 @@ ONYX2D_STATIC int O2PaintReadResampledNoneSpan_largb32f_PRE(O2Paint *selfX,
 
     O2ImagePointSampling_largb32f_PRE(self->_image, x, y, span, length,
                                       self->m_surfaceToPaintMatrix);
+    if (self->_mask != NULL) {
+        O2argb32f maskSpan[length];
+        O2ImagePointSampling_largb32f_PRE(self->_mask, x, y, maskSpan, length,
+                                      self->_surfaceToMask);
+        O2PaintApplyMaskSpan32f(span, maskSpan, length);
+    }
     O2PaintApplyGlobalAlpha32f(span, length, self->_alpha);
     return length;
 }
@@ -374,6 +393,9 @@ ONYX2D_STATIC int stencil(O2Paint *selfX, int x, int y, O2argb32f *span,
         }
         break;
     }
+
+    if (image->_read_argb8u == NULL || (mask != nil && mask->_read_argb8u == NULL))
+        _paint_largb8u_PRE = NULL;
 
     _image = O2ImageRetain(image);
     _mask = O2ImageRetain(mask);

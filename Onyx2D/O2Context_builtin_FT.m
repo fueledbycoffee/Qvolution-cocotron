@@ -107,9 +107,6 @@ static void renderFreeTypeBitmap(O2Context_builtin_FT *self, O2Surface *surface,
     if (fullWidth <= 0 || fullHeight <= 0 || pitch == 0)
         return;
 
-    if (surface->_read_argb8u == NULL)
-        return;
-
     // What we're going to render, taking clippig into account.
     NSInteger minX = MAX(x, self->_vpx);
     NSInteger maxX = MIN(x + fullWidth, self->_vpx + self->_vpwidth);
@@ -120,6 +117,21 @@ static void renderFreeTypeBitmap(O2Context_builtin_FT *self, O2Surface *surface,
         return;
     NSInteger renderWidth = maxX - minX;
     NSInteger renderHeight = maxY - minY;
+
+    if (self->_clipContext != nil || self->_blend_argb8u_PRE == NULL ||
+        !O2SurfaceCanReadWriteARGB8u(surface) ||
+        paint->_paint_largb8u_PRE == NULL) {
+        for (NSInteger row = 0; row < renderHeight; row++) {
+            NSInteger curY = minY + row;
+            NSInteger rowInBitmap = curY - y;
+            NSInteger rowOffset = pitch >= 0 ? rowInBitmap * pitch
+                    : (fullHeight - 1 - rowInBitmap) * (-pitch);
+            unsigned char *coverage = bitmap->buffer + rowOffset + (minX - x);
+            O2ContextWriteGlyphCoverageSpanFloat(self, surface, paint,
+                    minX, curY, coverage, renderWidth);
+        }
+        return;
+    }
 
     O2argb8u *dstBuffer = __builtin_alloca(renderWidth * sizeof(O2argb8u));
     O2argb8u *srcBuffer = __builtin_alloca(renderWidth * sizeof(O2argb8u));
@@ -226,11 +238,14 @@ static BOOL glyphBitmapPosition(NSInteger anchorX, NSInteger anchorY,
             return;
     }
 
-    O2SurfaceLock(_surface);
+    O2Surface *surface = [_layerStack count] > 0
+            ? O2LayerGetSurface([_layerStack lastObject]) : _surface;
+    O2SurfaceLock(surface);
 
     O2Paint *paint = nil;
     @try {
         paint = paintFromColor(gState->_fillColor);
+        O2ContextSetupPaintAndBlendMode(self, paint, O2GStateBlendMode(gState));
         O2AffineTransform Trm = O2ContextGetTextRenderingMatrix(self);
 
         NSPoint point = O2PointApplyAffineTransform(NSMakePoint(0, 0), Trm);
@@ -283,7 +298,7 @@ static BOOL glyphBitmapPosition(NSInteger anchorX, NSInteger anchorY,
             if (cached != nil && (!position || glyphBitmapPosition(anchorX, anchorY,
                     cached->left, cached->top, cached->bitmap.width, cached->bitmap.rows,
                     &anchorX, &anchorY)))
-                renderFreeTypeBitmap(self, _surface, &cached->bitmap,
+                renderFreeTypeBitmap(self, surface, &cached->bitmap,
                         position ? anchorX : point.x + cached->left,
                         position ? anchorY : point.y - cached->top, paint);
 
@@ -307,7 +322,7 @@ static BOOL glyphBitmapPosition(NSInteger anchorX, NSInteger anchorY,
     } @finally {
         O2PaintRelease(paint);
         free(defaultAdvances);
-        O2SurfaceUnlock(_surface);
+        O2SurfaceUnlock(surface);
     }
 }
 

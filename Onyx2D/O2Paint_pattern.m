@@ -47,22 +47,12 @@ ONYX2D_STATIC int o2pattern_largb32f_PRE(O2Paint *selfX, int x, int y,
                                          O2argb32f *span, int length)
 {
     O2Paint_pattern *self = (O2Paint_pattern *) selfX;
-    int i;
-
-    for (i = 0; i < length; i++)
-        span[i] = O2argb32fInit(1, 0, 0, 1);
+    O2ImageReadPatternSpan_largb32f_PRE(self->_image, x, y, span, length,
+            self->m_surfaceToPaintMatrix, kO2PatternTilingNoDistortion);
 
     return length;
 }
 
-#if 0
-static int O2PaintReadPremultipliedPatternSpan(O2Paint *selfX,int x,int y,O2argb32f *span,int length){
-   O2Paint_pattern *self=(O2Paint_pattern *)selfX;
-   
-   O2ImageReadPatternSpan_largb32f_PRE(self->_image,x, y,span,length, self->m_surfaceToPaintMatrix, kO2PatternTilingConstantSpacing);
-   return length;
-}
-#endif
 
 - initWithImage: (O2Image *) image
         surfaceToPaintTransform: (O2AffineTransform) xform
@@ -70,7 +60,7 @@ static int O2PaintReadPremultipliedPatternSpan(O2Paint *selfX,int x,int y,O2argb
 {
     //   O2PaintInitWithTransform(self,O2AffineTransformMakeTranslation(phase.width,phase.height));
     O2PaintInitWithTransform(self, O2AffineTransformIdentity);
-    _paint_largb8u_PRE = o2pattern_largb8u_PRE;
+    _paint_largb8u_PRE = image->_read_argb8u != NULL ? o2pattern_largb8u_PRE : NULL;
     _paint_largb32f_PRE = o2pattern_largb32f_PRE;
     _image = [image retain];
     _phase = phase;

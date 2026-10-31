@@ -72,6 +72,10 @@ typedef void (*O2WriteCoverage_argb8u)(O2Surface *surface, O2Surface *mask,
 
 @class O2Surface, O2Context_builtin;
 
+void O2ContextWriteGlyphCoverageSpanFloat(O2Context_builtin *self,
+        O2Surface *surface, O2Paint *paint, int x, int y,
+        const uint8_t *coverage, int length);
+
 @interface O2Context_builtin : O2BitmapContext {
 
     O2Paint *_paint;

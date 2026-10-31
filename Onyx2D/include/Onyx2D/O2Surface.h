@@ -97,6 +97,7 @@ void O2SurfaceLock(O2Surface *surface);
 void O2SurfaceUnlock(O2Surface *surface);
 
 BOOL O2SurfaceIsValidFormat(int format);
+BOOL O2SurfaceCanReadWriteARGB8u(O2Surface *surface);
 
 void O2SurfaceWriteSpan_argb8u_PRE(O2Surface *self, int x, int y,
                                    O2argb8u *span, int length);

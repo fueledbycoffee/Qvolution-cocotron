@@ -864,46 +864,66 @@ O2RasterizeWriteCoverageSpanffff(O2Surface *surface, O2Surface *mask,
                                  O2Paint *paint, int x, int y, int coverage,
                                  int length, O2BlendSpan_argb32f blendFunction)
 {
-    O2argb32f *dst = __builtin_alloca(length * sizeof(O2argb32f));
-    O2argb32f *direct = O2Image_read_argb32f(surface, x, y, dst, length);
-
-    if (direct != NULL)
-        dst = direct;
-
-    O2argb32f *src = __builtin_alloca(length * sizeof(O2argb32f));
-
-    while (YES) {
-        int chunk = O2PaintReadSpan_largb32f_PRE(paint, x, y, src, length);
-
-        if (chunk < 0) // skip
+    O2argb32f dst[256], src[256];
+    O2Float maskSpan[256];
+    while (length > 0) {
+        int requested = MIN(length, 256);
+        int chunk = O2PaintReadSpan_largb32f_PRE(paint, x, y, src, requested);
+        if (chunk == 0 || chunk > requested || chunk < -requested)
+            return;
+        if (chunk < 0)
             chunk = -chunk;
         else {
+            O2Image_read_argb32f(surface, x, y, dst, chunk);
             blendFunction(src, dst, chunk);
-
-            // apply masking
             if (mask == NULL)
                 O2ApplyCoverageToSpan_largb32f_PRE(dst, coverage, src, chunk);
             else {
-                O2Float maskSpan[length];
-
                 O2ImageReadSpan_Af_MASK(mask, x, y, maskSpan, chunk);
                 O2ApplyCoverageAndMaskToSpan_largb32f_PRE(dst, coverage,
                                                           maskSpan, src, chunk);
             }
-
-            if (direct == NULL) {
-                // write result to the destination surface
-                O2SurfaceWriteSpan_largb32f_PRE(surface, x, y, dst, chunk);
-            }
+            O2SurfaceWriteSpan_largb32f_PRE(surface, x, y, dst, chunk);
         }
-
         length -= chunk;
-        if (length == 0)
-            break;
-
         x += chunk;
-        src += chunk;
-        dst += chunk;
+    }
+}
+
+// Both text backends use byte glyph coverage, including on float destinations.
+// Keep destination pixels intact until the selected blend and both coverages
+// have been combined. Paint may return negative spans to skip pixels.
+void O2ContextWriteGlyphCoverageSpanFloat(O2Context_builtin *self,
+        O2Surface *surface, O2Paint *paint, int x, int y,
+        const uint8_t *coverage, int length) {
+    O2argb32f dst[256], src[256];
+    O2Float maskSpan[256];
+    O2Surface *mask = self->_clipContext != nil
+            ? self->_clipContext->_surface : nil;
+    while (length > 0) {
+        int requested = MIN(length, 256);
+        int chunk = O2PaintReadSpan_largb32f_PRE(paint, x, y, src, requested);
+        if (chunk == 0 || chunk > requested || chunk < -requested)
+            return;
+        if (chunk < 0)
+            chunk = -chunk;
+        else {
+            O2Image_read_argb32f(surface, x, y, dst, chunk);
+            self->_blend_argb32f_PRE(src, dst, chunk);
+            if (mask != nil)
+                O2ImageReadSpan_Af_MASK(mask, x, y, maskSpan, chunk);
+            for (int i = 0; i < chunk; i++) {
+                O2Float factor = coverage[i] / 255.0f;
+                if (mask != nil)
+                    factor *= maskSpan[i];
+                dst[i] = O2argb32fAdd(O2argb32fMultiplyByFloat(src[i], factor),
+                        O2argb32fMultiplyByFloat(dst[i], 1.0f - factor));
+            }
+            O2SurfaceWriteSpan_largb32f_PRE(surface, x, y, dst, chunk);
+        }
+        length -= chunk;
+        x += chunk;
+        coverage += chunk;
     }
 }
 
@@ -1489,6 +1509,15 @@ void O2ContextSetupPaintAndBlendMode(O2Context_builtin *self, O2PaintRef paint,
         self->_blend_argb8u_PRE = O2BlendSpanPlusLighter_8888;
         self->_blend_argb32f_PRE = O2BlendSpanPlusLighter_ffff;
         break;
+    }
+
+    O2Surface *surface = [self->_layerStack count] > 0
+            ? O2LayerGetSurface([self->_layerStack lastObject]) : self->_surface;
+    if (self->_clipContext != nil ||
+        !O2SurfaceCanReadWriteARGB8u(surface) ||
+        paint->_paint_largb8u_PRE == NULL) {
+        self->_writeCoverage_argb8u_PRE = NULL;
+        self->_blend_argb8u_PRE = NULL;
     }
 
     if (self->_writeCoverage_argb8u_PRE != NULL) {
