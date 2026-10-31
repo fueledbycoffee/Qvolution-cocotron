@@ -84,9 +84,6 @@
 }
 
 - (void)encodeWithCoder:(NSCoder *)coder {
-    // NSImage currently logs unimplemented encoding and loses content: never claim success.
-    if ([self image] != nil || [[_imageView objectValue] isKindOfClass:[NSImage class]])
-        [NSException raise:NSInvalidArchiveOperationException format:@"Populated scrubber image coding requires a real NSImage encoder"];
     [super encodeWithCoder:coder];
     if ([coder allowsKeyedCoding])
         [coder encodeObject:_imageView forKey:@"QvolutionScrubberImageView"];
