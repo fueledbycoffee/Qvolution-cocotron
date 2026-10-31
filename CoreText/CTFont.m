@@ -396,16 +396,37 @@ CGAffineTransform CTFontGetMatrix(CTFontRef font)
     return CGAffineTransformIdentity;
 }
 
+static FT_Face fontTraitFace(CTFontRef font) {
+    if (font == NULL)
+        return NULL;
+    CGFontRef graphics = graphicsFont(font);
+    if (![(id)graphics isKindOfClass:[O2Font_freetype class]])
+        return NULL;
+    return [(O2Font_freetype *)graphics face];
+}
+
 CTFontSymbolicTraits CTFontGetSymbolicTraits(CTFontRef font)
 {
-    printf("STUB %s\n", __PRETTY_FUNCTION__);
-    return kCTFontTraitItalic;
+    FT_Face face = fontTraitFace(font);
+    if (face == NULL)
+        return 0;
+    CTFontSymbolicTraits traits = 0;
+    if (face->style_flags & FT_STYLE_FLAG_ITALIC)
+        traits |= kCTFontTraitItalic;
+    if (face->style_flags & FT_STYLE_FLAG_BOLD)
+        traits |= kCTFontTraitBold;
+    if (FT_IS_FIXED_WIDTH(face))
+        traits |= kCTFontTraitMonoSpace;
+    return traits;
 }
 
 CFDictionaryRef CTFontCopyTraits(CTFontRef font)
 {
-    printf("STUB %s\n", __PRETTY_FUNCTION__);
-    return nil;
+    if (fontTraitFace(font) == NULL)
+        return NULL;
+    NSNumber *symbolic = [NSNumber numberWithUnsignedInt:CTFontGetSymbolicTraits(font)];
+    return (CFDictionaryRef)[[NSDictionary alloc] initWithObjectsAndKeys:
+            symbolic, (id)kCTFontSymbolicTrait, nil];
 }
 
 CFArrayRef CTFontCopyDefaultCascadeListForLanguages(CTFontRef font, CFArrayRef languagePrefList)
