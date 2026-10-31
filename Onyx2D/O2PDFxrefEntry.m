@@ -26,6 +26,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
             number: (O2PDFInteger) number
         generation: (O2PDFInteger) generation
 {
+    _type = 1;
     _position = position;
     _number = number;
     _generation = generation;
@@ -40,6 +41,20 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                                     number: number
                                 generation: generation] autorelease];
 }
+
++ (O2PDFxrefEntry *) xrefEntryWithType: (O2PDFInteger) type
+                                  number: (O2PDFInteger) number
+                                fieldTwo: (O2PDFInteger) fieldTwo
+                              fieldThree: (O2PDFInteger) fieldThree {
+    O2PDFxrefEntry *entry = [self xrefEntryWithPosition: fieldTwo number: number
+            generation: type == 2 ? 0 : fieldThree];
+    entry->_type = type;
+    entry->_objectStreamIndex = type == 2 ? fieldThree : 0;
+    return entry;
+}
+
+- (O2PDFInteger) type { return _type; }
+- (O2PDFInteger) objectStreamIndex { return _objectStreamIndex; }
 
 - (NSUInteger) hash {
     return _number;

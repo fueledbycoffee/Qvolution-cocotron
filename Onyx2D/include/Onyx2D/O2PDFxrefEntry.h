@@ -20,6 +20,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <Onyx2D/O2PDFObject.h>
 
 @interface O2PDFxrefEntry : NSObject {
+    O2PDFInteger _type;
+    O2PDFInteger _objectStreamIndex;
     O2PDFInteger _position;
     O2PDFInteger _number;
     O2PDFInteger _generation;
@@ -29,6 +31,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                                     number: (O2PDFInteger) number
                                 generation: (O2PDFInteger) generation;
 
++ (O2PDFxrefEntry *) xrefEntryWithType: (O2PDFInteger) type
+                                  number: (O2PDFInteger) number
+                                fieldTwo: (O2PDFInteger) fieldTwo
+                              fieldThree: (O2PDFInteger) fieldThree;
+- (O2PDFInteger) type;
+- (O2PDFInteger) objectStreamIndex;
 - (O2PDFInteger) position;
 - (O2PDFInteger) number;
 - (O2PDFInteger) generation;

@@ -39,6 +39,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <Onyx2D/O2PDFxrefEntry.h>
 
 #import <stddef.h>
+#import <limits.h>
+#import <Foundation/NSSet.h>
+#import <Foundation/NSValue.h>
 
 static BOOL O2PDFScannerDumpStream = NO;
 
@@ -902,9 +905,125 @@ BOOL O2PDFParseDictionary(const char *bytes, unsigned length,
     return [object checkForType: kO2PDFObjectTypeDictionary value: dictionaryp];
 }
 
+static BOOL O2PDFParseXrefStream(NSData *data, O2PDFInteger position,
+        O2PDFxref **result) {
+    const char *bytes = [data bytes];
+    unsigned length = [data length];
+    O2PDFInteger cursor = position, number, generation;
+    O2PDFObject *object;
+    if (!O2PDFScanInteger(bytes, length, cursor, &cursor, &number) || number <= 0 ||
+            !O2PDFScanInteger(bytes, length, cursor, &cursor, &generation) ||
+            generation < 0 || generation > 65535)
+        return NO;
+    O2PDFxref *table = [[[O2PDFxref alloc] initWithData: data] autorelease];
+    if (!O2PDFParseIndirectObject(data, position, &object, number, generation, table))
+        return NO;
+    O2PDFStream *stream;
+    if (![object checkForType: kO2PDFObjectTypeStream value: &stream])
+        return NO;
+    O2PDFDictionary *dictionary = [stream dictionary];
+    const char *directKeys[] = {"Length", "Filter", "DecodeParms", "Prev"};
+    for (NSUInteger key = 0; key < sizeof(directKeys) / sizeof(directKeys[0]); ++key) {
+        O2PDFObject *value = [dictionary objectForKeyNoParsing: directKeys[key]];
+        if ([value objectTypeNoParsing] == O2PDFObjectType_R)
+            return NO;
+        if ([value objectTypeNoParsing] == kO2PDFObjectTypeArray) {
+            O2PDFArray *array = (O2PDFArray *) value;
+            for (NSUInteger i = 0; i < [array count]; ++i)
+                if ([[array objectAtIndex: i] objectTypeNoParsing] == O2PDFObjectType_R)
+                    return NO;
+        }
+    }
+    O2PDFObject *previous = [dictionary objectForKeyNoParsing: "Prev"];
+    if (previous != nil && [previous objectTypeNoParsing] != kO2PDFObjectTypeInteger)
+        return NO;
+    const char *type;
+    O2PDFInteger size, widths[3];
+    O2PDFArray *w, *index;
+    if (![[dictionary objectForKeyNoParsing: "Type"] checkForType: kO2PDFObjectTypeName value: &type] ||
+            strcmp(type, "XRef") ||
+            [[dictionary objectForKeyNoParsing: "Size"] objectTypeNoParsing] != kO2PDFObjectTypeInteger ||
+            ![dictionary getIntegerForKey: "Size" value: &size] || size <= 0 || number >= size ||
+            ![[dictionary objectForKeyNoParsing: "W"] checkForType: kO2PDFObjectTypeArray value: &w] ||
+            [w count] != 3)
+        return NO;
+    NSUInteger rowWidth = 0;
+    for (NSUInteger i = 0; i < 3; ++i) {
+        if ([[w objectAtIndex: i] objectTypeNoParsing] != kO2PDFObjectTypeInteger ||
+                ![w getIntegerAtIndex: i value: &widths[i]] || widths[i] < 0 ||
+                widths[i] > sizeof(O2PDFInteger))
+            return NO;
+        rowWidth += widths[i];
+    }
+    if (rowWidth == 0)
+        return NO;
+    O2PDFObject *rawIndex = [dictionary objectForKeyNoParsing: "Index"];
+    if (rawIndex == nil) {
+        O2PDFInteger values[] = {0, size};
+        index = [O2PDFArray pdfArrayWithIntegers: values count: 2];
+    } else if (![rawIndex checkForType: kO2PDFObjectTypeArray value: &index]) {
+        return NO;
+    }
+    if ([index count] == 0 || [index count] % 2)
+        return NO;
+    O2PDFInteger previousEnd = 0;
+    NSUInteger entries = 0;
+    for (NSUInteger i = 0; i < [index count]; i += 2) {
+        O2PDFInteger first, count;
+        if ([[index objectAtIndex: i] objectTypeNoParsing] != kO2PDFObjectTypeInteger ||
+                [[index objectAtIndex: i + 1] objectTypeNoParsing] != kO2PDFObjectTypeInteger ||
+                ![index getIntegerAtIndex: i value: &first] ||
+                ![index getIntegerAtIndex: i + 1 value: &count] ||
+                first < previousEnd || count < 0 || first > size || count > size - first)
+            return NO;
+        previousEnd = first + count;
+        entries += count;
+    }
+    NSData *decoded = [stream data];
+    if (decoded == nil || [decoded length] % rowWidth || entries != [decoded length] / rowWidth)
+        return NO;
+    const unsigned char *input = [decoded bytes];
+    for (NSUInteger range = 0; range < [index count]; range += 2) {
+        O2PDFInteger first, count;
+        [index getIntegerAtIndex: range value: &first];
+        [index getIntegerAtIndex: range + 1 value: &count];
+        for (O2PDFInteger n = first; n < first + count; ++n) {
+            O2PDFInteger fields[3] = {1, 0, 0};
+            for (NSUInteger field = 0; field < 3; ++field) {
+                if (widths[field] == 0)
+                    continue;
+                NSUInteger value = 0;
+                for (O2PDFInteger byte = 0; byte < widths[field]; ++byte)
+                    value = (value << 8) | *input++;
+                if (value > NSIntegerMax)
+                    return NO;
+                fields[field] = value;
+            }
+            if ((fields[0] == 1 && (fields[1] <= 0 || fields[1] >= length || fields[2] > 65535)) ||
+                    (fields[0] == 2 && (fields[1] <= 0 || fields[1] >= size)))
+                return NO;
+            if ((const void *) n == NSNotAnIntMapKey)
+                return NO;
+            [table addEntry: [O2PDFxrefEntry xrefEntryWithType: fields[0] number: n
+                    fieldTwo: fields[1] fieldThree: fields[2]]];
+        }
+    }
+    [table setTrailer: dictionary];
+    *result = table;
+    return YES;
+}
+
 BOOL O2PDFParse_xrefAtPosition(NSData *data, O2PDFInteger position,
                                O2PDFxref **xrefp)
 {
+    if ([data length] > UINT_MAX || [data length] > NSIntegerMax || position < 0 || (NSUInteger) position >= [data length])
+        return NO;
+    O2PDFObject *firstObject;
+    O2PDFInteger next;
+    if (!O2PDFScanObject([data bytes], [data length], position, &next, &firstObject))
+        return NO;
+    if ([firstObject objectTypeNoParsing] == kO2PDFObjectTypeInteger)
+        return O2PDFParseXrefStream(data, position, xrefp);
     const char *bytes = [data bytes];
     unsigned length = [data length];
     O2PDFxref *table;
@@ -954,8 +1073,12 @@ BOOL O2PDFParse_xrefAtPosition(NSData *data, O2PDFInteger position,
         if (!O2PDFScanInteger(bytes, length, position, &position, &count))
             return debugError(bytes, length, position, @"Expecting integer");
 
+        if (number < 0 || count < 0 || count > NSIntegerMax - number)
+            return NO;
         for (; --count >= 0; number++) {
             O2PDFInteger fieldOne, fieldTwo;
+            if ((const void *) number == NSNotAnIntMapKey)
+                return NO;
 
             if (!O2PDFScanInteger(bytes, length, position, &position,
                                   &fieldOne))
@@ -973,6 +1096,8 @@ BOOL O2PDFParse_xrefAtPosition(NSData *data, O2PDFInteger position,
             switch ([identifier identifier]) {
 
             case O2PDFIdentifier_f:
+                [table addEntry: [O2PDFxrefEntry xrefEntryWithType: 0 number: number
+                        fieldTwo: fieldOne fieldThree: fieldTwo]];
                 break;
 
             case O2PDFIdentifier_n:
@@ -995,6 +1120,9 @@ BOOL O2PDFParse_xref(NSData *data, O2PDFxref **xrefp) {
     O2PDFInteger position, ignore;
     O2PDFObject_identifier *identifier;
     O2PDFxref *lastTable = nil;
+    NSMutableSet *visited = [NSMutableSet set];
+    if ([data length] > UINT_MAX || [data length] > NSIntegerMax)
+        return NO;
 
     if (!O2PDFScanBackwardsToEOF(bytes, length, length, &position))
         return debugError(bytes, length, position,
@@ -1017,6 +1145,12 @@ BOOL O2PDFParse_xref(NSData *data, O2PDFxref **xrefp) {
 
     do {
         O2PDFxref *table;
+        NSNumber *offset = [NSNumber numberWithInteger: position];
+        if ([visited containsObject: offset]) {
+            O2PDFError(__FILE__, __LINE__, @"Cyclic PDF cross-reference chain");
+            return NO;
+        }
+        [visited addObject: offset];
 
         if (!O2PDFParse_xrefAtPosition(data, position, &table))
             return NO;
@@ -1027,13 +1161,26 @@ BOOL O2PDFParse_xref(NSData *data, O2PDFxref **xrefp) {
             [lastTable setPreviousTable: table];
 
         lastTable = table;
+        O2PDFInteger hybridPosition;
+        if ([[table trailer] getIntegerForKey: "XRefStm" value: &hybridPosition]) {
+            NSNumber *hybridOffset = [NSNumber numberWithInteger: hybridPosition];
+            O2PDFxref *hybrid;
+            if ([visited containsObject: hybridOffset] || hybridPosition < 0 ||
+                    (NSUInteger) hybridPosition >= [data length] ||
+                    !O2PDFParseXrefStream(data, hybridPosition, &hybrid))
+                return NO;
+            [visited addObject: hybridOffset];
+            [table setPreviousTable: hybrid];
+            lastTable = hybrid;
+        }
 
         if (![[table trailer] getIntegerForKey: "Prev" value: &position])
             break;
 
     } while (YES);
 
-    return YES;
+    O2PDFDictionary *catalog;
+    return [[*xrefp trailer] getDictionaryForKey: "Root" value: &catalog];
 }
 
 BOOL O2PDFParseIndirectObject(NSData *data, O2PDFInteger position,
@@ -1046,6 +1193,8 @@ BOOL O2PDFParseIndirectObject(NSData *data, O2PDFInteger position,
     O2PDFObject_identifier *identifier;
     O2PDFObject *object;
 
+    if ([data length] > UINT_MAX || [data length] > NSIntegerMax || position < 0 || (NSUInteger) position >= [data length])
+        return NO;
     debugTrace(bytes, length, position, @"O2PDFParseIndirectObject");
 
     if (!O2PDFScanInteger(bytes, length, position, &position, &check))
@@ -1094,10 +1243,14 @@ BOOL O2PDFParseIndirectObject(NSData *data, O2PDFInteger position,
             return debugError(bytes, length, position,
                               @"stream dictionary does not contain /Length");
 
+        if (position >= length || streamLength < 0)
+            return NO;
         if (bytes[position] == CR)
             position++;
-        if (bytes[position] == LF)
+        if (position < length && bytes[position] == LF)
             position++;
+        if ((NSUInteger) streamLength > length - position)
+            return NO;
 
         object = [[[O2PDFStream alloc] initWithDictionary: dictionary
                                                      xref: xref

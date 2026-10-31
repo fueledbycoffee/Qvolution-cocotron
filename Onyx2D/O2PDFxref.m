@@ -25,6 +25,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <Onyx2D/O2PDFDictionary.h>
 #import <Onyx2D/O2PDFObject_const.h>
 #import <Onyx2D/O2PDFScanner.h>
+#import <Onyx2D/O2PDFStream.h>
+#import <limits.h>
 #import <Onyx2D/O2PDFxref.h>
 #import <Onyx2D/O2PDFxrefEntry.h>
 
@@ -101,7 +103,63 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
         }
     }
 
+    if ([check isKindOfClass: [NSArray class]] || [check generation] != generation)
+        return nil;
     return check;
+}
+
+- (BOOL) parseCompressedEntry: (O2PDFxrefEntry *) entry object: (O2PDFObject **) result {
+    O2PDFxrefEntry *container = [self entryWithNumber: [entry position] generation: 0];
+    if (container == nil || [container type] != 1 || [container number] == [entry number])
+        return NO;
+    O2PDFStream *stream;
+    if (![[self objectAtNumber: [entry position] generation: 0]
+            checkForType: kO2PDFObjectTypeStream value: &stream])
+        return NO;
+    O2PDFDictionary *dictionary = [stream dictionary];
+    O2PDFInteger count, first, index = [entry objectStreamIndex];
+    const char *type;
+    NSData *data = [stream data];
+    NSUInteger length = [data length];
+    if (![dictionary getNameForKey: "Type" value: &type] || strcmp(type, "ObjStm") ||
+            ![dictionary getIntegerForKey: "N" value: &count] || count <= 0 ||
+            ![dictionary getIntegerForKey: "First" value: &first] || first < 0 ||
+            (NSUInteger) first > length || length >= UINT_MAX || length >= NSIntegerMax ||
+            index < 0 || index >= count || (NSUInteger) count > ((NSUInteger) first + 1) / 4)
+        return NO;
+    NSMutableData *header = [NSMutableData dataWithBytes: [data bytes] length: first];
+    [header appendBytes: "\n" length: 1];
+    O2PDFInteger cursor = 0, start = -1, end = length - first, previous = -1;
+    const char *bytes = [header bytes];
+    for (O2PDFInteger i = 0; i < count; ++i) {
+        O2PDFInteger number, offset;
+        if (!O2PDFScanInteger(bytes, first + 1, cursor, &cursor, &number) || number <= 0 ||
+                !O2PDFScanInteger(bytes, first + 1, cursor, &cursor, &offset) ||
+                offset < 0 || offset <= previous || (NSUInteger) offset >= length - first)
+            return NO;
+        previous = offset;
+        if (i == index) {
+            if (number != [entry number])
+                return NO;
+            start = offset;
+        } else if (i == index + 1) {
+            end = offset;
+        }
+    }
+    O2PDFObject *trailing;
+    if (!O2PDFScanObject(bytes, first + 1, cursor, &cursor, &trailing) || trailing != nil || start < 0)
+        return NO;
+    // Close a final scalar token without admitting the next object's bytes.
+    NSMutableData *body = [NSMutableData dataWithBytes: (const char *) [data bytes] + first + start
+            length: end - start];
+    [body appendBytes: "\n" length: 1];
+    bytes = [body bytes];
+    O2PDFInteger parsedEnd;
+    if (!O2PDFParseObject(bytes, [body length], 0, &parsedEnd, result, self) || *result == nil ||
+            [*result objectTypeNoParsing] < kO2PDFObjectTypeNull ||
+            [*result objectTypeNoParsing] > kO2PDFObjectTypeDictionary)
+        return NO;
+    return O2PDFScanObject(bytes, [body length], parsedEnd, &parsedEnd, &trailing) && trailing == nil;
 }
 
 - (O2PDFObject *) objectAtNumber: (O2PDFInteger) number
@@ -110,15 +168,22 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     O2PDFxrefEntry *lookup = [self entryWithNumber: number
                                         generation: generation];
 
-    if (lookup == nil)
+    if (lookup == nil || ([lookup type] != 1 && [lookup type] != 2))
         return [O2PDFObject_const pdfObjectWithNull];
     else {
         O2PDFObject *result = NSMapGet(_entryToObject, lookup);
 
         if (result == nil) {
-            if (!O2PDFParseIndirectObject(_data, [lookup position], &result,
-                                          number, generation, self))
-                result = [O2PDFObject_const pdfObjectWithNull];
+            NSMapInsert(_entryToObject, lookup, [O2PDFObject_const pdfObjectWithNull]);
+            BOOL parsed = [lookup type] == 2
+                    ? [self parseCompressedEntry: lookup object: &result]
+                    : O2PDFParseIndirectObject(_data, [lookup position], &result,
+                            number, generation, self);
+            if (!parsed) {
+                O2PDFError(__FILE__, __LINE__, @"Invalid PDF object %ld generation %ld",
+                        (long) number, (long) generation);
+                return nil;
+            }
 
             NSMapInsert(_entryToObject, lookup, result);
         }

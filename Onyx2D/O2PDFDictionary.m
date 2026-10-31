@@ -131,6 +131,10 @@ NSMapTableKeyCallBacks O2PDFOwnedCStringKeyCallBacks = {O2PDFHashCString,
                     value: [O2PDFObject_Name pdfObjectWithCString: value]];
 }
 
+- (O2PDFObject *) objectForKeyNoParsing: (const char *) key {
+    return NSMapGet(_table, key);
+}
+
 - (O2PDFObject *) objectForCStringKey: (const char *) key {
     O2PDFObject *object = NSMapGet(_table, key);
 

@@ -37,6 +37,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 - (O2PDFObject *) inheritedForCStringKey: (const char *) cStringKey
                                typecheck: (O2PDFObjectType) aType;
 
+- (O2PDFObject *) objectForKeyNoParsing: (const char *) key;
+
 - (BOOL) getObjectForKey: (const char *) key value: (O2PDFObject **) objectp;
 - (BOOL) getNullForKey: (const char *) key;
 - (BOOL) getBooleanForKey: (const char *) key value: (O2PDFBoolean *) valuep;
