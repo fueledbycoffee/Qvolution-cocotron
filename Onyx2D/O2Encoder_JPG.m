@@ -11,6 +11,7 @@ O2JPGEncoderRef O2JPGEncoderCreate(O2DataConsumerRef consumer) {
 }
 
 void O2JPGEncoderDealloc(O2JPGEncoderRef self) {
+    if (self == NULL) return;
     if (self->_consumer != NULL)
         CFRelease(self->_consumer);
     NSZoneFree(NULL, self);
@@ -26,9 +27,21 @@ static void pack_argb8u_as_rgb8u(O2argb8u *imageRow, size_t width,
         *rowbuffer++ = pixel.b;
     }
 }
-void O2JPGEncoderWriteImage(O2JPGEncoderRef self, O2ImageRef image,
+bool O2JPGEncoderCanWriteImage(O2ImageRef image) {
+    return image != nil && O2ImageGetWidth(image) > 0 && O2ImageGetHeight(image) > 0 &&
+            O2ImageGetWidth(image) <= JPEG_MAX_DIMENSION &&
+            O2ImageGetHeight(image) <= JPEG_MAX_DIMENSION;
+}
+
+bool O2JPGEncoderWriteImage(O2JPGEncoderRef self, O2ImageRef image,
                             CFDictionaryRef props)
 {
+    if (self == NULL || !O2JPGEncoderCanWriteImage(image))
+        return false;
+    O2ImageRef byteImage = O2ImageCreateCopyForByteExport(image);
+    if (byteImage == nil)
+        return false;
+    image = byteImage;
     NSDictionary *properties = (NSDictionary *) props;
 
     unsigned long length = 0;
@@ -88,9 +101,10 @@ void O2JPGEncoderWriteImage(O2JPGEncoderRef self, O2ImageRef image,
 
     jpeg_finish_compress(&cinfo);
 
-    O2DataConsumerPutBytes(self->_consumer, outbuffer, length);
+    bool success = O2DataConsumerPutBytes(self->_consumer, outbuffer, length) == length;
 
     jpeg_destroy_compress(&cinfo);
+    O2ImageRelease(byteImage);
 
 #ifndef DARLING
     free(outbuffer);
@@ -102,6 +116,7 @@ void O2JPGEncoderWriteImage(O2JPGEncoderRef self, O2ImageRef image,
 
     elf_free(outbuffer);
 #endif
+    return success;
 }
 
 #endif

@@ -142,11 +142,29 @@ void O2ImageDestinationSetProperties(O2ImageDestinationRef self,
 void O2ImageDestinationAddImage(O2ImageDestinationRef self, O2ImageRef image,
                                 CFDictionaryRef properties)
 {
+    if (self->_failed || self->_encoder == NULL || self->_imageCount == 0 ||
+            image == nil) {
+        self->_failed = YES;
+        return;
+    }
     if (self->_type == O2ImageFilePNG && self->_imageCount != 1) {
+        self->_failed = YES;
         O2PNGEncoderWriteImage(self->_encoder, NULL, NULL);
         return;
     }
-    self->_imageCount--;
+#ifdef LIBJPEG_PRESENT
+    if (self->_type == O2ImageFileJPEG && !O2JPGEncoderCanWriteImage(image)) {
+        self->_failed = YES;
+        return;
+    }
+#endif
+    O2ImageRef byteImage = O2ImageCreateCopyForByteExport(image);
+    if (byteImage == nil) {
+        self->_failed = YES;
+        return;
+    }
+    image = byteImage;
+    bool wroteImage = false;
 
     switch (self->_type) {
 
@@ -154,8 +172,8 @@ void O2ImageDestinationAddImage(O2ImageDestinationRef self, O2ImageRef image,
         break;
 
     case O2ImageFileTIFF:
-        O2TIFFEncoderWriteImage(self->_encoder, image, properties,
-                                (self->_imageCount == 0) ? YES : NO);
+        wroteImage = O2TIFFEncoderWriteImage(self->_encoder, image, properties,
+                                self->_imageCount == 1);
         break;
 
     case O2ImageFileBMP:
@@ -166,17 +184,23 @@ void O2ImageDestinationAddImage(O2ImageDestinationRef self, O2ImageRef image,
 
     case O2ImageFileJPEG:
 #ifdef LIBJPEG_PRESENT
-        O2JPGEncoderWriteImage(self->_encoder, image, properties);
+        wroteImage = O2JPGEncoderWriteImage(self->_encoder, image, properties);
 #endif
         break;
 
     case O2ImageFilePNG:
         O2PNGEncoderWriteImage(self->_encoder, image, properties);
+        wroteImage = O2PNGEncoderIsComplete(self->_encoder);
         break;
 
     case O2ImageFileJPEG2000:
         break;
     }
+    if (wroteImage)
+        self->_imageCount--;
+    else
+        self->_failed = YES;
+    O2ImageRelease(byteImage);
 }
 
 void O2ImageDestinationAddImageFromSource(O2ImageDestinationRef self,
@@ -191,14 +215,17 @@ void O2ImageDestinationAddImageFromSource(O2ImageDestinationRef self,
 }
 
 bool O2ImageDestinationFinalize(O2ImageDestinationRef self) {
-    bool success = TRUE;
+    if (self->_encoder == NULL)
+        return false;
+    bool success = !self->_failed && self->_imageCount == 0;
     switch (self->_type) {
 
     case O2ImageFileUnknown:
         break;
 
     case O2ImageFileTIFF:
-        O2TIFFEncoderEnd(self->_encoder);
+        if (!self->_failed)
+            O2TIFFEncoderEnd(self->_encoder);
         O2TIFFEncoderDealloc(self->_encoder);
         self->_encoder = NULL;
         break;
@@ -217,7 +244,7 @@ bool O2ImageDestinationFinalize(O2ImageDestinationRef self) {
         break;
 
     case O2ImageFilePNG:
-        success = self->_imageCount == 0 && O2PNGEncoderIsComplete(self->_encoder);
+        success = success && O2PNGEncoderIsComplete(self->_encoder);
         O2PNGEncoderDealloc(self->_encoder);
         self->_encoder = NULL;
         break;
@@ -233,6 +260,20 @@ bool O2ImageDestinationFinalize(O2ImageDestinationRef self) {
     self->_options = NULL;
 
     return success;
+}
+
+- (void) dealloc {
+    switch (self->_type) {
+    case O2ImageFileTIFF: O2TIFFEncoderDealloc(self->_encoder); break;
+#ifdef LIBJPEG_PRESENT
+    case O2ImageFileJPEG: O2JPGEncoderDealloc(self->_encoder); break;
+#endif
+    case O2ImageFilePNG: O2PNGEncoderDealloc(self->_encoder); break;
+    default: break;
+    }
+    [self->_consumer release];
+    if (self->_options) CFRelease(self->_options);
+    [super dealloc];
 }
 
 @end

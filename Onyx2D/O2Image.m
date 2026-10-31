@@ -620,6 +620,123 @@ O2ImageRef O2ImageCreateCopy(O2ImageRef self) {
     return [self copy];
 }
 
+// Byte consumers use the same rounded, saturated component mapping as an
+// eight-bit bitmap surface. Samples remain premultiplied; no profile transform
+// or transfer-function conversion is implied. Convert the complete mask graph
+// before a consumer changes its image count, stream, or PDF resources.
+static O2ImageRef copyImageForByteExport(O2ImageRef image,
+        O2ImageRef *ancestors, size_t depth) {
+    if (image == nil || depth == 64)
+        return nil;
+    for (size_t i = 0; i < depth; i++)
+        if (ancestors[i] == image)
+            return nil;
+    ancestors[depth] = image;
+    // Readers require the complete final row (including its declared padding).
+    // Validate every graph node before copying samples or returning a byte image.
+    NSData *sourceData = [image directData];
+    if (image->_width == 0 || image->_width > INT_MAX ||
+            image->_height == 0 || image->_bitsPerPixel == 0 ||
+            image->_bytesPerRow == 0 || image->_bytesPerRow > INT_MAX ||
+            image->_height > (size_t)INT_MAX / image->_bytesPerRow ||
+            image->_width > (SIZE_MAX - 7) / image->_bitsPerPixel ||
+            image->_bytesPerRow < (image->_width * image->_bitsPerPixel + 7) / 8 ||
+            [sourceData bytes] == NULL ||
+            [sourceData length] < image->_bytesPerRow * image->_height)
+        return nil;
+    image->_directBytes = [sourceData bytes];
+    image->_directLength = [sourceData length];
+    O2ImageRef mask = nil;
+    if (image->_mask != nil) {
+        mask = copyImageForByteExport(image->_mask, ancestors, depth + 1);
+        if (mask == nil)
+            return nil;
+    }
+    if (image->_read_argb8u != NULL && mask == image->_mask) {
+        O2ImageRelease(mask);
+        return O2ImageRetain(image);
+    }
+
+    O2ImageRef result = nil;
+    if (image->_read_argb8u == NULL) {
+        if (!O2BitmapFormatSupportsFloatRGBA(image->_width, image->_height,
+                image->_bitsPerComponent, image->_bitsPerPixel,
+                image->_bytesPerRow, image->_colorSpace, image->_bitmapInfo)) {
+            O2ImageRelease(mask);
+            return nil;
+        }
+        size_t stride = image->_width * 4;
+        if (image->_height > SIZE_MAX / stride) {
+            O2ImageRelease(mask);
+            return nil;
+        }
+        size_t length = stride * image->_height;
+        uint8_t *pixels = malloc(length);
+        if (pixels == NULL) {
+            O2ImageRelease(mask);
+            return nil;
+        }
+        O2argb32f span[256];
+        for (int y = 0; y < image->_height; y++) {
+            for (int x = 0; x < image->_width;) {
+                int chunk = MIN(256, image->_width - x);
+                O2Image_read_argb32f(image, x, y, span, chunk);
+                for (int i = 0; i < chunk; i++) {
+                    O2argb8u sample = O2argb8uFromO2argb32f(span[i]);
+                    size_t offset = y * stride + (x + i) * 4;
+                    pixels[offset] = sample.r;
+                    pixels[offset + 1] = sample.g;
+                    pixels[offset + 2] = sample.b;
+                    pixels[offset + 3] = sample.a;
+                }
+                x += chunk;
+            }
+        }
+        NSData *data = [[NSData alloc] initWithBytesNoCopy: pixels
+                length: length freeWhenDone: YES];
+        if (data == nil) {
+            free(pixels);
+            O2ImageRelease(mask);
+            return nil;
+        }
+        O2DataProviderRef provider = O2DataProviderCreateWithCFData((CFDataRef)data);
+        if (provider == nil) {
+            [data release];
+            O2ImageRelease(mask);
+            return nil;
+        }
+        result = O2ImageCreate(image->_width, image->_height, 8, 32, stride,
+                image->_colorSpace,
+                kO2BitmapByteOrder32Big | kO2ImageAlphaPremultipliedLast,
+                provider, image->_decode, image->_interpolate,
+                image->_renderingIntent);
+        O2DataProviderRelease(provider);
+        [data release];
+    } else {
+        // A byte parent may still contain a float mask. Clone its metadata and
+        // provider so replacing the converted mask never mutates the caller.
+        result = [[O2Image alloc] initWithWidth: image->_width
+                height: image->_height bitsPerComponent: image->_bitsPerComponent
+                bitsPerPixel: image->_bitsPerPixel bytesPerRow: image->_bytesPerRow
+                colorSpace: image->_colorSpace bitmapInfo: image->_bitmapInfo
+                decoder: image->_decoder provider: image->_provider
+                decode: image->_decode interpolate: image->_interpolate
+                renderingIntent: image->_renderingIntent];
+    }
+    if (result != nil) {
+        result->_isMask = image->_isMask;
+        result->_clampExternalPixels = image->_clampExternalPixels;
+        [result setMask: mask];
+    }
+    O2ImageRelease(mask);
+    return result;
+}
+
+O2ImageRef O2ImageCreateCopyForByteExport(O2ImageRef image) {
+    O2ImageRef ancestors[64];
+    return copyImageForByteExport(image, ancestors, 0);
+}
+
 O2ImageRef O2ImageCreateCopyWithColorSpace(O2ImageRef self,
                                            O2ColorSpaceRef colorSpace)
 {

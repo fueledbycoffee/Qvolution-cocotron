@@ -15,6 +15,33 @@
 #import <zlib.h>
 #endif
 
+// Image-paint masks use their red sample as coverage. Scale nested masks to
+// their parent image just as a full-image draw does; byte-export preflight has
+// already bounded and converted this graph.
+static unsigned O2PDFImageMaskCoverage(O2Image *mask, size_t x, size_t y,
+        size_t parentWidth, size_t parentHeight) {
+    size_t u = ((uint64_t)x * 2 + 1) * O2ImageGetWidth(mask) / ((uint64_t)parentWidth * 2);
+    size_t v = ((uint64_t)y * 2 + 1) * O2ImageGetHeight(mask) / ((uint64_t)parentHeight * 2);
+    O2argb8u sample;
+    O2argb8u *direct = O2Image_read_argb8u(mask, u, v, &sample, 1);
+    if (direct != NULL) sample = *direct;
+    unsigned coverage = sample.r;
+    if (O2ImageGetMask(mask) != nil)
+        coverage = (coverage * O2PDFImageMaskCoverage(O2ImageGetMask(mask), x, y,
+                parentWidth, parentHeight) + 127) / 255;
+    return coverage;
+}
+
+static void O2PDFImageCopyDecode(O2PDFDictionary *dictionary, O2Image *image) {
+    const O2Float *decode = O2ImageGetDecode(image);
+    if (decode != NULL) {
+        size_t components = O2ImageIsMask(image) ? 1 :
+                O2ColorSpaceGetNumberOfComponents(O2ImageGetColorSpace(image));
+        [dictionary setObjectForKey: "Decode"
+                value: [O2PDFArray pdfArrayWithNumbers: decode count: components * 2]];
+    }
+}
+
 @implementation O2Image (PDF)
 
 O2ColorRenderingIntent O2ImageRenderingIntentWithName(const char *name) {
@@ -53,160 +80,127 @@ const char *O2ImageNameWithIntent(O2ColorRenderingIntent intent) {
 }
 
 - (O2PDFObject *) encodeReferenceWithContext: (O2PDFContext *) context {
-    O2PDFStream *result = [O2PDFStream pdfStream];
-    O2PDFDictionary *dictionary = [result dictionary];
-
-    [dictionary setNameForKey: "Type" value: "XObject"];
-    [dictionary setNameForKey: "Subtype" value: "Image"];
-    [dictionary setIntegerForKey: "Width" value: _width];
-    [dictionary setIntegerForKey: "Height" value: _height];
-    if (_colorSpace != nil)
-        [dictionary
-                setObjectForKey: "ColorSpace"
-                          value: [_colorSpace
-                                         encodeReferenceWithContext: context]];
-    [dictionary setIntegerForKey: "BitsPerComponent" value: _bitsPerComponent];
-    [dictionary setNameForKey: "Intent"
-                        value: O2ImageNameWithIntent(_renderingIntent)];
-    [dictionary setBooleanForKey: "ImageMask" value: _isMask];
-    if (_mask != nil)
-        [dictionary
-                setObjectForKey: "Mask"
-                          value: [_mask encodeReferenceWithContext: context]];
-    if (_decode != NULL)
-        [dictionary
-                setObjectForKey: "Decode"
-                          value: [O2PDFArray
-                                         pdfArrayWithNumbers: _decode
-                                                       count: O2ColorSpaceGetNumberOfComponents(
-                                                                      _colorSpace) *
-                                                              2]];
-    [dictionary setBooleanForKey: "Interpolate" value: _interpolate];
-
-    if (O2ImageDecoderGetCompressionType(_decoder) == O2ImageCompressionJPEG) {
-        // If the image is JPEG compressed, we can put the JPEG data in the PDF,
-        // using a DCTDecode filter
-        O2DataProviderRef dataProvider =
-                O2ImageDecoderGetDataProvider(_decoder);
-        CFDataRef dctData = O2DataProviderCopyData(dataProvider);
-
+    O2ImageRef byteImage = O2ImageCreateCopyForByteExport(self);
+    if (byteImage == nil)
+        return nil;
+    if (byteImage != self) {
+        O2PDFObject *converted = [byteImage encodeReferenceWithContext: context];
+        O2ImageRelease(byteImage);
+        return converted;
+    }
+    O2ImageRelease(byteImage);
+    if (_mask == nil && O2ImageDecoderGetCompressionType(_decoder) == O2ImageCompressionJPEG) {
+        O2PDFStream *result = [O2PDFStream pdfStream];
+        O2PDFDictionary *dictionary = [result dictionary];
+        [dictionary setNameForKey: "Type" value: "XObject"];
+        [dictionary setNameForKey: "Subtype" value: "Image"];
+        [dictionary setIntegerForKey: "Width" value: _width];
+        [dictionary setIntegerForKey: "Height" value: _height];
+        [dictionary setIntegerForKey: "BitsPerComponent" value: _bitsPerComponent];
+        [dictionary setNameForKey: "Intent" value: O2ImageNameWithIntent(_renderingIntent)];
+        [dictionary setBooleanForKey: "Interpolate" value: _interpolate];
+        O2PDFImageCopyDecode(dictionary, self);
+        [dictionary setObjectForKey: "ColorSpace"
+                value: [_colorSpace encodeReferenceWithContext: context]];
         [dictionary setNameForKey: "Filter" value: "DCTDecode"];
-
-        [[result mutableData] appendData: (NSData *) dctData];
-        CFRelease(dctData);
-    } else {
-#define CHUNK 65536
-
-        // Input buffer for image data
-        uint8_t in[CHUNK + 3]; // CHUNK size + some additional room for rgb
-        int idx = 0;
-
-#if ZLIB_PRESENT
-        // Put ZLIB compressed data in the PDF, using a DCTDecode filter
-        [dictionary setNameForKey: "Filter" value: "FlateDecode"];
-
-        // allocate deflate state
-        NSUInteger have;
-        z_stream strm;
-        strm.zalloc = Z_NULL;
-        strm.zfree = Z_NULL;
-        strm.opaque = Z_NULL;
-
-        deflateInit(&strm, 9);
-
-        // Compressed output buffer
-        uint8_t out[CHUNK + 3];
-#else
-        // No compression : out buffer = in buffer
-        uint8_t *out = in;
-#endif
-
-        const void *bytes = [self directBytes];
-
-        /* FIX, generate soft mask for alpha data
-         [dictionary setObjectForKey:"SMask" value:[softMask
-         encodeReferenceWithContext:context]];
-         */
-
-        // It would be nice if jpg data would stay jpg data (instead of an
-        // uncompress stream), as it does with Quartz and CGImage
-
-        // Export RGB bytes, without the alpha data, in the expected order
-        // TODO : support non 32 bits pixels, respect the premultiplied state,
-        // non-RGB pixels...
-        const uint8_t *ptr = bytes;
-        int alphaInfo = _bitmapInfo & kO2BitmapAlphaInfoMask;
-        BOOL hasAlpha = alphaInfo != kO2ImageAlphaNone;
-        BOOL alphaFirst = alphaInfo == kO2ImageAlphaPremultipliedFirst ||
-                          alphaInfo == kO2ImageAlphaFirst ||
-                          alphaInfo == kO2ImageAlphaNoneSkipFirst;
-        BOOL alphaLast = hasAlpha && (alphaFirst == NO);
-        BOOL bigEndian = _bitmapInfo & kO2BitmapByteOrder32Big;
-        BOOL littleEndian = bigEndian == NO;
-        int bytesPerPixel = _bitsPerPixel / 8;
-        for (int i = 0; i < _height; i++, ptr += _bytesPerRow) {
-            const uint8_t *linePtr = ptr;
-            for (int j = 0; j < _width; j++, linePtr += bytesPerPixel) {
-                const uint8_t *pixelPtr = linePtr;
-                /*
-                 AlphaFirst => The Alpha channel is next to the Red channel
-                 (ARGB and BGRA are both Alpha First formats)
-                 AlphaLast => The Alpha channel is next to the Blue channel
-                 (RGBA and ABGR are both Alpha Last formats)
-
-                 LittleEndian => Blue comes before Red
-                 (BGRA and ABGR are Little endian formats)
-                 BigEndian => Red comes before Blue
-                 (ARGB and RGBA are Big endian formats).
-                 */
-                uint8_t r = 0, g = 0, b = 0;
-                if ((alphaFirst && bigEndian) || (alphaLast && littleEndian)) {
-                    // Skip the alpha
-                    ++pixelPtr;
+        CFDataRef data = O2DataProviderCopyData(O2ImageDecoderGetDataProvider(_decoder));
+        [[result mutableData] appendData: (NSData *)data];
+        CFRelease(data);
+        return [context encodeIndirectPDFObject: result];
+    }
+    O2ColorSpaceModel model = O2ColorSpaceGetModel(_colorSpace);
+    BOOL packedGray = model == kO2ColorSpaceModelMonochrome &&
+            (_bitsPerComponent == 1 || _bitsPerComponent == 8) &&
+            _bitsPerPixel == _bitsPerComponent;
+    BOOL packedIndexed = model == kO2ColorSpaceModelIndexed &&
+            _bitsPerComponent == 8 && _bitsPerPixel == 8;
+    BOOL packedCMYK = model == kO2ColorSpaceModelCMYK &&
+            _bitsPerComponent == 8 && _bitsPerPixel == 32;
+    if ((packedGray || packedIndexed || packedCMYK) && _mask == nil &&
+            (!_isMask || _bitsPerComponent == 1)) {
+        O2PDFStream *result = [O2PDFStream pdfStream];
+        O2PDFDictionary *dictionary = [result dictionary];
+        [dictionary setNameForKey: "Type" value: "XObject"];
+        [dictionary setNameForKey: "Subtype" value: "Image"];
+        [dictionary setIntegerForKey: "Width" value: _width];
+        [dictionary setIntegerForKey: "Height" value: _height];
+        [dictionary setIntegerForKey: "BitsPerComponent" value: _bitsPerComponent];
+        [dictionary setNameForKey: "Intent" value: O2ImageNameWithIntent(_renderingIntent)];
+        [dictionary setBooleanForKey: "Interpolate" value: _interpolate];
+        O2PDFImageCopyDecode(dictionary, self);
+        [dictionary setBooleanForKey: "ImageMask" value: _isMask];
+        if (!_isMask)
+            [dictionary setObjectForKey: "ColorSpace"
+                    value: [_colorSpace encodeReferenceWithContext: context]];
+        const uint8_t *bytes = [self directBytes];
+        size_t rowLength = (_width * _bitsPerPixel + 7) / 8;
+        for (size_t y = 0; y < _height; y++)
+            [[result mutableData] appendBytes: bytes + y * _bytesPerRow length: rowLength];
+        return [context encodeIndirectPDFObject: result];
+    }
+    // The RGB sampler exposes premultiplied components. PDF color samples are
+    // unassociated; preserve alpha in a separate gray soft-mask stream.
+    if (!_isMask) {
+        O2PDFStream *rgb = [O2PDFStream pdfStream];
+        O2PDFStream *alpha = [O2PDFStream pdfStream];
+        O2PDFDictionary *dictionary = [rgb dictionary];
+        [dictionary setNameForKey: "Type" value: "XObject"];
+        [dictionary setNameForKey: "Subtype" value: "Image"];
+        [dictionary setIntegerForKey: "Width" value: _width];
+        [dictionary setIntegerForKey: "Height" value: _height];
+        [dictionary setIntegerForKey: "BitsPerComponent" value: 8];
+        if (O2ColorSpaceGetModel(_colorSpace) == kO2ColorSpaceModelRGB)
+            [dictionary setObjectForKey: "ColorSpace"
+                    value: [_colorSpace encodeReferenceWithContext: context]];
+        else
+            [dictionary setNameForKey: "ColorSpace" value: "DeviceRGB"];
+        [dictionary setBooleanForKey: "Interpolate" value: _interpolate];
+        [dictionary setNameForKey: "Intent" value: O2ImageNameWithIntent(_renderingIntent)];
+        if (O2ColorSpaceGetModel(_colorSpace) == kO2ColorSpaceModelRGB)
+            O2PDFImageCopyDecode(dictionary, self);
+        BOOL needsAlpha = NO;
+        O2argb8u span[256];
+        uint8_t colors[256 * 3], coverage[256];
+        for (size_t y = 0; y < _height; y++) {
+            for (size_t x = 0; x < _width;) {
+                int chunk = MIN(256, _width - x);
+                O2argb8u *samples = O2Image_read_argb8u(self, x, y, span, chunk);
+                if (samples == NULL) samples = span;
+                for (int i = 0; i < chunk; i++) {
+                    O2argb8u sample = samples[i];
+                    unsigned a = sample.a;
+                    unsigned r = a ? (sample.r * 255 + a / 2) / a : 0;
+                    unsigned g = a ? (sample.g * 255 + a / 2) / a : 0;
+                    unsigned b = a ? (sample.b * 255 + a / 2) / a : 0;
+                    colors[i * 3] = MIN(r, 255);
+                    colors[i * 3 + 1] = MIN(g, 255);
+                    colors[i * 3 + 2] = MIN(b, 255);
+                    if (_mask != nil)
+                        a = (a * O2PDFImageMaskCoverage(_mask, x + i, y,
+                                _width, _height) + 127) / 255;
+                    coverage[i] = a;
+                    needsAlpha |= a != 255;
                 }
-                if (bigEndian) {
-                    r = *pixelPtr++;
-                    g = *pixelPtr++;
-                    b = *pixelPtr++;
-                } else {
-                    b = *pixelPtr++;
-                    g = *pixelPtr++;
-                    r = *pixelPtr++;
-                }
-                in[idx++] = r;
-                in[idx++] = g;
-                in[idx++] = b;
-                BOOL flush =
-                        (i == _height - 1 && j == _width - 1) || (idx > CHUNK);
-                if (flush) {
-#if ZLIB_PRESENT
-                    strm.avail_in = idx;
-                    flush = ((i == _height - 1 && j == _width - 1))
-                                    ? Z_FINISH
-                                    : Z_NO_FLUSH;
-                    strm.next_in = in;
-
-                    // run deflate() on input until the output buffer is not
-                    // full
-                    do {
-                        strm.avail_out = idx;
-                        strm.next_out = out;
-                        deflate(&strm, flush);
-                        have = idx - strm.avail_out;
-                        [[result mutableData] appendBytes: out length: have];
-                    } while (strm.avail_out == 0);
-#else
-                    [[result mutableData] appendBytes: out length: idx];
-#endif
-                    idx = 0;
-                }
+                [[rgb mutableData] appendBytes: colors length: chunk * 3];
+                [[alpha mutableData] appendBytes: coverage length: chunk];
+                x += chunk;
             }
         }
-#if ZLIB_PRESENT
-        deflateEnd(&strm);
-#endif
+        if (needsAlpha) {
+            O2PDFDictionary *maskDictionary = [alpha dictionary];
+            [maskDictionary setNameForKey: "Type" value: "XObject"];
+            [maskDictionary setNameForKey: "Subtype" value: "Image"];
+            [maskDictionary setIntegerForKey: "Width" value: _width];
+            [maskDictionary setIntegerForKey: "Height" value: _height];
+            [maskDictionary setIntegerForKey: "BitsPerComponent" value: 8];
+            [maskDictionary setBooleanForKey: "Interpolate" value: _interpolate];
+            [maskDictionary setNameForKey: "ColorSpace" value: "DeviceGray"];
+            [dictionary setObjectForKey: "SMask"
+                    value: [context encodeIndirectPDFObject: alpha]];
+        }
+        return [context encodeIndirectPDFObject: rgb];
     }
-    return [context encodeIndirectPDFObject: result];
+    return nil;
 }
 
 + (O2Image *) imageWithPDFObject: (O2PDFObject *) object {

@@ -678,9 +678,14 @@ static void requirePDFColors(O2ContextRef context, BOOL fill, BOOL stroke) {
     O2ColorSpaceRequireSupportedRendering(O2ImageGetColorSpace(image));
     BOOL fill = O2ImageIsMask(image);
     requirePDFColors(self, fill, NO);
+    O2ImageRef byteImage = O2ImageCreateCopyForByteExport(image);
+    if (byteImage == nil)
+        return;
+    O2PDFObject *pdfObject = [byteImage encodeReferenceWithContext: self];
+    O2ImageRelease(byteImage);
+    if (pdfObject == nil)
+        return;
     [self emitSaveGState];
-
-    O2PDFObject *pdfObject = [image encodeReferenceWithContext: self];
     O2PDFObject *name = [self nameForResource: pdfObject inCategory: "XObject"];
     [self emitCurrentGStateForFill:fill stroke:NO];
 

@@ -173,6 +173,8 @@ O2ImageRef O2ImageMaskCreate(size_t width, size_t height,
                              size_t bytesPerRow, O2DataProviderRef dataProvider,
                              const O2Float *decode, BOOL shouldInterpolate);
 O2ImageRef O2ImageCreateCopy(O2ImageRef image);
+// Internal consumer boundary; returns an owned image with byte-readable masks.
+O2ImageRef O2ImageCreateCopyForByteExport(O2ImageRef image);
 O2ImageRef O2ImageCreateCopyWithColorSpace(O2ImageRef self,
                                            O2ColorSpaceRef colorSpace);
 O2ImageRef

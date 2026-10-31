@@ -17,5 +17,6 @@ typedef struct O2JPGEncoder {
 O2JPGEncoderRef O2JPGEncoderCreate(O2DataConsumerRef consumer);
 void O2JPGEncoderDealloc(O2JPGEncoderRef self);
 
-void O2JPGEncoderWriteImage(O2JPGEncoderRef self, O2ImageRef image, CFDictionaryRef properties);
+bool O2JPGEncoderCanWriteImage(O2ImageRef image);
+bool O2JPGEncoderWriteImage(O2JPGEncoderRef self, O2ImageRef image, CFDictionaryRef properties);
 #endif

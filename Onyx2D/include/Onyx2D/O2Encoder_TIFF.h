@@ -5,6 +5,7 @@
 
 typedef struct O2TIFFEncoder {
     bool _bigEndian;
+    bool _failed;
     size_t _consumerOffset;
     size_t _consumerPosition;
     size_t _bufferCapacity;
@@ -18,5 +19,5 @@ O2TIFFEncoderRef O2TIFFEncoderCreate(O2DataConsumerRef consumer);
 void O2TIFFEncoderDealloc(O2TIFFEncoderRef self);
 
 void O2TIFFEncoderBegin(O2TIFFEncoderRef self);
-void O2TIFFEncoderWriteImage(O2TIFFEncoderRef self, O2ImageRef image, CFDictionaryRef properties, bool lastImage);
+bool O2TIFFEncoderWriteImage(O2TIFFEncoderRef self, O2ImageRef image, CFDictionaryRef properties, bool lastImage);
 void O2TIFFEncoderEnd(O2TIFFEncoderRef self);

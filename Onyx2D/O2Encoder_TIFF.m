@@ -1,5 +1,7 @@
 #import <Onyx2D/O2Decoder_TIFF.h>
 #import <Onyx2D/O2Encoder_TIFF.h>
+#include <limits.h>
+#include <stdlib.h>
 
 O2TIFFEncoderRef O2TIFFEncoderCreate(O2DataConsumerRef consumer) {
     O2TIFFEncoderRef self = NSZoneCalloc(NULL, 1, sizeof(struct O2TIFFEncoder));
@@ -14,6 +16,7 @@ O2TIFFEncoderRef O2TIFFEncoderCreate(O2DataConsumerRef consumer) {
 }
 
 void O2TIFFEncoderDealloc(O2TIFFEncoderRef self) {
+    if (self == NULL) return;
     if (self->_mutableBytes != NULL)
         NSZoneFree(NULL, self->_mutableBytes);
     if (self->_consumer != NULL)
@@ -25,11 +28,13 @@ static void beginBuffering(O2TIFFEncoderRef self) {
     self->_bufferCapacity = 256;
     self->_bufferCount = 0;
     self->_mutableBytes = NSZoneMalloc(NULL, self->_bufferCapacity);
+    if (self->_mutableBytes == NULL) self->_failed = true;
 }
 
 static void endBuffering(O2TIFFEncoderRef self) {
-    O2DataConsumerPutBytes(self->_consumer, self->_mutableBytes,
-                           self->_bufferCount);
+    if (!self->_failed && O2DataConsumerPutBytes(self->_consumer,
+            self->_mutableBytes, self->_bufferCount) != self->_bufferCount)
+        self->_failed = true;
 
     NSZoneFree(NULL, self->_mutableBytes);
     self->_mutableBytes = NULL;
@@ -49,23 +54,27 @@ static uint32_t setPosition(O2TIFFEncoderRef self, uint32_t value) {
     return result;
 }
 
-static void ensureByteCount(O2TIFFEncoderRef self, size_t count) {
-    if (self->_bufferCount + count > self->_bufferCapacity) {
-        while (self->_bufferCount + count > self->_bufferCapacity)
-            self->_bufferCapacity *= 2;
-
-        self->_mutableBytes =
-                NSZoneRealloc(NULL, self->_mutableBytes, self->_bufferCapacity);
-    }
-}
-
 static void putBytes(O2TIFFEncoderRef self, uint8_t *values, uint32_t count) {
-    uint32_t i;
-
-    ensureByteCount(self, count);
-
-    for (i = 0; i < count; i++, self->_bufferCount++, self->_consumerPosition++)
-        self->_mutableBytes[self->_bufferCount] = values[i];
+    if (self->_failed) return;
+    if (count > SIZE_MAX - self->_bufferCount) {
+        self->_failed = true;
+        return;
+    }
+    size_t needed = self->_bufferCount + count;
+    if (needed > self->_bufferCapacity) {
+        size_t capacity = self->_bufferCapacity;
+        while (capacity < needed) {
+            if (capacity > SIZE_MAX / 2) { capacity = needed; break; }
+            capacity *= 2;
+        }
+        uint8_t *bytes = NSZoneRealloc(NULL, self->_mutableBytes, capacity);
+        if (bytes == NULL) { self->_failed = true; return; }
+        self->_mutableBytes = bytes;
+        self->_bufferCapacity = capacity;
+    }
+    memcpy(self->_mutableBytes + self->_bufferCount, values, count);
+    self->_bufferCount += count;
+    self->_consumerPosition += count;
 }
 
 static void putUnsigned8(O2TIFFEncoderRef self, uint8_t value) {
@@ -294,9 +303,15 @@ void pack_argb8u_as_rgba8u(O2argb8u *imageRow, size_t width, uint8_t *tiffRow) {
     }
 }
 
-void O2TIFFEncoderWriteImage(O2TIFFEncoderRef self, O2ImageRef image,
+bool O2TIFFEncoderWriteImage(O2TIFFEncoderRef self, O2ImageRef image,
                              CFDictionaryRef properties, bool lastImage)
 {
+    if (self == NULL || self->_failed)
+        return false;
+    O2ImageRef byteImage = O2ImageCreateCopyForByteExport(image);
+    if (byteImage == nil)
+        return false;
+    image = byteImage;
     size_t imageWidth = O2ImageGetWidth(image);
     size_t imageHeight = O2ImageGetHeight(image);
     O2ImageAlphaInfo imageAlphaInfo = O2ImageGetAlphaInfo(image);
@@ -309,8 +324,12 @@ void O2TIFFEncoderWriteImage(O2TIFFEncoderRef self, O2ImageRef image,
     int tiffBitsPerComponent = 8;
     int tiffSamplesPerPixel = imageHasAlpha ? 4 : 3;
     int tiffBitsPerPixel = tiffBitsPerComponent * tiffSamplesPerPixel;
+    if (imageWidth > INT_MAX / tiffSamplesPerPixel ||
+            imageHeight > INT_MAX / (imageWidth * tiffSamplesPerPixel)) {
+        O2ImageRelease(byteImage);
+        return false;
+    }
     int tiffBytesPerRow = (tiffBitsPerPixel * imageWidth) / 8;
-
     size_t tiffPixelByteCount = imageHeight * tiffBytesPerRow;
 
     uint32_t idealStripSize =
@@ -319,12 +338,18 @@ void O2TIFFEncoderWriteImage(O2TIFFEncoderRef self, O2ImageRef image,
     uint32_t stripSize = rowsPerStrip * tiffBytesPerRow;
     uint32_t stripCount = (tiffPixelByteCount + (stripSize - 1)) / stripSize;
     uint32_t stripOffsetsPosition;
-    uint32_t stripOffsets[stripCount];
+    uint32_t *stripOffsets = malloc(stripCount * sizeof(*stripOffsets));
     uint32_t stripByteCountsPosition;
-    uint32_t stripByteCounts[stripCount];
-    O2argb8u imageRowBuffer[imageWidth];
+    uint32_t *stripByteCounts = malloc(stripCount * sizeof(*stripByteCounts));
+    O2argb8u *imageRowBuffer = malloc(imageWidth * sizeof(*imageRowBuffer));
     O2argb8u *imageRow;
-    uint8_t tiffRowBuffer[tiffBytesPerRow];
+    uint8_t *tiffRowBuffer = malloc(tiffBytesPerRow);
+    if (!stripOffsets || !stripByteCounts || !imageRowBuffer || !tiffRowBuffer) {
+        free(stripOffsets); free(stripByteCounts);
+        free(imageRowBuffer); free(tiffRowBuffer);
+        O2ImageRelease(byteImage);
+        return false;
+    }
 
     int strip, y = 0;
 
@@ -409,6 +434,10 @@ void O2TIFFEncoderWriteImage(O2TIFFEncoderRef self, O2ImageRef image,
                                 nextEntryOffsetPosition);
 
     endBuffering(self);
+    free(stripOffsets); free(stripByteCounts);
+    free(imageRowBuffer); free(tiffRowBuffer);
+    O2ImageRelease(byteImage);
+    return !self->_failed;
 }
 
 void O2TIFFEncoderEnd(O2TIFFEncoderRef self) {

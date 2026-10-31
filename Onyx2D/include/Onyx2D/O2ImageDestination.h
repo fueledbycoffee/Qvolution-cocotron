@@ -20,6 +20,7 @@ extern const CFStringRef kO2ImageDestinationDPI;
     size_t _imageCount;
     CFDictionaryRef _options;
     void *_encoder;
+    BOOL _failed;
 }
 
 @end
