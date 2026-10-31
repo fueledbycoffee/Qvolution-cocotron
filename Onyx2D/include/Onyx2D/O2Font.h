@@ -81,6 +81,9 @@ typedef enum {
 - initWithFontName: (NSString *) name;
 - initWithDataProvider: (O2DataProviderRef) provider;
 
+- (NSString *) copyFullName;
+- (NSString *) copyPostScriptName;
+
 - (CFArrayRef) copyTableTags;
 - (NSData *) copyTableForTag: (uint32_t) tag;
 

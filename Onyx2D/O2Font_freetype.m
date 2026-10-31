@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #import FT_TRUETYPE_TABLES_H
 #import FT_ADVANCES_H
+#import FT_SFNT_NAMES_H
+#import FT_TRUETYPE_IDS_H
+#import FT_TYPE1_TABLES_H
 
 @implementation O2Font_freetype
 
@@ -255,6 +258,89 @@ O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
     return [self initWithFace: face];
 }
 
+static NSString *copySFNTName(const FT_SfntName *name) {
+    if (name->string == NULL || name->string_len == 0)
+        return nil;
+    CFStringEncoding encoding;
+    if ((name->platform_id == TT_PLATFORM_APPLE_UNICODE &&
+         name->encoding_id <= TT_APPLE_ID_UNICODE_32) ||
+        (name->platform_id == TT_PLATFORM_MICROSOFT &&
+         (name->encoding_id == TT_MS_ID_UNICODE_CS ||
+          name->encoding_id == TT_MS_ID_UCS_4 ||
+          name->encoding_id == TT_MS_ID_SYMBOL_CS))) {
+        if (name->string_len % 2 != 0)
+            return nil;
+        for (FT_UInt i = 0; i < name->string_len; i += 2) {
+            unsigned unit = (name->string[i] << 8) | name->string[i + 1];
+            if (unit >= 0xD800 && unit <= 0xDBFF) {
+                if (name->string_len - i < 4)
+                    return nil;
+                unsigned low = (name->string[i + 2] << 8) | name->string[i + 3];
+                if (low < 0xDC00 || low > 0xDFFF)
+                    return nil;
+                i += 2;
+            } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+                return nil;
+            }
+        }
+        encoding = kCFStringEncodingUTF16BE;
+    } else if (name->platform_id == TT_PLATFORM_MACINTOSH &&
+               name->encoding_id == TT_MAC_ID_ROMAN) {
+        encoding = kCFStringEncodingMacRoman;
+    } else {
+        return nil;
+    }
+    return (NSString *)CFStringCreateWithBytes(kCFAllocatorDefault, name->string,
+                                               name->string_len, encoding, false);
+}
+
+static NSString *copyPostScriptNameForFace(FT_Face face) {
+    const char *name = FT_Get_Postscript_Name(face);
+    return name != NULL ? (NSString *)CFStringCreateWithCString(kCFAllocatorDefault,
+                                    name, kCFStringEncodingUTF8) : nil;
+}
+
+static NSString *copyFullNameForFace(FT_Face face) {
+    NSString *fallback = nil;
+    FT_UInt count = FT_Get_Sfnt_Name_Count(face);
+    for (FT_UInt i = 0; i < count; i++) {
+        FT_SfntName name;
+        if (FT_Get_Sfnt_Name(face, i, &name) != 0 ||
+            name.name_id != TT_NAME_ID_FULL_NAME)
+            continue;
+        NSString *candidate = copySFNTName(&name);
+        if (candidate == nil)
+            continue;
+        // A deterministic English Unicode preference, not host-locale matching.
+        if (name.platform_id == TT_PLATFORM_MICROSOFT &&
+            name.language_id == TT_MS_LANGID_ENGLISH_UNITED_STATES) {
+            [fallback release];
+            return candidate;
+        }
+        if (fallback == nil)
+            fallback = candidate;
+        else
+            [candidate release];
+    }
+    if (fallback != nil)
+        return fallback;
+    if (!FT_IS_SFNT(face)) {
+        PS_FontInfoRec info;
+        if (FT_Get_PS_Font_Info(face, &info) == 0 && info.full_name != NULL)
+            return (NSString *)CFStringCreateWithCString(kCFAllocatorDefault,
+                                    info.full_name, kCFStringEncodingUTF8);
+    }
+    return nil;
+}
+
+- (NSString *) copyPostScriptName {
+    return [_postScriptName copy];
+}
+
+- (NSString *) copyFullName {
+    return [_fullName copy];
+}
+
 - (instancetype) initWithFace: (FT_Face) face {
     _face = face;
     _platformType = O2FontPlatformTypeFreeType;
@@ -306,11 +392,16 @@ O2FontRef O2FontCreateWithCodePointCoverage(const uint32_t *codePoints,
     _bbox.size.height = face->bbox.yMax - face->bbox.yMin;
     _numberOfGlyphs = face->num_glyphs;
     _advances = NULL;
+    // FreeType name APIs may lazily mutate the face; snapshot before publication.
+    _postScriptName = copyPostScriptNameForFace(face);
+    _fullName = copyFullNameForFace(face);
     return self;
 }
 
 - (void) dealloc {
     FT_Done_Face(_face);
+    [_postScriptName release];
+    [_fullName release];
     [_glyphCache release];
     [_macRomanEncoding release];
     [_macExpertEncoding release];
