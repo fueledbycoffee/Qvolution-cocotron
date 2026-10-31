@@ -56,7 +56,7 @@ int main(void){
 }
 '''
 with tempfile.TemporaryDirectory(prefix='qv-ui-face-') as d:
- f=Path(d)/'test.c';out=Path(d)/'test';f.write_text(pre+body('O2FontGetFaceStyleFlags')+'\n'+body('createFaceForMatchInLibrary')+'\n'+body('createFaceForMatch')+'\n'+body('createMatchingFace')+'\n'+body('createUserInterfaceFace')+test)
+ f=Path(d)/'test.c';out=Path(d)/'test';f.write_text(pre+body('O2FontGetFaceStyleFlags')+'\n'+body('createFaceForMatchInLibrary')+'\n'+body('createFaceForMatch')+'\n'+body('createMatchingFaceWithEncodingRequirement')+'\n'+body('createMatchingFace')+'\n'+body('createUserInterfaceFace')+test)
  flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','fontconfig','freetype2'],text=True))
  subprocess.run(['clang','-std=c11','-UNDEBUG','-fsanitize=address,undefined',str(f),'-o',str(out),*flags],check=True)
  import os
