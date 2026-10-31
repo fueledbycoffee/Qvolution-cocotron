@@ -78,6 +78,7 @@ int main(void) {
     CHECK(identified(scroll,@"NSTextViewInspectorBar")==nil,"explicit disable removes inspector");
     NSView *pages=[[NSView alloc] initWithFrame:NSMakeRect(0,0,600,800)];
     [view retain]; [view removeFromSuperview]; [pages addSubview:view]; [scroll setDocumentView:pages];
+    CHECK([view superview]==pages,"replacing clip document preserves reparented old document");
     [view setUsesInspectorBar:YES];
     CHECK(identified(scroll,@"NSTextViewInspectorBar")!=nil,"nested page text view installs inspector in enclosing scroll view");
     [view removeFromSuperview];

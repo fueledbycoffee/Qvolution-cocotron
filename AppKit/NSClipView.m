@@ -181,7 +181,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                         object: _docView];
     }
 
-    [_docView removeFromSuperview];
+    if ([_docView superview] == self)
+        [_docView removeFromSuperview];
 
     view = [view retain];
     [_docView release];
