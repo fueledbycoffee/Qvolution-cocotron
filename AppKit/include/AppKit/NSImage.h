@@ -62,6 +62,7 @@ typedef NS_ENUM(NSInteger, NSImageResizingMode) {
     NSImageCacheMode _cacheMode;
     NSString *_accessibilityDescription;
     NSImageSymbolConfiguration *_symbolConfiguration;
+    NSString *_systemSymbolName;
     NSMutableArray *_scaledRepCache;
     id _drawingHandlerRepCache;
 }
