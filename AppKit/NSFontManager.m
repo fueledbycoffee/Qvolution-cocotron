@@ -20,6 +20,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSAttributedString.h>
 #import <AppKit/NSFont.h>
+#import <AppKit/NSDisplay.h>
 #import <AppKit/NSFontFamily.h>
 #import <AppKit/NSFontManager.h>
 #import <AppKit/NSFontPanel.h>
@@ -28,6 +29,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSMenuItem.h>
 #import <AppKit/NSNibLoading.h>
 #import <AppKit/NSRaise.h>
+#import <CoreText/CoreText.h>
+#import <Onyx2D/O2Font_freetype.h>
 
 @implementation NSFontManager
 
@@ -115,6 +118,7 @@ static Class _fontPanelFactory;
 
 - (NSArray *) availableFonts {
     NSMutableArray *result = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
     NSArray *families = [NSFontFamily allFontFamilyNames];
     int i, count = [families count];
 
@@ -128,7 +132,10 @@ static Class _fontPanelFactory;
             NSFontTypeface *typeface = [typefaces objectAtIndex: t];
             NSString *name = [typeface name];
 
-            [result addObject: name];
+            if (name != nil && ![seen containsObject:name]) {
+                [seen addObject:name];
+                [result addObject:name];
+            }
         }
     }
 
@@ -189,8 +196,8 @@ static Class _fontPanelFactory;
         [result addObject: [NSArray arrayWithObjects: name, traitName,
                                                       [NSNumber
                                                               numberWithInt: 0],
-                                                      [NSNumber
-                                                              numberWithInt: 0],
+                                                      [NSNumber numberWithUnsignedInt:
+                                                              [typeface traits]],
                                                       nil]];
     }
 
@@ -263,10 +270,21 @@ static Class _fontPanelFactory;
 }
 
 - (NSFontTraitMask) traitsOfFont: (NSFont *) font {
-    NSFontTypeface *typeface =
-            [NSFontFamily fontTypefaceWithName: [font fontName]];
-
-    return [typeface traits];
+    if (font == nil)
+        return 0;
+    NSFontFamily *family = [NSFontFamily fontFamilyWithName:[font familyName]];
+    NSFontTypeface *typeface = [family typefaceWithName:[font fontName]];
+    NSFontTraitMask traits = [typeface traits];
+#ifdef FREETYPE_PRESENT
+    if ([(id)[font cgFont] isKindOfClass:[O2Font_freetype class]]) {
+        CTFontSymbolicTraits actual = CTFontGetSymbolicTraits((CTFontRef)font);
+        traits &= ~(NSBoldFontMask | NSItalicFontMask | NSFixedPitchFontMask);
+        if (actual & kCTFontTraitBold) traits |= NSBoldFontMask;
+        if (actual & kCTFontTraitItalic) traits |= NSItalicFontMask;
+        if (actual & kCTFontTraitMonoSpace) traits |= NSFixedPitchFontMask;
+    }
+#endif
+    return traits;
 }
 
 - (NSString *) localizedNameForFamily: (NSString *) family
@@ -450,85 +468,51 @@ static Class _fontPanelFactory;
     return [NSFont fontWithName: [font fontName] size: size];
 }
 
+static NSFontTraitMask addingFontTraits(NSFontTraitMask current, NSFontTraitMask request) {
+    NSFontTraitMask result = current | (request & ~(NSUnboldFontMask | NSUnitalicFontMask));
+    if (request & NSUnboldFontMask) result &= ~NSBoldFontMask;
+    if (request & NSUnitalicFontMask) result &= ~NSItalicFontMask;
+    return result;
+}
+
 - (BOOL) _canConvertFont: (NSFont *) font
-             toHaveTrait: (NSFontTraitMask) addTraits
-{
-    NSFontFamily *family =
-            [NSFontFamily fontFamilyWithTypefaceName: [font fontName]];
-    NSFontTypeface *typeface = [family typefaceWithName: [font fontName]];
-    NSFontTraitMask traits = [typeface traits];
+             toHaveTrait: (NSFontTraitMask) addTraits {
+    if (font == nil)
+        return NO;
+    NSFontTraitMask current = [self traitsOfFont:font];
+    NSFontTraitMask desired = addingFontTraits(current, addTraits);
+    if (current == desired)
+        return YES;
+    return [self _convertFont:font toTraits:desired] != font;
+}
 
-    if (addTraits & NSItalicFontMask) {
-        traits |= NSItalicFontMask;
-    }
-
-    if (addTraits & NSBoldFontMask) {
-        traits |= NSBoldFontMask;
-    }
-
-    if (addTraits & NSUnboldFontMask) {
-        traits &= ~NSBoldFontMask;
-    }
-
-    if (addTraits & NSUnitalicFontMask) {
-        traits &= ~NSItalicFontMask;
-    }
-
-    NSFontTypeface *newface = [family typefaceWithTraits: traits];
-    return newface != nil;
+- (NSFont *) _convertFont: (NSFont *) font toTraits: (NSFontTraitMask) desired {
+    if ([self traitsOfFont:font] == desired)
+        return font;
+    NSFontFamily *family = [NSFontFamily fontFamilyWithName:[font familyName]];
+    NSFontTypeface *face = [family typefaceWithTraits:desired];
+    if (face == nil)
+        return font;
+    NSFont *candidate = [NSFont fontWithName:[face name] size:[font pointSize]];
+    if (candidate == nil || [self traitsOfFont:candidate] != desired ||
+        ![[candidate familyName] isEqualToString:[font familyName]] ||
+        [candidate pointSize] != [font pointSize])
+        return font;
+    return candidate;
 }
 
 - (NSFont *) convertFont: (NSFont *) font
-             toHaveTrait: (NSFontTraitMask) addTraits
-{
-    if (font == nil) {
+             toHaveTrait: (NSFontTraitMask) addTraits {
+    if (font == nil)
         return nil;
-    }
-
-    NSFontFamily *family =
-            [NSFontFamily fontFamilyWithTypefaceName: [font fontName]];
-    NSFontTypeface *typeface = [family typefaceWithName: [font fontName]];
-    NSFontTraitMask traits = [typeface traits];
-    NSFontTypeface *newface;
-
-    if (addTraits & NSItalicFontMask)
-        traits |= NSItalicFontMask;
-    if (addTraits & NSBoldFontMask)
-        traits |= NSBoldFontMask;
-    if (addTraits & NSUnboldFontMask)
-        traits &= ~NSBoldFontMask;
-    if (addTraits & NSUnitalicFontMask)
-        traits &= ~NSItalicFontMask;
-
-    newface = [family typefaceWithTraits: traits];
-
-    if (newface != nil) {
-        return [NSFont fontWithName: [newface name] size: [font pointSize]];
-    }
-    NSLog(@"%s failed, %@ %d", sel_getName(_cmd), [font fontName], addTraits);
-    return font;
+    return [self _convertFont:font toTraits:addingFontTraits([self traitsOfFont:font], addTraits)];
 }
 
 - (NSFont *) convertFont: (NSFont *) font
-          toNotHaveTrait: (NSFontTraitMask) trait
-{
-    if (font == nil) {
+          toNotHaveTrait: (NSFontTraitMask) trait {
+    if (font == nil)
         return nil;
-    }
-
-    NSFontFamily *family = [NSFontFamily fontFamilyWithName: [font familyName]];
-    NSFontTypeface *typeface = [family typefaceWithName: [font fontName]];
-    NSFontTraitMask traits = [typeface traits];
-    traits &= ~trait; // remove the traits
-    NSFontTypeface *newface;
-
-    newface = [family typefaceWithTraits: traits];
-
-    if (newface != nil) {
-        return [NSFont fontWithName: [newface name] size: [font pointSize]];
-    }
-    NSLog(@"%s failed, %@ %d", sel_getName(_cmd), [font fontName], trait);
-    return font;
+    return [self _convertFont:font toTraits:[self traitsOfFont:font] & ~trait];
 }
 
 - (NSFont *) convertFont: (NSFont *) font toFace: (NSString *) typeface {
@@ -551,15 +535,16 @@ static Class _fontPanelFactory;
         return nil;
     }
 
-    // Get the current traits so we try and match them...
-    NSFontFamily *fontFamily =
-            [NSFontFamily fontFamilyWithName: [font familyName]];
-    NSFontTypeface *typeface = [fontFamily typefaceWithName: [font fontName]];
-    NSFontTraitMask traits = [typeface traits];
-    return [self fontWithFamily: family
-                         traits: traits
-                         weight: 5
-                           size: [font pointSize]];
+    if (![[[NSDisplay currentDisplay] allFontFamilyNames] containsObject:family])
+        return font;
+    NSFontTraitMask traits = [self traitsOfFont:font];
+    NSFont *candidate = [self fontWithFamily: family traits:traits
+                                    weight:5 size:[font pointSize]];
+    NSFontTraitMask basic = NSBoldFontMask | NSItalicFontMask;
+    if (candidate == nil || ([self traitsOfFont:candidate] & basic) != (traits & basic) ||
+        [candidate pointSize] != [font pointSize])
+        return font;
+    return candidate;
 }
 
 - (NSFont *) convertWeight: (BOOL) heavierNotLighter ofFont: (NSFont *) font {

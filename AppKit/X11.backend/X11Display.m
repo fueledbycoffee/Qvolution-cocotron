@@ -1000,51 +1000,67 @@ static int compareFontPatterns(const void *a, const void *b) {
     FcObjectSetAdd(props, FC_SLANT);
     FcObjectSetAdd(props, FC_WIDTH);
     FcObjectSetAdd(props, FC_WEIGHT);
+    FcObjectSetAdd(props, FC_FILE);
+    FcObjectSetAdd(props, FC_INDEX);
 
     FcFontSet *set = FcFontList(O2FontSharedFontConfig(), pat, props);
     NSMutableArray *ret = [NSMutableArray array];
-    qsort(set->fonts, set->nfont, sizeof(FcPattern *), compareFontPatterns);
+    FT_Library metadataLibrary = NULL;
+    @try {
+        if (set == NULL) {
+            NSLog(@"Font metadata enumeration failed");
+            return nil;
+        }
+        FT_Error metadataError = FT_Init_FreeType(&metadataLibrary);
+        if (metadataError != 0) {
+            NSLog(@"Font metadata library initialization failed: %d", metadataError);
+            return nil;
+        }
+        qsort(set->fonts, set->nfont, sizeof(FcPattern *), compareFontPatterns);
 
-    for (int i = 0; i < set->nfont; i++) {
-        FcChar8 *typeface;
-        FcPattern *p = set->fonts[i];
-        if (FcPatternGetString(p, FC_STYLE, 0, &typeface) == FcResultMatch && typeface != NULL) {
-            NSString *traitName =
-                    [NSString stringWithCString: (const char *) typeface
-                                       encoding: NSUTF8StringEncoding];
-            if (traitName == nil)
-                traitName = [NSString stringWithCString: (const char *) typeface
-                                               encoding: NSISOLatin1StringEncoding];
-            if (traitName == nil)
-                traitName = @"Regular";
-
-            FcChar8 *pattern = FcNameUnparse(p);
-            NSString *name = nil;
-            if (pattern != NULL) {
-                name = [NSString stringWithCString: (const char *) pattern
-                                          encoding: NSUTF8StringEncoding];
+        for (int i = 0; i < set->nfont; i++) {
+            FcPattern *p = set->fonts[i];
+            FT_Face native = O2FontCreateMetadataFaceForMatch(p, metadataLibrary);
+            if (native == NULL)
+                continue;
+            NSString *name = nil, *displayName = nil, *traitName = nil;
+            @try {
+                const char *postscript = FT_Get_Postscript_Name(native);
+                if (postscript != NULL)
+                    name = (NSString *)CFStringCreateWithCString(NULL, postscript,
+                                                                 kCFStringEncodingASCII);
                 if (name == nil)
-                    name = [NSString stringWithCString: (const char *) pattern
-                                              encoding: NSISOLatin1StringEncoding];
-                FcStrFree(pattern);
-            }
-            if (name == nil)
-                name = traitName;
-
-            NSFontTypeface *face = [[NSFontTypeface alloc]
-                    initWithName: name
-                       traitName: traitName
-                          traits: fontTraitsOfPattern(p)];
-            if (face != nil) {
-                [ret addObject: face];
-                [face release];
+                    continue;
+                displayName = O2FontCopyMetadataFullName(native);
+                if (native->style_name != NULL)
+                    traitName = (NSString *)CFStringCreateWithCString(NULL, native->style_name,
+                                                                     kCFStringEncodingUTF8);
+                NSFontTraitMask traits = fontTraitsOfPattern(p);
+                traits &= ~(NSBoldFontMask | NSItalicFontMask | NSFixedPitchFontMask);
+                if (native->style_flags & FT_STYLE_FLAG_BOLD) traits |= NSBoldFontMask;
+                if (native->style_flags & FT_STYLE_FLAG_ITALIC) traits |= NSItalicFontMask;
+                if (FT_IS_FIXED_WIDTH(native)) traits |= NSFixedPitchFontMask;
+                NSFontTypeface *face = [[NSFontTypeface alloc]
+                        initWithName: name displayName: displayName ?: name
+                           traitName: traitName ?: @"" traits: traits];
+                @try {
+                    if (face != nil)
+                        [ret addObject: face];
+                } @finally {
+                    [face release];
+                }
+            } @finally {
+                [name release]; [displayName release]; [traitName release];
+                FT_Done_Face(native);
             }
         }
-    }
 
-    FcPatternDestroy(pat);
-    FcObjectSetDestroy(props);
-    FcFontSetDestroy(set);
+    } @finally {
+        if (metadataLibrary != NULL) FT_Done_FreeType(metadataLibrary);
+        FcPatternDestroy(pat);
+        FcObjectSetDestroy(props);
+        if (set != NULL) FcFontSetDestroy(set);
+    }
     return ret;
 }
 
