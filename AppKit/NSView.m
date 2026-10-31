@@ -513,7 +513,7 @@ typedef struct __VFlags {
 }
 
 - (void) dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self name:_NSApplicationEffectiveAppearanceDidChange object:nil];
+    _NSUnregisterApplicationAppearanceObserver(self);
     [NSLayoutConstraint deactivateConstraints:[self constraints]];
 
     // Do this first?
@@ -3667,25 +3667,28 @@ static NSMutableArray *installedViewConstraints(NSView *view, BOOL create) {
 }
 
 - (void)_registerForApplicationAppearanceChanges {
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_applicationAppearanceDidChange:)
-            name:_NSApplicationEffectiveAppearanceDidChange object:nil];
+    _NSRegisterApplicationAppearanceObserver(self);
 }
 
-- (void)_applicationAppearanceDidChange:(NSNotification *)notification {
+- (void)_applicationAppearanceDidChangeFrom:(NSAppearance *)previous {
     if (_appearance == nil && _superview == nil && _window == nil)
-        [self _appearanceDidChangeFrom:[[notification userInfo] objectForKey:_NSPreviousEffectiveAppearance]];
+        [self _appearanceDidChangeFrom:previous];
 }
 
 - (void)_appearanceDidChangeFrom:(NSAppearance *)previous {
     if (previous == [self effectiveAppearance])
         return;
+    NSUInteger generation = ++_appearanceChangeGeneration;
     NSArray *children = [_subviews copy];
     @try {
         [self setNeedsDisplay:YES];
         [self viewDidChangeEffectiveAppearance];
-        for (NSView *child in children)
+        for (NSView *child in children) {
+            if (generation != _appearanceChangeGeneration)
+                break;
             if ([child superview] == self && [child appearance] == nil)
                 [child _appearanceDidChangeFrom:previous];
+        }
     } @finally { [children release]; }
 }
 

@@ -283,9 +283,9 @@ static BOOL _allowsAutomaticWindowTabbing;
     [self setViewsNeedDisplay:YES];
 }
 
-- (void)_applicationAppearanceDidChange:(NSNotification *)notification {
+- (void)_applicationAppearanceDidChangeFrom:(NSAppearance *)previous {
     if (_appearance == nil)
-        [self _appearanceDidChangeFrom:[[notification userInfo] objectForKey:_NSPreviousEffectiveAppearance]];
+        [self _appearanceDidChangeFrom:previous];
 }
 
 + (NSWindowDepth) defaultDepthLimit {
@@ -465,8 +465,7 @@ static BOOL _allowsAutomaticWindowTabbing;
     if (!(_styleMask & NSAppKitPrivateWindow)) {
         [[NSApplication sharedApplication] _addWindow: self];
     }
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(_applicationAppearanceDidChange:)
-            name:_NSApplicationEffectiveAppearanceDidChange object:nil];
+    _NSRegisterApplicationAppearanceObserver(self);
     return self;
 }
 
@@ -489,6 +488,7 @@ static BOOL _allowsAutomaticWindowTabbing;
 }
 
 - (void) dealloc {
+    _NSUnregisterApplicationAppearanceObserver(self);
     [[NSNotificationCenter defaultCenter] removeObserver: self];
     [_childWindows release];
     [_representedFilename release];

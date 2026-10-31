@@ -47,6 +47,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <CoreGraphics/CGWindowPrivate.h>
 #import <objc/message.h>
 #import <pthread.h>
+#import <Foundation/NSHashTable.h>
 #import "NSAppearanceInternal.h"
 #import <stdatomic.h>
 #include <stdarg.h>
@@ -115,6 +116,43 @@ NSApplication *NSApp = nil;
 - initWithOwner: owner;
 @end
 
+static NSHashTable *applicationAppearanceObservers;
+static NSUInteger applicationAppearanceGeneration;
+
+void _NSRegisterApplicationAppearanceObserver(id observer) {
+    @synchronized([NSAppearance class]) {
+        if (applicationAppearanceObservers == nil)
+            applicationAppearanceObservers = [[NSHashTable alloc]
+                    initWithOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality capacity:0];
+        [applicationAppearanceObservers addObject:observer];
+    }
+}
+
+void _NSUnregisterApplicationAppearanceObserver(id observer) {
+    @synchronized([NSAppearance class]) {
+        [applicationAppearanceObservers removeObject:observer];
+    }
+}
+
+static void applicationAppearanceDidChange(NSAppearance *previous) {
+    NSArray *recipients;
+    NSUInteger generation;
+    @synchronized([NSAppearance class]) {
+        generation = ++applicationAppearanceGeneration;
+        // Hold every recipient before any callback can drop another owner.
+        recipients = [[applicationAppearanceObservers allObjects] retain];
+    }
+    @try {
+        for (id observer in recipients) {
+            @synchronized([NSAppearance class]) {
+                if (generation != applicationAppearanceGeneration)
+                    break;
+            }
+            [observer _applicationAppearanceDidChangeFrom:previous];
+        }
+    } @finally { [recipients release]; }
+}
+
 @implementation NSApplication
 
 - (NSUserInterfaceLayoutDirection) userInterfaceLayoutDirection {
@@ -138,8 +176,7 @@ NSApplication *NSApp = nil;
     [appearance retain]; [_appearance release]; _appearance = appearance;
     @try {
         if (previous != [self effectiveAppearance])
-            [[NSNotificationCenter defaultCenter] postNotificationName:_NSApplicationEffectiveAppearanceDidChange
-                    object:self userInfo:[NSDictionary dictionaryWithObject:previous forKey:_NSPreviousEffectiveAppearance]];
+            applicationAppearanceDidChange(previous);
     } @finally { [previous release]; }
 }
 

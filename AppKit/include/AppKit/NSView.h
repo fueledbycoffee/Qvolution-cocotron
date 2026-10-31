@@ -146,6 +146,7 @@ APPKIT_EXPORT const NSViewFullScreenModeOptionKey NSFullScreenModeApplicationPre
     NSString *_accessibilityTitle;
 
     NSAppearance *_appearance;
+    NSUInteger _appearanceChangeGeneration;
     BOOL _canDrawConcurrently;
 
     NSMutableArray *_gestureRecognizers;
