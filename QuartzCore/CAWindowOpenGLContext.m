@@ -20,6 +20,17 @@
 }
 
 - (void) dealloc {
+    CGLContextObj previous = CGLGetCurrentContext();
+    if (_presentTexture || _uploadBuffers[0]) {
+        if (CGLSetCurrentContext(_cglContext) == kCGLNoError) {
+            for (unsigned i = 0; i < 3; ++i)
+                if (_uploadFences[i]) glDeleteSync(_uploadFences[i]);
+            glDeleteBuffers(3, _uploadBuffers);
+            glDeleteTextures(1, &_presentTexture);
+            if (CGLSetCurrentContext(previous) != kCGLNoError)
+                NSLog(@"AppKit EGL: cannot restore caller context after presenter cleanup");
+        } else NSLog(@"AppKit EGL: presenter cleanup deferred to context destruction");
+    }
     CGLReleaseContext(_cglContext);
     [super dealloc];
 }
