@@ -14,6 +14,7 @@ import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--arch', choices=['i386', 'x86_64'], required=True)
 args = parser.parse_args()
 out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
@@ -35,6 +36,10 @@ bridge = r'''
 typedef int16_t OSErr;
 typedef struct { uint32_t highLongOfPSN, lowLongOfPSN; } ProcessSerialNumber;
 typedef struct { uint32_t highLongOfPSN, lowLongOfPSN; } CPSProcessSerNum;
+_Static_assert(sizeof(OSErr) == 2, "OSErr return is signed 16-bit");
+_Static_assert(sizeof(ProcessSerialNumber) == 8, "public PSN is eight bytes");
+_Static_assert(sizeof(CPSProcessSerNum) == 8, "CPS PSN is eight bytes");
+_Static_assert(_Alignof(ProcessSerialNumber) == _Alignof(uint32_t), "PSN alignment");
 enum { noErr = 0, paramErr = -50, unimpErr = -4 };
 OSErr GetCurrentProcess(ProcessSerialNumber *);
 static __attribute__((unused)) void *native_dlopen(const char *path, int flags) {
@@ -69,6 +74,7 @@ typedef struct { uint32_t highLongOfPSN, lowLongOfPSN; } CPSProcessSerNum;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); return 1; } } while (0)
 int main(int argc, char **argv) {
     CHECK(argc == 3);
+    CHECK(sizeof(void *) == CGS_TEST_POINTER_BYTES);
     CHECK(dlsym(RTLD_DEFAULT, "GetCurrentProcess") == NULL);
     CHECK(dlopen(getenv("CGS_TEST_HISERVICES"), RTLD_NOW | RTLD_NOLOAD) == NULL);
     void *image = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
@@ -92,7 +98,9 @@ int main(int argc, char **argv) {
 }
 ''')
 cc = os.environ.get('CC', 'clang')
-flags = [cc, '-Wall', '-Wextra', '-Werror']
+flags = [cc, '-m32' if args.arch == 'i386' else '-m64',
+         '-DCGS_TEST_POINTER_BYTES=' + ('4' if args.arch == 'i386' else '8'),
+         '-Wall', '-Wextra', '-Werror']
 def run(command, **kwargs):
     subprocess.run(command, check=True, **kwargs)
 
@@ -111,4 +119,4 @@ for image in ['libbridge.so', 'libimports.so']:
         run([str(out / 'loader'), str(out / image), str(expected)], env={**os.environ,
             'CGS_TEST_HISERVICES': str(out / sibling), 'CGS_TEST_STATUS': str(status)})
         cases += 1
-print(f'PASS: {cases} fresh-process native loads; strict link, sibling success/errors, null and output preservation')
+print(f'PASS {args.arch}: {cases} fresh-process native loads; strict link, sibling success/errors, null and output preservation')
