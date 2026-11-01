@@ -97,7 +97,8 @@ int main(void){setbuf(stdout,NULL);
   seconds[old]=now()-started;visits[old]=sampleVisits;dispose(&c);
  }
  printf("theme faces (8 buttons x 3 rounded fills, 256 samples, x5): candidate %.3f ms %llu samples; reference %.3f ms %llu samples\n",seconds[0]*1000,visits[0],seconds[1]*1000,visits[1]);
- puts("PASS flattened curves fill identically");return 0;
+ assert(visits[0]*2<visits[1]);
+ puts("PASS flattened curves fill identically with less than half the sample work");return 0;
 }
 '''
 with tempfile.TemporaryDirectory(prefix='curve-fill-') as folder:

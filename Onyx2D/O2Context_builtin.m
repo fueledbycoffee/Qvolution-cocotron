@@ -1320,6 +1320,20 @@ ONYX2D_STATIC_INLINE void sortEdgesByMinY(Edge **edges, int count, Edge **B) {
     }
 }
 
+// One edge's value at one sample; compared against the pixel's pcxnormal.
+ONYX2D_STATIC_INLINE O2Float edgeSampleValue(O2Float sampleY, O2Float sampleX,
+                                             O2Float normalX, O2Float normalY)
+{
+    return sampleY * normalY - sampleX * normalX;
+}
+
+// An edge shorter than half a pixel never covers every sample row of a
+// scanline, so only the rows it crosses are ever compared; those are computed
+// per scanline in FillEdgesOnSurface instead of all numSamples here.
+ONYX2D_STATIC_INLINE BOOL edgeUsesRowSamples(O2Context_builtin *self, Edge *edge) {
+    return self->numSamples > 1 && edge->v1.y - edge->v0.y < 0.5f;
+}
+
 ONYX2D_STATIC_INLINE void initEdgeForAET(O2Context_builtin *self, Edge *edge,
                                          int scany)
 {
@@ -1349,6 +1363,10 @@ ONYX2D_STATIC_INLINE void initEdgeForAET(O2Context_builtin *self, Edge *edge,
     O2Float minx = RI_MIN(autosx, autoex);
 
     edge->minx = MAX(self->_vpx, minx);
+    if (edgeUsesRowSamples(self, edge)) {
+        edge->samples = NULL;
+        return;
+    }
     edge->samples = NSZoneMalloc(NULL, sizeof(O2Float) * self->numSamples);
 
     O2Float *pre = edge->samples;
@@ -1362,7 +1380,7 @@ ONYX2D_STATIC_INLINE void initEdgeForAET(O2Context_builtin *self, Edge *edge,
     O2Float min = 0, max = 0;
 
     for (i = 0; i < numberOfSamples; sampleY += deltaY, samplesX++, i++) {
-        O2Float value = sampleY * normalY - *samplesX * normalX;
+        O2Float value = edgeSampleValue(sampleY, *samplesX, normalX, normalY);
 
         *pre++ = value;
 
@@ -1389,7 +1407,23 @@ ONYX2D_STATIC_INLINE void incrementEdgeForAET(Edge *edge, int vpx) {
 }
 
 ONYX2D_STATIC_INLINE void removeEdgeFromAET(Edge *edge) {
-    NSZoneFree(NULL, edge->samples);
+    if (edge->samples != NULL)
+        NSZoneFree(NULL, edge->samples);
+}
+
+// The first index in [low, high) whose sample row is not below y, or high:
+// the count the original linear walk (row < y, row += deltaY) reached.
+ONYX2D_STATIC_INLINE int firstSampleRowNotBelow(const O2Float *rows, int low,
+                                                int high, O2Float y)
+{
+    while (low < high) {
+        int middle = low + (high - low) / 2;
+        if (rows[middle] < y)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    return low;
 }
 
 typedef struct CoverageNode {
@@ -1470,6 +1504,12 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
 
     int *winding = self->_winding;
     int *rowIncrease = self->_rowIncrease;
+    // Sample row offsets as initEdgeForAET accumulates them, and this
+    // scanline's sample rows as the original below/above walk accumulated them.
+    O2Float sampleRowY[MAX_SAMPLES], scanRowY[MAX_SAMPLES], rowPre[MAX_SAMPLES];
+    sampleRowY[0] = self->samplesInitialY;
+    for (int row = 1; row < self->numSamples; row++)
+        sampleRowY[row] = sampleRowY[row - 1] + self->samplesDeltaY;
     int numberOfSamples = self->numSamples;
     int shiftNumberOfSamples = self->sampleSizeShift;
     int totalActiveEdges = 0;
@@ -1561,6 +1601,9 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
 
         int minx = xlimit, maxx = 0;
         int *increase = self->_increase;
+        scanRowY[0] = scany + self->samplesInitialY;
+        for (int row = 1; row < numberOfSamples; row++)
+            scanRowY[row] = scanRowY[row - 1] + self->samplesDeltaY;
         // From this pixel on, every pixel is its own coverage span, as when
         // edges ending inside the row wrote each pixel up to xlimit.
         int splitFrom = xlimit;
@@ -1571,26 +1614,16 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
                 continue;
             }
 
-            O2Float deltaY = self->samplesDeltaY;
-            O2Float scanFloatY = scany + self->samplesInitialY;
             O2Float v0y = edge->v0.y;
             O2Float v1y = edge->v1.y;
 
-            int belowY = 0;
+            int belowY = firstSampleRowNotBelow(scanRowY, 0, numberOfSamples, v0y);
             int aboveY;
-
-            for (; scanFloatY < v0y && belowY < numberOfSamples;
-                 scanFloatY += deltaY)
-                belowY++;
 
             if (scany + 1 < v1y)
                 aboveY = numberOfSamples;
-            else {
-                aboveY = belowY;
-                for (; scanFloatY < v1y && aboveY < numberOfSamples;
-                     scanFloatY += deltaY)
-                    aboveY++;
-            }
+            else
+                aboveY = firstSampleRowNotBelow(scanRowY, belowY, numberOfSamples, v1y);
 
             // it is possible for the edge to be inside the scanline a tiny bit
             // and below/above first/last sample, skip it
@@ -1610,6 +1643,17 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
             int *windptr = winding + (scanx << shiftNumberOfSamples);
 
             O2Float *pre = edge->samples;
+            O2Float minSample = pre != NULL ? edge->minSample : 0;
+            if (pre == NULL) {
+                // A short edge always ends inside the row; its rows decide
+                // when every later pixel takes the carried contribution.
+                pre = rowPre;
+                for (int row = belowY; row < aboveY; row++) {
+                    pre[row] = edgeSampleValue(sampleRowY[row], self->samplesX[row],
+                                               normalX, normalY);
+                    minSample = row == belowY ? pre[row] : MIN(minSample, pre[row]);
+                }
+            }
 
             for (;; pcxnormal += normalX, windptr += numberOfSamples) {
                 /*
@@ -1623,7 +1667,7 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
                 if (increase[scanx] == INT_MAX)
                     increase[scanx] = 0;
 
-                if (pcxnormal <= edge->minSample) {
+                if (pcxnormal <= minSample) {
                     windptr[belowY] += direction;
 
                     if (aboveY != numberOfSamples)
@@ -1701,14 +1745,26 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
         }
         currentCoverage = NULL;
 
+        // An untouched pixel (only past splitFrom) has no winding of its
+        // own, so it repeats the last untouched pixel until accum or the
+        // carried rows change, which only a touched pixel does.
+        BOOL reusable = NO;
+        int reusedCoverage = 0;
+        uint32_t reusedBits[8];
+
         for (; increase < maxAdvance;) {
             int total = accum;
             int coverage = 0;
             uint32_t sampleBits[8] = {0};
             unsigned sampleIndex = 0;
             int *carriedRow = carried;
+            BOOL untouched = *increase == INT_MAX;
 
-            if (fillRuleMask == 1) {
+            if (untouched && reusable) {
+                coverage = reusedCoverage;
+                memcpy(sampleBits, reusedBits, sizeof(sampleBits));
+                windptr = windend;
+            } else if (fillRuleMask == 1) {
                 do {
                     total += *windptr + *carriedRow++;
 
@@ -1731,6 +1787,12 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
                     *windptr++ = 0;
                 } while (windptr < windend);
             }
+            if (untouched && !reusable) {
+                reusable = YES;
+                reusedCoverage = coverage;
+                memcpy(reusedBits, sampleBits, sizeof(sampleBits));
+            } else if (!untouched)
+                reusable = NO;
 
             int *advance = increase + 1;
             for (; advance < maxAdvance && advance < splitAdvance; advance++)
@@ -1768,13 +1830,10 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
             windend += (advance - increase) << shiftNumberOfSamples;
             windptr = windend - numberOfSamples;
 
-            // Pixels from splitFrom on may be untouched (INT_MAX): no change.
-            BOOL touched = *increase != INT_MAX;
-            if (touched)
+            // Pixels from splitFrom on may be untouched (INT_MAX): no change,
+            // and only a touched pixel can hold carried rows.
+            if (!untouched) {
                 accum += *increase;
-            *increase = INT_MAX;
-            // Only a touched pixel can hold carried rows.
-            if (touched) {
                 int *rowCarry = rowIncrease +
                         ((increase - self->_increase) << shiftNumberOfSamples);
                 for (int row = 0; row < numberOfSamples; row++) {
@@ -1782,6 +1841,7 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
                     rowCarry[row] = 0;
                 }
             }
+            *increase = INT_MAX;
             increase = advance;
         }
 
