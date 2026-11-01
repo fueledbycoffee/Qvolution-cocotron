@@ -156,6 +156,13 @@ typedef struct _Margins {
                         vertical: (BOOL) vertical
                         upOrLeft: (BOOL) upOrLeft;
 - (void) drawScrollerTrackInRect: (NSRect) rect vertical: (BOOL) vertical;
+- (void) drawOverlayScrollerKnobInRect: (NSRect) rect
+                              vertical: (BOOL) vertical
+                              expanded: (BOOL) expanded
+                               opacity: (CGFloat) opacity;
+- (void) drawOverlayScrollerTrackInRect: (NSRect) rect
+                               vertical: (BOOL) vertical
+                                opacity: (CGFloat) opacity;
 @end
 
 @interface NSGraphicsStyle (NSSlider)

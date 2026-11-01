@@ -4,6 +4,7 @@
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSAppearance.h>
 #import <AppKit/NSColor.h>
+#import <AppKit/NSScroller.h>
 #import <Foundation/Foundation.h>
 #include <dispatch/dispatch.h>
 #include <stdlib.h>
@@ -127,10 +128,13 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
     }
     if (!dbus_connection_get_is_connected(_connection)) [self disconnect];
     if (changed) {
+        BOOL scrollerStyleChanged=next.overlayScrolling!=_state.overlayScrolling;
         [NSApp willChangeValueForKey:@"effectiveAppearance"];
         QVDesktopSharedStore(&_shared,&next);
         [self invalidateAppearance];
         [NSApp _desktopSettingsDidChangeFrom:previous];
+        if (scrollerStyleChanged)
+            [[NSNotificationCenter defaultCenter] postNotificationName:NSPreferredScrollerStyleDidChangeNotification object:nil];
     }
     [previous release];
 }

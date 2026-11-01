@@ -16,11 +16,18 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
+#import <AppKit/NSColor.h>
 #import <AppKit/NSMenuWindow.h>
 #import <AppKit/NSOverflowMenuView.h>
 #import <AppKit/NSSubmenuView.h>
 
 @implementation NSMenuWindow
+
+// The menu view draws a rounded shape; the window around it is transparent.
+- (void) _setRoundedMenuBackground {
+    [self setOpaque: NO];
+    [self setBackgroundColor: [NSColor clearColor]];
+}
 
 - initWithMenu: (NSMenu *) menu {
     NSSubmenuView *view = [[NSSubmenuView alloc] initWithMenu: menu];
@@ -31,6 +38,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                       backing: NSBackingStoreBuffered
                         defer: NO];
     [self setLevel: NSSubmenuWindowLevel];
+    [self _setRoundedMenuBackground];
 
     _releaseWhenClosed = YES;
 
@@ -52,6 +60,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                       backing: NSBackingStoreBuffered
                         defer: NO];
     [self setLevel: NSSubmenuWindowLevel];
+    [self _setRoundedMenuBackground];
 
     _releaseWhenClosed = YES;
 

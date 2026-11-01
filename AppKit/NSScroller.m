@@ -25,8 +25,19 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSImage.h>
 #import <AppKit/NSRaise.h>
 #import <AppKit/NSScroller.h>
+#import <AppKit/NSTrackingArea.h>
+#import <Foundation/NSTimer.h>
+#import "X11DesktopSettings.h"
+
+@interface NSScroller (NSScrollerOverlay)
+- (void) _revealOverlay;
+@end
 #import <AppKit/NSWindow.h>
 #import <Foundation/NSKeyedArchiver.h>
+
+// Declared in NSScroller.h.
+NSString *const NSPreferredScrollerStyleDidChangeNotification =
+        @"NSPreferredScrollerStyleDidChangeNotification";
 
 // Private: coordinates a scroll view's two scrollers. Apps create one, set its
 // delegate and ask for the scroller layout direction.
@@ -67,10 +78,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 }
 
 - (void) flashScrollers {
-    // Legacy scrollers remain visible; refresh both painters when an app
-    // requests the transient overlay flash used by Apple's implementation.
-    [_verticalScrollerImp setNeedsDisplay: YES];
-    [_horizontalScrollerImp setNeedsDisplay: YES];
+    // Overlay knobs reappear and fade again; legacy scrollers just redraw.
+    for (id imp in @[ _verticalScrollerImp ?: [NSNull null],
+                      _horizontalScrollerImp ?: [NSNull null] ]) {
+        if ([imp respondsToSelector: @selector(_revealOverlay)])
+            [imp _revealOverlay];
+        if ([imp respondsToSelector: @selector(setNeedsDisplay:)])
+            [imp setNeedsDisplay: YES];
+    }
 }
 
 - (void) contentAreaDidResize {
@@ -108,9 +123,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     return [[NSDisplay currentDisplay] scrollerWidth];
 }
 
-// Cocotron draws legacy scrollers, which take up space next to the content.
+// Follows GNOME's org.gnome.desktop.interface overlay-scrolling key, read
+// through the desktop settings portal. Without a portal the settings object
+// keeps GNOME's default, which is overlay scrolling.
 + (NSScrollerStyle) preferredScrollerStyle {
-    return NSScrollerStyleLegacy;
+    return [[X11DesktopSettings sharedSettings] overlayScrolling]
+                   ? NSScrollerStyleOverlay
+                   : NSScrollerStyleLegacy;
 }
 
 // Cocotron draws one scroller size for every control size and style.
@@ -146,6 +165,7 @@ static NSAppleScrollBarVariant appleScrollBarVariant(NSScroller *self) {
         sFlags.isHoriz = (_bounds.size.width < _bounds.size.height) ? NO : YES;
         _floatValue = 0;
         _knobProportion = 0;
+        _arrowsPosition = NSScrollerArrowsNone;
         [self checkSpaceForParts];
     } else {
         // GUESS (rung 6): NeXT/OpenStep typedstream layout for NSScroller
@@ -183,8 +203,158 @@ static NSAppleScrollBarVariant appleScrollBarVariant(NSScroller *self) {
     sFlags.isHoriz = (_bounds.size.width < _bounds.size.height) ? NO : YES;
     _floatValue = 0;
     _knobProportion = 0;
+    // The theme draws no stepper arrows; an app can still ask for them.
+    _arrowsPosition = NSScrollerArrowsNone;
     [self checkSpaceForParts];
     return self;
+}
+
+- (void) dealloc {
+    [_overlayTimer invalidate];
+    [_overlayTimer release];
+    [_overlayTrackingArea release];
+    [super dealloc];
+}
+
+#pragma mark - Overlay presentation
+
+// Overlay knobs stay visible for this long after the last scroll, then fade.
+static const NSTimeInterval kOverlayIdleDelay = 1.0;
+static const NSTimeInterval kOverlayFadeDuration = 0.2;
+static const NSTimeInterval kOverlayFadeStep = 1.0 / 60.0;
+
+- (BOOL) _isOverlay {
+    return _scrollerStyle == NSScrollerStyleOverlay;
+}
+
+- (void) _stopOverlayTimer {
+    [_overlayTimer invalidate];
+    [_overlayTimer release];
+    _overlayTimer = nil;
+}
+
+- (void) _scheduleOverlayTimer: (NSTimeInterval) delay
+                      selector: (SEL) selector
+                       repeats: (BOOL) repeats
+{
+    [self _stopOverlayTimer];
+    _overlayTimer = [[NSTimer timerWithTimeInterval: delay
+                                             target: self
+                                           selector: selector
+                                           userInfo: nil
+                                            repeats: repeats] retain];
+    [[NSRunLoop currentRunLoop] addTimer: _overlayTimer
+                                 forMode: NSRunLoopCommonModes];
+}
+
+- (void) _setOverlayOpacity: (CGFloat) opacity {
+    opacity = MAX(0, MIN(1, opacity));
+    if (opacity != _overlayOpacity) {
+        _overlayOpacity = opacity;
+        [self setNeedsDisplay: YES];
+    }
+}
+
+// The knob's opacity follows the clock from the last reveal (stored in
+// _overlayFadeStart), so it is gone 1.2 s after the last scroll even when
+// the run loop delivers the timers late. Timers only trigger redraws.
+- (CGFloat) _overlayOpacity {
+    NSTimeInterval elapsed;
+
+    if (_overlayOpacity <= 0)
+        return 0;
+    if (_isHovered || _isHighlighted)
+        return 1;
+    elapsed = [NSDate timeIntervalSinceReferenceDate] - _overlayFadeStart -
+              kOverlayIdleDelay;
+    if (elapsed < 0)
+        return 1;
+    // Reduced motion hides the knob at once instead of animating it.
+    if ([[X11DesktopSettings sharedSettings] reducedMotion])
+        return 0;
+    return MAX(0, 1 - elapsed / kOverlayFadeDuration);
+}
+
+- (void) _overlayFadeStep: (NSTimer *) timer {
+    if ([self _overlayOpacity] <= 0) {
+        [self _stopOverlayTimer];
+        [self _setOverlayOpacity: 0];
+        return;
+    }
+    [self setNeedsDisplay: YES];
+}
+
+- (void) _overlayIdle: (NSTimer *) timer {
+    if (_isHovered || _isHighlighted) {
+        [self _stopOverlayTimer];
+        return;
+    }
+    [self _scheduleOverlayTimer: kOverlayFadeStep
+                       selector: @selector(_overlayFadeStep:)
+                        repeats: YES];
+    [self _overlayFadeStep: nil];
+}
+
+// Shows the overlay knob and restarts the idle delay before it fades.
+- (void) _revealOverlay {
+    if (![self _isOverlay])
+        return;
+    _overlayFadeStart = [NSDate timeIntervalSinceReferenceDate];
+    _overlayOpacity = 1;
+    [self setNeedsDisplay: YES];
+    if (_isHovered || _isHighlighted)
+        [self _stopOverlayTimer];
+    else
+        [self _scheduleOverlayTimer: kOverlayIdleDelay
+                           selector: @selector(_overlayIdle:)
+                            repeats: NO];
+}
+
+- (BOOL) _isHovered {
+    return _isHovered;
+}
+
+- (void) _setHovered: (BOOL) hovered {
+    if (_isHovered == hovered)
+        return;
+    _isHovered = hovered;
+    [self setNeedsDisplay: YES];
+    if ([self _isOverlay]) {
+        if (hovered && [self isEnabled])
+            [self _revealOverlay];
+        else if (!hovered && [self _overlayOpacity] > 0)
+            [self _revealOverlay];
+    }
+}
+
+- (void) updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (_overlayTrackingArea != nil) {
+        [self removeTrackingArea: _overlayTrackingArea];
+        [_overlayTrackingArea release];
+    }
+    _overlayTrackingArea = [[NSTrackingArea alloc]
+            initWithRect: [self bounds]
+                 options: NSTrackingMouseEnteredAndExited |
+                          NSTrackingActiveInActiveApp | NSTrackingInVisibleRect
+                   owner: self
+                userInfo: nil];
+    [self addTrackingArea: _overlayTrackingArea];
+}
+
+- (void) mouseEntered: (NSEvent *) event {
+    [self _setHovered: YES];
+}
+
+- (void) mouseExited: (NSEvent *) event {
+    [self _setHovered: NO];
+}
+
+// A faded overlay scroller lets clicks reach the content beneath it.
+- (NSView *) hitTest: (NSPoint) point {
+    if ([self _isOverlay] && [self _overlayOpacity] <= 0 && !_isHovered)
+        return nil;
+    return [super hitTest: point];
 }
 
 - (BOOL) isFlipped {
@@ -290,11 +460,16 @@ static NSAppleScrollBarVariant appleScrollBarVariant(NSScroller *self) {
     if (zeroToOneKnob < 0)
         zeroToOneKnob = 0;
 
+    BOOL changed = (_floatValue != zeroToOneValue ||
+                    _knobProportion != zeroToOneKnob);
+
     _floatValue = zeroToOneValue;
     _knobProportion = zeroToOneKnob;
     if (_knobProportion > 1)
         _knobProportion = 1;
 
+    if (changed)
+        [self _revealOverlay];
     [self setNeedsDisplay: YES];
 }
 
@@ -323,7 +498,12 @@ static NSAppleScrollBarVariant appleScrollBarVariant(NSScroller *self) {
 }
 
 - (void) setScrollerStyle: (NSScrollerStyle) style {
+    if (_scrollerStyle == style)
+        return;
     _scrollerStyle = style;
+    [self _stopOverlayTimer];
+    _overlayOpacity = 0;
+    [self setNeedsDisplay: YES];
 }
 
 - (void) setKnobStyle: (NSScrollerKnobStyle) style {
@@ -503,6 +683,7 @@ static inline CGFloat roundFloat(CGFloat value) {
     if (_isHighlighted != flag) {
         _isHighlighted = flag;
         [self setNeedsDisplay: YES];
+        [self _revealOverlay];
     }
 }
 
@@ -516,10 +697,17 @@ static inline CGFloat roundFloat(CGFloat value) {
 - (void) drawKnob {
     NSRect knob = [self rectForPart: NSScrollerKnob];
 
-    if (!NSIsEmptyRect(knob))
+    if (NSIsEmptyRect(knob))
+        return;
+    if ([self _isOverlay])
+        [[self graphicsStyle] drawOverlayScrollerKnobInRect: knob
+                                                   vertical: [self isVertical]
+                                                   expanded: _isHovered || _isHighlighted
+                                                    opacity: [self _overlayOpacity]];
+    else
         [[self graphicsStyle] drawScrollerKnobInRect: knob
                                             vertical: [self isVertical]
-                                           highlight: _isHighlighted];
+                                           highlight: _isHighlighted || _isHovered];
 }
 
 - (void) drawArrow: (NSScrollerArrow) arrow highlight: (BOOL) highlight {
@@ -536,28 +724,33 @@ static inline CGFloat roundFloat(CGFloat value) {
 }
 
 - (void) drawRect: (NSRect) rect {
-    NSRect decPage = [self rectForPart: NSScrollerDecrementPage];
-    NSRect incPage = [self rectForPart: NSScrollerIncrementPage];
     NSRect slot = [self rectForPart: NSScrollerKnobSlot];
-    NSRect knob = [self rectForPart: NSScrollerKnob];
     BOOL high;
 
-    high = (_hitPart == NSScrollerIncrementLine) && _isHighlighted;
-    [self drawArrow: NSScrollerIncrementArrow highlight: high];
-    high = (_hitPart == NSScrollerDecrementLine) && _isHighlighted;
-    [self drawArrow: NSScrollerDecrementArrow highlight: high];
+    if ([self _isOverlay]) {
+        // Overlay scrollers float over the content: nothing but the knob,
+        // plus a track while the pointer is over them.
+        CGFloat opacity = [self _overlayOpacity];
 
-    if (!NSIsEmptyRect(decPage))
-        [[self graphicsStyle] drawScrollerTrackInRect: decPage
-                                             vertical: [self isVertical]
-                                             upOrLeft: YES];
+        if (opacity <= 0)
+            return;
+        if (_isHovered || _isHighlighted)
+            [[self graphicsStyle] drawOverlayScrollerTrackInRect: [self bounds]
+                                                        vertical: [self isVertical]
+                                                         opacity: opacity];
+        [self drawKnob];
+        return;
+    }
 
-    if (!NSIsEmptyRect(incPage))
-        [[self graphicsStyle] drawScrollerTrackInRect: incPage
-                                             vertical: [self isVertical]
-                                             upOrLeft: NO];
+    if (_arrowsPosition != NSScrollerArrowsNone) {
+        high = (_hitPart == NSScrollerIncrementLine) && _isHighlighted;
+        [self drawArrow: NSScrollerIncrementArrow highlight: high];
+        high = (_hitPart == NSScrollerDecrementLine) && _isHighlighted;
+        [self drawArrow: NSScrollerDecrementArrow highlight: high];
+    }
 
-    if (NSIsEmptyRect(knob) && !NSIsEmptyRect(slot))
+    // One track under the whole slot, so the narrow knob has track beside it.
+    if (!NSIsEmptyRect(slot))
         [[self graphicsStyle] drawScrollerTrackInRect: slot
                                              vertical: [self isVertical]];
 
@@ -598,6 +791,8 @@ static inline CGFloat roundFloat(CGFloat value) {
     else
         totalSize = slotRect.size.width - knobRect.size.width;
 
+    // Dragging shows the active knob and keeps an overlay knob visible.
+    [self highlight: YES];
     do {
         NSPoint point;
         CGFloat delta;
@@ -626,6 +821,7 @@ static inline CGFloat roundFloat(CGFloat value) {
         [self sendAction: _action to: _target];
 
     } while ([event type] != NSLeftMouseUp);
+    [self highlight: NO];
 }
 
 - (void) trackScrollButtons: (NSEvent *) event {

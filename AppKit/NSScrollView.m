@@ -30,6 +30,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSTableCornerView.h>
 #import <AppKit/NSWindow.h>
 #import <Foundation/NSKeyedArchiver.h>
+#import <Foundation/NSNotificationCenter.h>
+
+@interface NSScroller (NSScrollerOverlay)
+- (void) _revealOverlay;
+@end
+
+@interface NSScrollView (NSScrollerStyle)
+- (void) _followPreferredScrollerStyle;
+@end
 
 NSString *const NSScrollViewDidEndLiveScrollNotification =
         @"NSScrollViewDidEndLiveScrollNotification";
@@ -41,9 +50,6 @@ NSString *const NSScrollViewWillStartLiveMagnifyNotification =
         @"NSScrollViewWillStartLiveMagnifyNotification";
 NSString *const NSScrollViewDidEndLiveMagnifyNotification =
         @"NSScrollViewDidEndLiveMagnifyNotification";
-
-NSString *const NSPreferredScrollerStyleDidChangeNotification =
-        @"NSPreferredScrollerStyleDidChangeNotification";
 
 @implementation NSScrollView
 
@@ -327,7 +333,44 @@ static Class _rulerViewClass = nil;
         [self tile];
     }
 
+    [self _followPreferredScrollerStyle];
     return self;
+}
+
+// A scroll view uses the system's preferred scroller style and follows it
+// when it changes, as AppKit documents for scrollerStyle.
+- (void) _followPreferredScrollerStyle {
+    [[NSNotificationCenter defaultCenter]
+            addObserver: self
+               selector: @selector(_preferredScrollerStyleDidChange:)
+                   name: NSPreferredScrollerStyleDidChangeNotification
+                 object: nil];
+    _scrollerStyle = (NSScrollerStyle) -1;
+    [self setScrollerStyle: [NSScroller preferredScrollerStyle]];
+}
+
+- (void) _preferredScrollerStyleDidChange: (NSNotification *) note {
+    [self setScrollerStyle: [NSScroller preferredScrollerStyle]];
+}
+
+- (BOOL) _scrollersOverlay {
+    return _scrollerStyle == NSScrollerStyleOverlay;
+}
+
+// The width a visible scroller takes from the content; overlay scrollers
+// float over it and take none.
+- (CGFloat) _verticalScrollerInset {
+    if (![self hasVerticalScroller] || [_verticalScroller isHidden] ||
+        [self _scrollersOverlay])
+        return 0;
+    return [NSScroller scrollerWidth];
+}
+
+- (CGFloat) _horizontalScrollerInset {
+    if (![self hasHorizontalScroller] || [_horizontalScroller isHidden] ||
+        [self _scrollersOverlay])
+        return 0;
+    return [NSScroller scrollerWidth];
 }
 
 - (void) postAwakeFromNib {
@@ -420,7 +463,8 @@ static Class _rulerViewClass = nil;
 
     NSRect result = [self _scrollContentBounds];
     result.size.height = [headerView bounds].size.height;
-    result.size.width -= [NSScroller scrollerWidth];
+    if (![self _scrollersOverlay])
+        result.size.width -= [NSScroller scrollerWidth];
 
     return result;
 }
@@ -428,7 +472,7 @@ static Class _rulerViewClass = nil;
 - (NSRect) cornerViewFrame {
     NSView *headerView = [self _headerView];
 
-    if (headerView == nil)
+    if (headerView == nil || [self _scrollersOverlay])
         return NSZeroRect;
 
     NSRect bounds = [self _scrollContentBounds];
@@ -472,18 +516,13 @@ static Class _rulerViewClass = nil;
     result.origin.x = bounds.origin.x;
     result.origin.y = bounds.origin.y;
 
-    result.size.width = bounds.size.width;
-    if ([self hasVerticalScroller] && ![_verticalScroller isHidden])
-        result.size.width -= [NSScroller scrollerWidth];
+    result.size.width = bounds.size.width - [self _verticalScrollerInset];
     if ([self rulersVisible] && [self hasVerticalRuler]) {
         result.origin.x += [self verticalRulerFrame].size.width;
         result.size.width -= [self verticalRulerFrame].size.width;
     }
 
-    result.size.height = bounds.size.height;
-    if ([self hasHorizontalScroller] && ![_horizontalScroller isHidden]) {
-        result.size.height -= [NSScroller scrollerWidth];
-    }
+    result.size.height = bounds.size.height - [self _horizontalScrollerInset];
     if ([self rulersVisible] && [self hasHorizontalRuler]) {
         result.origin.y += [self horizontalRulerFrame].size.height;
         result.size.height -= [self horizontalRulerFrame].size.height;
@@ -548,6 +587,7 @@ static Class _rulerViewClass = nil;
                 initWithFrame: [self verticalScrollerFrame]];
         [_verticalScroller
                 setAutoresizingMask: NSViewMinXMargin | NSViewHeightSizable];
+        [_verticalScroller setScrollerStyle: _scrollerStyle];
         [_verticalScroller setTarget: self];
         [_verticalScroller setAction: @selector(_verticalScroll:)];
     }
@@ -559,6 +599,7 @@ static Class _rulerViewClass = nil;
                 initWithFrame: [self horizontalScrollerFrame]];
         [_horizontalScroller
                 setAutoresizingMask: NSViewMaxYMargin | NSViewWidthSizable];
+        [_horizontalScroller setScrollerStyle: _scrollerStyle];
         [_horizontalScroller setTarget: self];
         [_horizontalScroller setAction: @selector(_horizontalScroll:)];
     }
@@ -581,11 +622,13 @@ static Class _rulerViewClass = nil;
     [self setAutoresizesSubviews: YES];
 
     [self addSubview: _clipView];
+    [self _followPreferredScrollerStyle];
 
     return self;
 }
 
 - (void) dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver: self];
     [_textInspectorBar removeFromSuperview];
     [_textInspectorBar release];
     _textInspectorBar = nil;
@@ -856,6 +899,7 @@ static Class _rulerViewClass = nil;
     [_verticalScroller removeFromSuperview];
     [_verticalScroller release];
     _verticalScroller = scroller;
+    [_verticalScroller setScrollerStyle: _scrollerStyle];
     [_verticalScroller setTarget: self];
     [_verticalScroller setAction: @selector(_verticalScroll:)];
 
@@ -870,10 +914,18 @@ static Class _rulerViewClass = nil;
 }
 
 - (void) setScrollerStyle: (NSScrollerStyle) newScrollerStyle {
+    if (_scrollerStyle == newScrollerStyle)
+        return;
     _scrollerStyle = newScrollerStyle;
     [_verticalScroller setScrollerStyle: newScrollerStyle];
     [_horizontalScroller setScrollerStyle: newScrollerStyle];
     [self tile];
+    [self setNeedsDisplay: YES];
+}
+
+- (void) flashScrollers {
+    [_verticalScroller _revealOverlay];
+    [_horizontalScroller _revealOverlay];
 }
 
 - (NSScrollerKnobStyle) scrollerKnobStyle {
@@ -891,6 +943,7 @@ static Class _rulerViewClass = nil;
     [_horizontalScroller removeFromSuperview];
     [_horizontalScroller release];
     _horizontalScroller = scroller;
+    [_horizontalScroller setScrollerStyle: _scrollerStyle];
     [_horizontalScroller setTarget: self];
     [_horizontalScroller setAction: @selector(_horizontalScroll:)];
 

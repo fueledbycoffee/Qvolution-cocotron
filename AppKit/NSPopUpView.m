@@ -156,6 +156,9 @@ static const NSTimeInterval kMenuInitialClickThreshold = .3f;
     // Add the left+right and bottom borders
     result.width += WINDOW_BORDER_THICKNESS * 2;
     result.height += WINDOW_BORDER_THICKNESS;
+    // Whole pixels, so the rounded frame and inset selection land on pixel edges.
+    result.width = ceil(result.width);
+    result.height = ceil(result.height);
 
     if (_cachedItemRects == nil && [items isEqual: [self visibleItemArray]]) {
         // Build our cached item rects
