@@ -400,6 +400,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 // Unmapping an xdg surface requires a new configure sequence before it can be
 // shown again, so the role objects are destroyed and created again on show.
 - (void) unmap {
+    [self cancelAppMovePress];
     if (!_mapped)
         return;
 
@@ -672,7 +673,15 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 
     BOOL moved = !NSEqualPoints(frame.origin, _frame.origin);
     BOOL sized = !NSEqualSizes(frame.size, _frame.size);
+    // Apps with their own chrome drag by setting the origin. Wayland only
+    // permits the compositor to move a toplevel, using the initiating press.
+    NSEvent *event = [NSApp currentEvent];
+    if (moved && !sized && _appMoveDragged &&
+        [event type] == NSLeftMouseDragged && [event window] == _delegate)
+        [self beginWindowDrag];
     [self invalidateContextWithNewSize: frame.size];
+    // Like NSWindow, retain the requested frame, not an invented compositor
+    // position: xdg-shell never reports the toplevel's global origin.
     _frame = frame;
     // The application chose a new size: leaving fullscreen returns to it, even
     // when the compositor answers unset_fullscreen with the size it remembered.
@@ -759,8 +768,53 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 }
 
 - (void) decorationPointerLeft {
+    [self cancelAppMovePress];
     if (_clientDecorated)
         [self setButtonHover: NO shownPressed: NSTitlebarButtonNone];
+}
+
+- (void) cancelAppMovePress {
+    _appMoveSeat = NULL;
+    _appMoveSerial = 0;
+    _appMoveDragged = NO;
+}
+
+// Called only for changed pointer coordinates, before the drag event is queued.
+// The receiver is the current pointer window, so another window cannot qualify
+// this window's content press. Frame changes also require its drag event context.
+- (void) appMoveMotion: (BOOL) leftHeld {
+    if (_appMoveSeat != NULL && leftHeld)
+        _appMoveDragged = YES;
+}
+
+- (void) appMoveButton: (uint32_t) button pressed: (BOOL) pressed
+                serial: (uint32_t) serial atPoint: (CGPoint) point
+{
+    if (button != WP_BTN_LEFT)
+        return;
+    [self cancelAppMovePress];
+    if (pressed && _toplevel != NULL && ![self isDecorationPoint: point]) {
+        _appMoveSeat = [_display seat];
+        _appMoveSerial = serial;
+    }
+}
+
+- (void) beginWindowDrag {
+    if (_toplevel == NULL || _appMoveSeat == NULL)
+        return;
+    union wl_argument args[2] = {{.o = (struct wl_object *) _appMoveSeat},
+                                 {.u = _appMoveSerial}};
+    // Consume before sending: the compositor may take pointer focus and the
+    // release may never reach us. Further frame updates cannot reuse this press.
+    [self cancelAppMovePress];
+    WaylandMarshal(_toplevel, WP_TOPLEVEL_MOVE, NULL, 0, args);
+    [_display flush];
+}
+
+- (void) performWindowDragWithEvent: (NSEvent *) event {
+    if ([event window] == _delegate &&
+        ([event type] == NSLeftMouseDown || [event type] == NSLeftMouseDragged))
+        [self beginWindowDrag];
 }
 
 - (void) performTitlebarButton: (NSTitlebarButton) action {

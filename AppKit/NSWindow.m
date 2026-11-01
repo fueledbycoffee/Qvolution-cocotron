@@ -1525,6 +1525,12 @@ static BOOL _allowsAutomaticWindowTabbing;
     _isMovableByWindowBackground = value;
 }
 
+- (void) performWindowDragWithEvent: (NSEvent *) event {
+    id platform = [self platformWindow];
+    if ([platform respondsToSelector: @selector(performWindowDragWithEvent:)])
+        [platform performWindowDragWithEvent: event];
+}
+
 - (void) setAllowsToolTipsWhenApplicationIsInactive: (BOOL) value {
     _allowsToolTipsWhenApplicationIsInactive = value;
 }
