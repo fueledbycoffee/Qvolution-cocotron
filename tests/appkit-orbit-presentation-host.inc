@@ -221,7 +221,7 @@ static int failures;
 static DBusConnection *receiver;
 static BOOL answerQueries = YES;
 static double extensionState = 1;
-static int writeOnlyProgress, layoutReplies;
+static int writeOnlyProgress, layoutReplies, bulkReceived;
 static void appendState(DBusMessage *reply, double state) {
     DBusMessageIter out, dict, entry, variant; const char *key="state";
     dbus_message_iter_init_append(reply,&out);
@@ -245,6 +245,7 @@ static void pump(X11GlobalMenu *exporter) {
                 dbus_connection_send(receiver,reply,NULL); dbus_message_unref(reply); dbus_connection_flush(receiver);
             }
             if (dbus_message_get_type(request)==DBUS_MESSAGE_TYPE_METHOD_RETURN && dbus_message_has_signature(request,"u(ia{sv}av)")) layoutReplies++;
+            if (dbus_message_is_signal(request,"org.example.Fixture","Bulk")) bulkReceived++;
             dbus_message_unref(request);
         }
         struct pollfd fd={.fd=exporter->_cfSocket->fd,.events=0};
@@ -339,6 +340,9 @@ int main(void) {
     dbus_message_set_destination(bulk,sender); const char *bytes=blob; appendBasic(bulk,DBUS_TYPE_STRING,&bytes);
     dbus_connection_send(exporter->_connection,bulk,NULL); dbus_message_unref(bulk); free(blob); [exporter scheduleDBusWrite]; pump(exporter);
     CHECK(writeOnlyProgress>0,"queued requests progress on writable readiness without readable input");
+    // Later checks assume a quiescent bus: let the 2 MiB transfer finish instead of racing it.
+    for(int n=0;n<200 && (!bulkReceived || dbus_connection_has_messages_to_send(exporter->_connection));n++) pump(exporter);
+    CHECK(bulkReceived==1 && !dbus_connection_has_messages_to_send(exporter->_connection),"bulk transfer drains before later reader checks");
     failLayoutSend=YES; readLayout(exporter,sender); CHECK(!menu->hidden && !exporter->_orbitMenuRead,"failed send after engagement restores fallback"); failLayoutSend=NO;
     readLayout(exporter,sender); CHECK(menu->hidden,"successful retry can engage after send failure");
     CHECK(FIXTURE_HAS_ALLOCATION_GUARD,"production reply allocation failure has a bounded fallback path");
