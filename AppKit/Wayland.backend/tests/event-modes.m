@@ -41,9 +41,13 @@ int main(void) {
             [display nextEventMatchingMask: NSAnyEventMask untilDate: deadline inMode: mode dequeue: YES];
         } while (!mapped && [deadline timeIntervalSinceNow] > 0);
         double elapsed = CFAbsoluteTimeGetCurrent() - start;
-        printf("mode=%s mapped=%d exposed=%u elapsed=%.3f\n", [mode UTF8String], mapped, exposures, elapsed);
+        // Inspect only our source-defined platform object; scale-only exposure
+        // must not be mistaken for delivery of xdg_surface.configure.
+        BOOL configured = [[[window platformWindow] valueForKey: @"configured"] boolValue];
+        printf("mode=%s mapped=%d configured=%d exposed=%u elapsed=%.3f\n",
+               [mode UTF8String], mapped, configured, exposures, elapsed);
         CFRunLoopTimerInvalidate(timer); CFRelease(timer);
-        if (!mapped || !exposures || elapsed >= 1) return 1;
+        if (!mapped || !configured || !exposures || elapsed >= 1) return 1;
         [window close]; [window release];
     }
     [pool drain]; return 0;
