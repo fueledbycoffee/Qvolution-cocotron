@@ -9,6 +9,7 @@
 #import <QuartzCore/CASpringAnimation.h>
 #import "CALayerInternal.h"
 #include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -616,6 +617,44 @@ static void drawLayerMask(CALayer *layer, CGRect bounds, unsigned depth, BOOL en
     glPopAttrib();
 }
 
+// The 16-bit EGL fallback can have no stencil attachment. Use intersected
+// window-space bounds there; rounded/rotated masks degrade to their bounding
+// rectangles, but nested rectangular view clips remain exact.
+static void scissorLayerMask(CGRect bounds) {
+    GLdouble model[16], projection[16]; GLint viewport[4], parent[4];
+    glGetDoublev(GL_MODELVIEW_MATRIX, model);
+    glGetDoublev(GL_PROJECTION_MATRIX, projection);
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    double x0 = viewport[0] + viewport[2], y0 = viewport[1] + viewport[3];
+    double x1 = viewport[0], y1 = viewport[1];
+    for (unsigned i = 0; i < 4; ++i) {
+        double point[4] = {i & 1 ? bounds.size.width : 0,
+                           i & 2 ? bounds.size.height : 0, 0, 1};
+        double eye[4] = {0}, clip[4] = {0};
+        for (unsigned row = 0; row < 4; ++row)
+            for (unsigned col = 0; col < 4; ++col)
+                eye[row] += model[col * 4 + row] * point[col];
+        for (unsigned row = 0; row < 4; ++row)
+            for (unsigned col = 0; col < 4; ++col)
+                clip[row] += projection[col * 4 + row] * eye[col];
+        if (!isfinite(clip[3]) || clip[3] <= 0) {
+            // A near-plane crossing cannot be bounded by projected corners.
+            x0 = viewport[0]; y0 = viewport[1];
+            x1 = x0 + viewport[2]; y1 = y0 + viewport[3];
+            break;
+        }
+        double x = viewport[0] + (clip[0] / clip[3] + 1) * viewport[2] / 2;
+        double y = viewport[1] + (clip[1] / clip[3] + 1) * viewport[3] / 2;
+        x0 = MIN(x0, x); y0 = MIN(y0, y); x1 = MAX(x1, x); y1 = MAX(y1, y);
+    }
+    if (glIsEnabled(GL_SCISSOR_TEST)) glGetIntegerv(GL_SCISSOR_BOX, parent);
+    else memcpy(parent, viewport, sizeof(parent));
+    x0 = MAX(parent[0], floor(x0)); y0 = MAX(parent[1], floor(y0));
+    x1 = MIN(parent[0] + parent[2], ceil(x1)); y1 = MIN(parent[1] + parent[3], ceil(y1));
+    glEnable(GL_SCISSOR_TEST);
+    glScissor((GLint)x0, (GLint)y0, (GLsizei)MAX(0, x1 - x0), (GLsizei)MAX(0, y1 - y0));
+}
+
 // Layers are composited in painter's order: a layer's background, contents and
 // border, then its sublayers in array order. Opacity multiplies down the tree.
 // parentFlipped says whether the parent's coordinate space is y-flipped on screen.
@@ -624,6 +663,7 @@ static void drawLayerMask(CALayer *layer, CGRect bounds, unsigned depth, BOOL en
         parentOpacity: (CGFloat) parentOpacity
         parentFlipped: (BOOL) parentFlipped
             maskDepth: (unsigned) maskDepth
+         stencilLimit: (unsigned) stencilLimit
 {
     if (layer.hidden)
         return;
@@ -656,17 +696,24 @@ static void drawLayerMask(CALayer *layer, CGRect bounds, unsigned depth, BOOL en
     }
 
     BOOL masked = [layer masksToBounds];
-    if (masked) {
-        GLint bits = 0; glGetIntegerv(GL_STENCIL_BITS, &bits);
-        if (bits < 8 || maskDepth == 255)
-            [NSException raise:NSInternalInconsistencyException format:@"Layer masks require an 8-bit stencil buffer and depth below 256"];
+    BOOL stencilMask = masked && maskDepth < stencilLimit;
+    BOOL scissorMask = masked && !stencilMask;
+    if (stencilMask) {
         drawLayerMask(layer, bounds, maskDepth, YES);
         ++maskDepth;
+    } else if (scissorMask) {
+        static int warned;
+        if (!__sync_lock_test_and_set(&warned, 1))
+            NSLog(@"Layer masks: stencil unavailable or exhausted; using rectangular scissor bounds");
+        glPushAttrib(GL_SCISSOR_BIT);
+        scissorLayerMask(bounds);
     }
-    glEnable(GL_STENCIL_TEST);
-    glStencilMask(0);
-    glStencilFunc(GL_EQUAL, maskDepth, 0xff);
-    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    if (stencilLimit) {
+        glEnable(GL_STENCIL_TEST);
+        glStencilMask(0);
+        glStencilFunc(GL_EQUAL, maskDepth, 0xff);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    } else glDisable(GL_STENCIL_TEST);
 
     [self _drawBackgroundOfLayer: layer bounds: bounds opacity: opacity];
     // A layer that draws its own content (CAMetalLayer draws the texture the GPU
@@ -690,11 +737,13 @@ static void drawLayerMask(CALayer *layer, CGRect bounds, unsigned depth, BOOL en
                 currentTime: currentTime
 parentOpacity: opacity
               parentFlipped: flipped
-                  maskDepth: maskDepth];
+                  maskDepth: maskDepth
+               stencilLimit: stencilLimit];
     glPopMatrix();
 
-    if (masked) drawLayerMask(layer, bounds, maskDepth, NO);
-    glStencilFunc(GL_EQUAL, masked ? maskDepth - 1 : maskDepth, 0xff);
+    if (stencilMask) drawLayerMask(layer, bounds, maskDepth, NO);
+    if (scissorMask) glPopAttrib();
+    if (stencilLimit) glStencilFunc(GL_EQUAL, stencilMask ? maskDepth - 1 : maskDepth, 0xff);
     glPopMatrix();
 }
 
@@ -732,9 +781,15 @@ static void displayLayerTreeIfNeeded(CALayer *layer) {
         glClearColor(0, 0, 0, 0);
     }
     glDisable(GL_SCISSOR_TEST);
-    glStencilMask(0xff);
-    glClearStencil(0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    GLint stencilBits = 0;
+    glGetIntegerv(GL_STENCIL_BITS, &stencilBits);
+    unsigned stencilLimit = stencilBits > 0 ? (1u << MIN(stencilBits, 8)) - 1 : 0;
+    if (stencilLimit) {
+        glStencilMask(0xff);
+        glClearStencil(0);
+    }
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
+            (stencilLimit ? GL_STENCIL_BUFFER_BIT : 0));
 
     // Painter's order instead of depth testing: every layer used to get z+1,
     // which put layers nested two or more deep outside the [-1, 1] depth range
@@ -753,7 +808,8 @@ static void displayLayerTreeIfNeeded(CALayer *layer) {
             currentTime: CACurrentMediaTime()
           parentOpacity: 1.0
           parentFlipped: [_rootLayer.superlayer contentsAreFlipped]
-              maskDepth: 0];
+              maskDepth: 0
+           stencilLimit: stencilLimit];
     glDisable(GL_STENCIL_TEST);
 
     glFlush();
