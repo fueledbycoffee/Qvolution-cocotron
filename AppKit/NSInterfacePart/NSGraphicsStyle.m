@@ -27,6 +27,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSInterfacePartAttributedString.h>
 #import <AppKit/NSInterfacePartDisabledAttributedString.h>
 #import <AppKit/NSWindow.h>
+#import <AppKit/NSAppearance.h>
 
 @implementation NSGraphicsStyle
 
@@ -399,36 +400,172 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 
 @end
 
+// Private control roles resolve through the same dynamic palette as public
+// semantic colors, including live settings and high-contrast appearances.
+typedef enum {
+    NSControlTokenBezelBorder,
+    NSControlTokenBezelBottomShadow,
+    NSControlTokenPressedFace,
+    NSControlTokenSegmentSelected,
+} NSControlTokenName;
+
+static BOOL NSControlDrawingIsDark(void) {
+    NSAppearanceName name = [[NSAppearance currentDrawingAppearance]
+            bestMatchFromAppearancesWithNames: @[
+                NSAppearanceNameAqua, NSAppearanceNameDarkAqua
+            ]];
+    return [name isEqualToString: NSAppearanceNameDarkAqua];
+}
+
+static NSColor *NSControlToken(NSControlTokenName token) {
+    NSString *name;
+    switch (token) {
+    case NSControlTokenBezelBorder:
+        name = @"bezel.border"; break;
+    case NSControlTokenBezelBottomShadow:
+        name = @"bezel.bottomShadow"; break;
+    case NSControlTokenPressedFace:
+        name = @"bezel.pressedFace"; break;
+    case NSControlTokenSegmentSelected:
+        name = @"segment.selected"; break;
+    default:
+        [NSException raise: NSInvalidArgumentException
+                    format: @"unknown control token %d", (int) token];
+        return nil;
+    }
+    return [NSColor colorWithCatalogName: @"System" colorName: name];
+}
+
+static NSBezierPath *NSControlRoundedPath(NSRect rect, CGFloat radius) {
+    radius = MAX(0, MIN(radius, MIN(rect.size.width, rect.size.height) / 2));
+    return [NSBezierPath bezierPathWithRoundedRect: rect
+                                           xRadius: radius
+                                           yRadius: radius];
+}
+
+// The region inside outer but outside inner, filled with even-odd so the
+// translucent border and shadow tokens are never composited twice.
+static void NSControlFillRing(NSRect outer, CGFloat outerRadius, NSRect inner,
+                              CGFloat innerRadius, NSColor *color)
+{
+    NSBezierPath *ring = NSControlRoundedPath(outer, outerRadius);
+    [ring appendBezierPath: NSControlRoundedPath(inner, innerRadius)];
+    [ring setWindingRule: NSEvenOddWindingRule];
+    [color setFill];
+    [ring fill];
+}
+
+@implementation NSGraphicsStyle (NSControlFaces)
+
+- (NSRect) _bodyRectForBezel: (NSRect) rect {
+    rect.size.height -= 1;
+    if ([_view isFlipped] == NO)
+        rect.origin.y += 1;
+    return rect;
+}
+
+- (void) drawControlFaceInRect: (NSRect) rect
+                        radius: (CGFloat) radius
+                          fill: (NSColor *) fill
+{
+    NSRect body = [self _bodyRectForBezel: rect];
+    NSRect face = NSInsetRect(body, 1, 1);
+
+    NSControlFillRing(rect, radius, body, radius,
+                      NSControlToken(NSControlTokenBezelBottomShadow));
+    NSControlFillRing(body, radius, face, radius - 1,
+                      NSControlToken(NSControlTokenBezelBorder));
+    [fill setFill];
+    [NSControlRoundedPath(face, radius - 1) fill];
+}
+
+- (void) drawDefaultButtonFaceInRect: (NSRect) rect pressed: (BOOL) pressed {
+    NSColor *accent = [NSColor controlAccentColor];
+    NSRect body = [self _bodyRectForBezel: rect];
+    NSBezierPath *path = NSControlRoundedPath(body, NSControlBezelRadius);
+
+    NSControlFillRing(rect, NSControlBezelRadius, body, NSControlBezelRadius,
+                      NSControlToken(NSControlTokenBezelBottomShadow));
+    if (pressed) {
+        [[accent blendedColorWithFraction: 0.12
+                                  ofColor: [NSColor blackColor]] setFill];
+        [path fill];
+    } else {
+        NSColor *top = [accent blendedColorWithFraction: 0.08
+                                                ofColor: [NSColor whiteColor]];
+        BOOL flipped = [_view isFlipped];
+        NSGradient *gradient = [[[NSGradient alloc]
+                initWithStartingColor: flipped ? top : accent
+                          endingColor: flipped ? accent : top] autorelease];
+        [gradient drawInBezierPath: path angle: 90];
+    }
+}
+
+- (void) drawFocusRingAroundRect: (NSRect) rect radius: (CGFloat) radius {
+    NSBezierPath *ring = NSControlRoundedPath(NSInsetRect(rect, -1.5, -1.5),
+                                              radius + 1.5);
+    [[[NSColor controlAccentColor] colorWithAlphaComponent: 0.5] setStroke];
+    [ring setLineWidth: 3];
+    [ring stroke];
+}
+
+- (NSColor *) segmentSelectedColor {
+    return NSControlToken(NSControlTokenSegmentSelected);
+}
+
+- (void) drawPopUpIndicatorInRect: (NSRect) rect
+                        pullsDown: (BOOL) pullsDown
+                           active: (BOOL) active
+{
+    NSColor *glyph = [NSColor labelColor];
+    if (active) {
+        [[NSColor controlAccentColor] setFill];
+        [NSControlRoundedPath(rect, 4) fill];
+        glyph = [NSColor alternateSelectedControlTextColor];
+    }
+
+    CGFloat midX = NSMidX(rect), midY = NSMidY(rect);
+    CGFloat up = [_view isFlipped] ? -1 : 1;
+    NSBezierPath *chevrons = [NSBezierPath bezierPath];
+    if (pullsDown) {
+        [chevrons moveToPoint: NSMakePoint(midX - 2.5, midY + up * 1.5)];
+        [chevrons lineToPoint: NSMakePoint(midX, midY - up * 1.5)];
+        [chevrons lineToPoint: NSMakePoint(midX + 2.5, midY + up * 1.5)];
+    } else {
+        [chevrons moveToPoint: NSMakePoint(midX - 2.5, midY + up * 2)];
+        [chevrons lineToPoint: NSMakePoint(midX, midY + up * 5)];
+        [chevrons lineToPoint: NSMakePoint(midX + 2.5, midY + up * 2)];
+        [chevrons moveToPoint: NSMakePoint(midX - 2.5, midY - up * 2)];
+        [chevrons lineToPoint: NSMakePoint(midX, midY - up * 5)];
+        [chevrons lineToPoint: NSMakePoint(midX + 2.5, midY - up * 2)];
+    }
+    [chevrons setLineWidth: 1.5];
+    [chevrons setLineCapStyle: NSRoundLineCapStyle];
+    [chevrons setLineJoinStyle: NSRoundLineJoinStyle];
+    [glyph setStroke];
+    [chevrons stroke];
+}
+
+@end
+
 @implementation NSGraphicsStyle (NSButton)
 
 - (void) drawUnborderedButtonInRect: (NSRect) rect defaulted: (BOOL) defaulted {
-    if (defaulted) {
-        [[NSColor blackColor] setFill];
-        NSRectFill(rect);
-    }
 }
 
 - (void) drawPushButtonNormalInRect: (NSRect) rect defaulted: (BOOL) defaulted {
-    if (defaulted) {
-        [[NSColor blackColor] setFill];
-        NSRectFill(rect);
-        rect = NSInsetRect(rect, 1, 1);
-    }
-
-    [[NSColor colorWithCalibratedWhite: 0.78 alpha: 1.0] set];
-    [[NSBezierPath bezierPathWithRoundedRect: rect xRadius: 4 yRadius: 4] fill];
-    rect = NSInsetRect(rect, 1, 1);
-    [[NSColor whiteColor] set];
-    [[NSBezierPath bezierPathWithRoundedRect: rect xRadius: 4 yRadius: 4] fill];
+    if (defaulted)
+        [self drawDefaultButtonFaceInRect: rect pressed: NO];
+    else
+        [self drawControlFaceInRect: rect
+                             radius: NSControlBezelRadius
+                               fill: [NSColor controlColor]];
 }
 
 - (void) drawPushButtonPressedInRect: (NSRect) rect {
-    [[NSColor colorWithCalibratedWhite: 0.78 alpha: 1.0] set];
-    [[NSBezierPath bezierPathWithRoundedRect: rect xRadius: 4 yRadius: 4] fill];
-    rect = NSInsetRect(rect, 1, 1);
-    [[NSColor colorWithCalibratedRed: 0.0 green: 0.58 blue: 0.97
-                               alpha: 1.0] set];
-    [[NSBezierPath bezierPathWithRoundedRect: rect xRadius: 4 yRadius: 4] fill];
+    [self drawControlFaceInRect: rect
+                         radius: NSControlBezelRadius
+                           fill: NSControlToken(NSControlTokenPressedFace)];
 }
 
 - (void) drawPushButtonHighlightedInRect: (NSRect) rect {
@@ -988,12 +1125,32 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 - (void) drawTextFieldBorderInRect: (NSRect) rect
                     bezeledNotLine: (BOOL) bezeledNotLine
 {
-    if (bezeledNotLine)
-        NSDrawWhiteBezel(rect, rect);
-    else {
+    if (!bezeledNotLine) {
         [[NSColor blackColor] setStroke];
         NSFrameRect(rect);
+        return;
     }
+
+    [[NSColor textBackgroundColor] setFill];
+    NSRectFill(NSInsetRect(rect, 1, 1));
+
+    BOOL dark = NSControlDrawingIsDark();
+    NSColor *edge = [NSColor colorWithCalibratedWhite: dark ? 1 : 0
+                                                alpha: dark ? 0.12 : 0.15];
+    NSColor *topEdge = dark ? edge
+                            : [NSColor colorWithCalibratedWhite: 0 alpha: 0.25];
+    NSRect top = rect;
+    top.size.height = 1;
+    if ([_view isFlipped] == NO)
+        top.origin.y = NSMaxY(rect) - 1;
+    NSRect rest = rect;
+    rest.size.height -= 1;
+    if ([_view isFlipped])
+        rest.origin.y += 1;
+
+    [topEdge setFill];
+    NSRectFillUsingOperation(top, NSCompositeSourceOver);
+    NSControlFillRing(rest, 0, NSInsetRect(rect, 1, 1), 0, edge);
 }
 
 - (void) drawTextViewInsertionPointInRect: (NSRect) rect

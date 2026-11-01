@@ -19,16 +19,16 @@ static int exercise(struct role role,CGFloat requested,CFStringRef language){
 }
 int main(void){@autoreleasepool{
  CTFontRef control=CTFontCreateWithName(CFSTR("Helvetica"),14,NULL);CHECK(control&&CTFontGetSize(control)==14,"existing named-font control");CFRelease(control);
- struct role roles[]={{kCTFontUIFontSystem,12},{kCTFontUIFontMenuItem,12},{kCTFontUIFontEmphasizedSystem,12},{kCTFontUIFontToolTip,10},{kCTFontUIFontWindowTitle,12},{kCTFontUIFontSmallSystem,10},{kCTFontUIFontPushButton,12},{kCTFontUIFontSmallToolbar,10},{kCTFontUIFontViews,12},{kCTFontUIFontMiniSystem,9},{kCTFontUIFontUserFixedPitch,12},{kCTFontUIFontMenuTitle,12}};
+ struct role roles[]={{kCTFontUIFontSystem,13},{kCTFontUIFontMenuItem,13},{kCTFontUIFontEmphasizedSystem,13},{kCTFontUIFontToolTip,11},{kCTFontUIFontWindowTitle,13},{kCTFontUIFontSmallSystem,11},{kCTFontUIFontPushButton,13},{kCTFontUIFontSmallToolbar,11},{kCTFontUIFontViews,13},{kCTFontUIFontMiniSystem,9},{kCTFontUIFontUserFixedPitch,13},{kCTFontUIFontMenuTitle,13}};
  for(unsigned i=0;i<sizeof roles/sizeof roles[0];i++){fprintf(stderr,"PHASE role %u\n",(unsigned)roles[i].type);fflush(stderr);CHECK(exercise(roles[i],0,NULL)==0,"default role font sequence");CHECK(exercise(roles[i],17.25,CFSTR("en"))==0,"explicit-size/language role sequence");}
  CHECK(exercise(roles[0],13,CFSTR("fr"))==0&&exercise(roles[0],13,CFSTR("ja"))==0,"language hints yield real fonts without claiming localization identity");
  CHECK(!CTFontCreateUIFontForLanguage(kCTFontUIFontNone,0,NULL)&&!CTFontCreateUIFontForLanguage((CTFontUIFontType)0x7fffffff,0,NULL),"unsupported role returns NULL");
  CHECK(!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,-1,NULL)&&!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,NAN,NULL)&&!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,INFINITY,NULL),"invalid size returns NULL");
- CHECK(!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,12,CFSTR("")),"empty language rejected explicitly");
+ CHECK(!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,13,CFSTR("")),"empty language rejected explicitly");
  UniChar embedded[]={ 'e','n',0,'f','r' },invalid[]={0xd800};
  CFStringRef withNull=CFStringCreateWithCharacters(NULL,embedded,5),bad=CFStringCreateWithCharacters(NULL,invalid,1);
- CHECK(withNull&&!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,12,withNull),"embedded language NUL rejected");CFRelease(withNull);
- if(bad){CHECK(!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,12,bad),"invalid UTF8 conversion rejected");CFRelease(bad);}
+ CHECK(withNull&&!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,13,withNull),"embedded language NUL rejected");CFRelease(withNull);
+ if(bad){CHECK(!CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,13,bad),"invalid UTF8 conversion rejected");CFRelease(bad);}
  CHECK(!CTFontCreateUIFontForLanguage(kCTFontUIFontSmallEmphasizedSystem,0,NULL),"unimplemented valid role remains unsupported");
  puts("PASS original real UI-role fonts/size/language/glyph metrics/ownership; no native face policy or app qualification");return 0;
 }}

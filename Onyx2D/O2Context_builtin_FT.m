@@ -82,13 +82,13 @@ static void applyCoverageToSpan_lRGBA8888_PRE(O2argb8u *dst,
     int i;
 
     for (i = 0; i < length; i++, src++, dst++) {
-        int coverage = coverageSpan[i];
-        int oneMinusCoverage = inverseCoverage(coverage);
-        O2argb8u r = *src;
-        O2argb8u d = *dst;
+        // FreeType gray coverage runs 0..255; the span weights run 0..256.
+        // Map 255 to 256 so full ink is exact, and sum both weighted terms
+        // before truncating so edges over opaque pixels stay opaque.
+        int coverage = coverageSpan[i] + (coverageSpan[i] >> 7);
 
-        *dst = O2argb8uAdd(O2argb8uMultiplyByCoverage(r, coverage),
-                           O2argb8uMultiplyByCoverage(d, oneMinusCoverage));
+        *dst = O2argb8uMultiplyByCoverageAdd(*src, coverage, *dst,
+                                             inverseCoverage(coverage));
     }
 }
 

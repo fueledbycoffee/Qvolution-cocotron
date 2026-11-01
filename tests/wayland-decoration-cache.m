@@ -129,6 +129,14 @@ static void compareContentAfterDecoration(id backend) {
             [backend setTitle:title];[window display];
             compareForcedDraw(backend);compareContentAfterDecoration(backend);
         }
+        NSAppearance *dark=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+        [window display];renders=0;[window setAppearance:dark];
+        expectCache(flag(backend,"_decorationsDirty"),"window appearance change invalidates decorations");
+        [window flushWindow];expectCache(renders==1,"window appearance change renders once");
+        [window setAppearance:nil];[window flushWindow];renders=0;[NSApp setAppearance:dark];
+        expectCache(flag(backend,"_decorationsDirty"),"application appearance change invalidates decorations");
+        [window flushWindow];expectCache(renders==1,"application appearance change renders once");
+        [NSApp setAppearance:nil];[window flushWindow];compareForcedDraw(backend);
         setFlag(backend,"_pendingActivated",YES);[backend applyConfigure];[window flushWindow];
         id context=[backend cgContext];
         [backend hideWindow];

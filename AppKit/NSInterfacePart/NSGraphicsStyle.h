@@ -23,6 +23,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 @class NSImage, NSColor;
 
+// Corner radius of push buttons and segmented controls at regular size.
+#define NSControlBezelRadius 5
+
 typedef struct _Margins {
     CGFloat left;
     CGFloat right;
@@ -76,6 +79,18 @@ typedef struct _Margins {
                                hover: (BOOL) hovering
                             selected: (BOOL) selected;
 
+@end
+
+@interface NSGraphicsStyle (NSControlFaces)
+- (void) drawControlFaceInRect: (NSRect) rect
+                        radius: (CGFloat) radius
+                          fill: (NSColor *) fill;
+- (void) drawDefaultButtonFaceInRect: (NSRect) rect pressed: (BOOL) pressed;
+- (void) drawFocusRingAroundRect: (NSRect) rect radius: (CGFloat) radius;
+- (NSColor *) segmentSelectedColor;
+- (void) drawPopUpIndicatorInRect: (NSRect) rect
+                        pullsDown: (BOOL) pullsDown
+                           active: (BOOL) active;
 @end
 
 @interface NSGraphicsStyle (NSButton)

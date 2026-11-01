@@ -19,6 +19,7 @@
  SOFTWARE. */
 
 #import "X11Display.h"
+#import "X11DesktopSettings.h"
 #import "NSEvent_mouse.h"
 #import "X11Cursor.h"
 #import "X11Pasteboard.h"
@@ -91,6 +92,7 @@ static void socketCallback(CFSocketRef s, CFSocketCallBackType type,
 #endif
 
 - init {
+    [X11DesktopSettings sharedSettings];
     if (self = [super init]) {
         XInitThreads();
 
@@ -653,87 +655,12 @@ static NSDictionary *modeInfoToDictionary(const XRRModeInfo *mi, int depth) {
 }
 
 - (NSColor *) colorWithName: (NSString *) colorName {
-    if ([colorName isEqual: @"controlColor"])
-        return [NSColor colorWithCalibratedWhite: 0.93 alpha: 1.0];
-    if ([colorName isEqual: @"disabledControlTextColor"])
-        return [NSColor grayColor];
-    if ([colorName isEqual: @"controlTextColor"])
-        return [NSColor blackColor];
-    if ([colorName isEqual: @"menuBackgroundColor"])
-        return [NSColor colorWithCalibratedWhite: 0.9 alpha: 1.0];
-    if ([colorName isEqual: @"mainMenuBarColor"])
-        return [NSColor colorWithCalibratedWhite: 0.9 alpha: 1.0];
-    if ([colorName isEqual: @"controlShadowColor"])
-        return [NSColor darkGrayColor];
-    if ([colorName isEqual: @"selectedControlColor"])
-        return [NSColor blueColor];
-    if ([colorName isEqual: @"controlBackgroundColor"])
-        return [NSColor whiteColor];
+    NSColor *semantic = [[X11DesktopSettings sharedSettings] colorWithName:colorName appearance:nil];
+    if (semantic) return semantic;
     if ([colorName isEqual: @"controlLightHighlightColor"])
-        return [NSColor lightGrayColor];
-    if ([colorName isEqual: @"headerColor"])
-        return [NSColor greenColor];
-    if ([colorName isEqual: @"textBackgroundColor"])
-        return [NSColor whiteColor];
-    if ([colorName isEqual: @"textColor"])
-        return [NSColor blackColor];
-    if ([colorName isEqual: @"selectedTextColor"])
-        return [NSColor whiteColor];
-    if ([colorName isEqual: @"headerTextColor"])
-        return [NSColor blackColor];
-    if ([colorName isEqual: @"menuItemTextColor"])
-        return [NSColor blackColor];
-    if ([colorName isEqual: @"selectedMenuItemTextColor"])
-        return [NSColor whiteColor];
-    if ([colorName isEqual: @"selectedMenuItemColor"])
-        return [NSColor blueColor];
-    if ([colorName isEqual: @"selectedControlTextColor"])
-        return [NSColor blackColor];
-    if ([colorName isEqual: @"windowFrameColor"])
         return [NSColor lightGrayColor];
     if ([colorName isEqual: @"shadowColor"])
         return [NSColor colorWithGenericGamma22White: 0.0f alpha: 1.0f];
-    if ([colorName isEqual: @"alternateSelectedControlTextColor"])
-        return [NSColor colorWithGenericGamma22White: 1.0f alpha: 1.0f];
-    if ([colorName isEqual: @"labelColor"])
-        return [NSColor colorWithSRGBRed: 0.0f
-                                   green: 0.0f
-                                    blue: 0.0f
-                                   alpha: 0.847059f];
-    if ([colorName isEqual: @"linkColor"])
-        return [NSColor colorWithSRGBRed: 0.0f
-                                   green: 0.411765f
-                                    blue: 0.850980f
-                                   alpha: 1.0f];
-    if ([colorName isEqual: @"unemphasizedSelectedTextColor"])
-        return [NSColor
-                colorWithGenericGamma22White: 0.0f /* 1.0f on dark mode */
-                                               alpha: 1.0f];
-    if ([colorName isEqual: @"selectedContentBackgroundColor"])
-        return [NSColor colorWithSRGBRed: 0.0f
-                                   green: 0.388235f /* 0.345098f on dark mode */
-                                    blue: 0.882353f /* 0.815686f on dark mode */
-                                   alpha: 1.0f];
-    if ([colorName isEqual: @"unemphasizedSelectedContentBackgroundColor"])
-        return [NSColor colorWithSRGBRed: 0.862745f /* 0.274510f on dark mode */
-                                   green: 0.862745f /* 0.274510f on dark mode */
-                                    blue: 0.862745f /* 0.274510f on dark mode */
-                                   alpha: 1.0f];
-    if ([colorName isEqual: @"alternatingContentBackgroundColor"])
-        return [NSColor colorWithSRGBRed: 0.956863f
-                                   green: 0.960784f
-                                    blue: 0.960784f
-                                   alpha: 1.0f];
-    if ([colorName isEqual: @"selectedTextBackgroundColor"])
-        return [NSColor colorWithCalibratedRed: 0.20f
-                                         green: 0.55f
-                                          blue: 1.00f
-                                         alpha: 1.00f];
-    if ([colorName isEqual: @"alternateSelectedControlColor"])
-        return [NSColor colorWithSRGBRed: 0.0f
-                                   green: 0.411765f
-                                    blue: 0.850980f
-                                    alpha: 1.0f];
     if ([colorName isEqual: @"controlDarkShadowColor"])
         return [NSColor colorWithCalibratedRed: 0.0f
                                          green: 0.0f
@@ -744,30 +671,8 @@ static NSDictionary *modeInfoToDictionary(const XRRModeInfo *mi, int depth) {
                                          green: 0.890097f
                                           blue: 0.890097f
                                          alpha: 1.0f];
-    if ([colorName isEqual: @"gridColor"])
-        return [NSColor colorWithGenericGamma22White: 0.80f alpha: 1.0f];
     if ([colorName isEqual: @"highlightColor"])
         return [NSColor colorWithGenericGamma22White: 1.0f alpha: 1.0f];
-    if ([colorName isEqual: @"keyboardFocusIndicatorColor"])
-        return [NSColor colorWithSRGBRed: 0.231373f
-                                   green: 0.60f
-                                    blue: 0.988235f
-                                    alpha: 1.0f];
-    if ([colorName isEqual: @"knobColor"])
-        return [NSColor colorWithSRGBRed: 0.60f
-                                   green: 0.60f
-                                    blue: 0.733333f
-                                    alpha: 1.0f];
-    if ([colorName isEqual: @"scrollBarColor"])
-        return [NSColor colorWithSRGBRed: 0.666667f
-                                   green: 0.666667f
-                                    blue: 0.666667f
-                                    alpha: 1.0f];
-    if ([colorName isEqual: @"secondarySelectedControlColor"])
-        return [NSColor colorWithSRGBRed: 0.862745f
-                                   green: 0.862745f
-                                    blue: 0.862745f
-                                    alpha: 1.0f];
     if ([colorName isEqual: @"selectedKnobColor"])
         return [NSColor colorWithSRGBRed: 0.40f
                                    green: 0.40f

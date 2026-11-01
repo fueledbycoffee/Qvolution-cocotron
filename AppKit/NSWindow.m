@@ -226,6 +226,10 @@ NSInteger NSBitsPerPixelFromDepth(NSWindowDepth depth) {
 }
 @end
 
+@interface NSObject (QVDesktopSettingsPlatformWindow)
+- (void)desktopSettingsDidChange;
+@end
+
 @implementation NSWindowSheetCompletion
 
 - initWithHandler: (void (^)(NSInteger returnCode)) handler {
@@ -283,7 +287,18 @@ static BOOL _allowsAutomaticWindowTabbing;
         if ([_backgroundView appearance] == nil)
             [_backgroundView _appearanceDidChangeFrom:previous];
         [self setViewsNeedDisplay:YES];
+        // Client-side title bars read the window's effective appearance too.
+        if ([_platformWindow respondsToSelector:@selector(desktopSettingsDidChange)])
+            [(id)_platformWindow desktopSettingsDidChange];
     } @finally { [self release]; }
+}
+
+- (void)_desktopSettingsDidChange {
+    [self setViewsNeedDisplay:YES];
+    [_backgroundView setNeedsDisplay:YES];
+    if ([_platformWindow respondsToSelector:@selector(desktopSettingsDidChange)])
+        [(id)_platformWindow desktopSettingsDidChange];
+    [self displayIfNeeded];
 }
 
 - (void)_applicationAppearanceDidChangeFrom:(NSAppearance *)previous {
@@ -2008,6 +2023,22 @@ static BOOL _allowsAutomaticWindowTabbing;
     [self becomeMainWindow];
 }
 
+// Default buttons, focus rings and pop-up indicators draw differently in
+// the key window. Nothing else invalidates them when key status moves, so
+// they are marked here; text and other views keep their retained drawing.
+static void markKeyStateControls(NSView *view) {
+    if ([view isKindOfClass: [NSControl class]])
+        [view setNeedsDisplay: YES];
+    for (NSView *subview in [view subviews])
+        markKeyStateControls(subview);
+}
+
+- (void) _keyStateDidChange {
+    markKeyStateControls(_contentView);
+    if ([_firstResponder isKindOfClass: [NSView class]])
+        [(NSView *) _firstResponder setNeedsDisplay: YES];
+}
+
 - (void) becomeKeyWindow {
     // If we don't return early we may resign ourselves.
     if ([self isKeyWindow]) {
@@ -2019,6 +2050,7 @@ static BOOL _allowsAutomaticWindowTabbing;
     NSWindow *keyWindow = [NSApp keyWindow];
     [NSApp _setKeyWindow: self];
     [keyWindow resignKeyWindow];
+    [self _keyStateDidChange];
 
     if (_firstResponder != self && [_firstResponder respondsToSelector: _cmd])
         [_firstResponder performSelector: _cmd];
@@ -2029,6 +2061,7 @@ static BOOL _allowsAutomaticWindowTabbing;
 - (void) resignKeyWindow {
     if (_firstResponder != self && [_firstResponder respondsToSelector: _cmd])
         [_firstResponder performSelector: _cmd];
+    [self _keyStateDidChange];
 
     [self postNotificationName: NSWindowDidResignKeyNotification];
 }

@@ -18,7 +18,13 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import "NSSegmentItem.h"
+#import <AppKit/NSAttributedString.h>
+#import <AppKit/NSBezierPath.h>
 #import <AppKit/NSButtonCell.h>
+#import <AppKit/NSColor.h>
+#import <AppKit/NSGraphics.h>
+#import <AppKit/NSGraphicsContext.h>
+#import <AppKit/NSGraphicsStyle.h>
 #import <AppKit/NSPopUpWindow.h>
 #import <AppKit/NSRaise.h>
 #import <AppKit/NSSegmentedCell.h>
@@ -293,24 +299,85 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     }
 }
 
+- (BOOL) _segmentUsesAccent: (NSInteger) idx {
+    return _trackingMode == NSSegmentSwitchTrackingSelectOne &&
+           [[_segments objectAtIndex: idx] isSelected];
+}
+
 - (void) drawSegment: (NSInteger) idx
              inFrame: (NSRect) frame
             withView: (NSView *) view
 {
     NSButtonCell *cell = [self _cellForSegment: idx];
+    NSString *label = [[_segments objectAtIndex: idx] label];
 
+    [cell setBordered: NO];
+    [cell setHighlighted: NO];
+    if ([self _segmentUsesAccent: idx] && [self isEnabled] && [label length]) {
+        NSMutableAttributedString *title =
+                [[[cell attributedTitle] mutableCopy] autorelease];
+        [title addAttribute: NSForegroundColorAttributeName
+                      value: [NSColor alternateSelectedControlTextColor]
+                      range: NSMakeRange(0, [title length])];
+        [cell setAttributedTitle: title];
+    }
     [cell setControlView: view];
     [cell drawWithFrame: frame inView: view];
 }
 
+// One container with hairline dividers; segments draw only their content.
 - (void) drawWithFrame: (NSRect) cellFrame inView: (NSView *) controlView {
 
     int i = 0, count = [self segmentCount];
-    NSRect segmentFrame = cellFrame;
+    NSGraphicsStyle *style = [controlView graphicsStyle];
+    NSRect container = NSInsetRect(cellFrame, 0, 1);
+    NSRect face = NSInsetRect(container, 1, 1);
+    face.size.height -= 1;
+    if (![controlView isFlipped])
+        face.origin.y += 1;
+    CGFloat radius = NSControlBezelRadius;
+    NSBezierPath *facePath = [NSBezierPath bezierPathWithRoundedRect: face
+                                                             xRadius: radius - 1
+                                                             yRadius: radius - 1];
+    CGContextRef context = [[NSGraphicsContext currentContext] graphicsPort];
 
     if ([_segmentComputedWidths count] != count)
         [self _recomputeSegmentWidths];
 
+    CGContextSaveGState(context);
+    if (![self isEnabled])
+        CGContextSetAlpha(context, 0.5);
+    [style drawControlFaceInRect: container
+                          radius: radius
+                            fill: [NSColor controlColor]];
+
+    NSRect segmentFrame = cellFrame;
+    for (i = 0; i < count; i++) {
+        segmentFrame.size.width =
+                [[_segmentComputedWidths objectAtIndex: i] doubleValue];
+        if ([[_segments objectAtIndex: i] isSelected]) {
+            [NSGraphicsContext saveGraphicsState];
+            [facePath addClip];
+            [([self _segmentUsesAccent: i] ? [NSColor controlAccentColor]
+                                           : [style segmentSelectedColor])
+                    setFill];
+            NSRectFillUsingOperation(segmentFrame, NSCompositeSourceOver);
+            [NSGraphicsContext restoreGraphicsState];
+        }
+        if (i + 1 < count && ![[_segments objectAtIndex: i] isSelected] &&
+            ![[_segments objectAtIndex: i + 1] isSelected])
+        {
+            [[NSColor separatorColor] setFill];
+            NSRectFillUsingOperation(
+                    NSMakeRect(floor(NSMaxX(segmentFrame)), NSMinY(face), 1,
+                               NSHeight(face)),
+                    NSCompositeSourceOver);
+        }
+        segmentFrame.origin.x += segmentFrame.size.width;
+    }
+    CGContextRestoreGState(context);
+
+    segmentFrame = cellFrame;
     for (i = 0; i < count; i++) {
         segmentFrame.size.width =
                 [[_segmentComputedWidths objectAtIndex: i] doubleValue];

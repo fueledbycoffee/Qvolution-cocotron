@@ -1,3 +1,4 @@
+#import "X11DesktopSettings.h"
 /* Permission is hereby granted, free of charge, to any person obtaining a copy of
  this software and associated documentation files (the "Software"), to deal in
  the Software without restriction, including without limitation the rights to
@@ -276,6 +277,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 @implementation WaylandDisplay
 
 - (instancetype) init {
+    [X11DesktopSettings sharedSettings];
     // WaylandBackendSelected() is shared with CoreGraphics' Wayland backend (see
     // WaylandLibrary.h): the two frameworks pick a display server independently, and
     // they must not disagree.
@@ -1112,6 +1114,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                                            wl_fixed_to_double(args[3].f));
         [_pointerWindow setLastKnownCursorPosition:
                                 [_pointerWindow transformPoint: _pointerSurfacePoint]];
+        [_pointerWindow decorationPointerMoved: _pointerSurfacePoint];
         [self performAfterDispatch: ^{ [self applyCursor]; }];
         break;
 
@@ -1120,6 +1123,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         [self consumeDragPress];
         [_buttonClickCounts removeAllObjects];
         _lastMouseLocation = [self mouseLocation];
+        [_pointerWindow decorationPointerLeft];
         _pointerWindow = nil;
         _pointerEnterSerial = 0;
         _pendingScrollX = _pendingScrollY = 0;
@@ -1186,6 +1190,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     NSPoint location = [window transformPoint: _pointerSurfacePoint];
     NSPoint last = [window mouseLocationOutsideOfEventStream];
     [window setLastKnownCursorPosition: location];
+    [window decorationPointerMoved: _pointerSurfacePoint];
 
     if (_pressedButtons == 0 && [window isDecorationPoint: _pointerSurfacePoint]) {
         [self performAfterDispatch: ^{ [self applyCursor]; }];
