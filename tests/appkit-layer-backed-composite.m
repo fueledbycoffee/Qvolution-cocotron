@@ -20,10 +20,11 @@ static void expect(BOOL ok, const char *message) {
 @interface NSObject (BackingProbe)
 - (O2Context *)cgContext;
 @end
-@interface CountView : NSView { @public unsigned draws, rectChecks; BOOL blue; }
+@interface CountView : NSView { @public unsigned draws, rectChecks, displays; BOOL blue; }
 @end
 @implementation CountView
 - (BOOL)isOpaque { return YES; }
+- (void)displayRectIgnoringOpacity:(NSRect)rect { displays++; [super displayRectIgnoringOpacity:rect]; }
 - (void)drawRect:(NSRect)rect {
     if ([[self layer] delegate]==(id)self) {
         const NSRect *rects=NULL; NSInteger count=0;
@@ -40,10 +41,10 @@ static void expect(BOOL ok, const char *message) {
 @implementation ScaleView
 - (CALayer *)makeBackingLayer { CALayer *layer=[CALayer layer]; [layer setContentsScale:2]; return layer; }
 @end
-@interface PatternView : CountView
+@interface PatternView : CountView { @public BOOL flipped; }
 @end
 @implementation PatternView
-- (BOOL)isFlipped { return YES; }
+- (BOOL)isFlipped { return flipped; }
 - (void)drawRect:(NSRect)rect {
     [super drawRect:rect];
     NSGradient *gradient=[[NSGradient alloc] initWithStartingColor:[NSColor redColor] endingColor:[NSColor blueColor]];
@@ -126,7 +127,11 @@ int main(int argc,char **argv) {
         NSClipView *clip=[[NSClipView alloc] initWithFrame:NSMakeRect(300,10,80,80)];
         CountView *document=[[CountView alloc] initWithFrame:NSMakeRect(0,0,80,40000)];
         [clip setDocumentView:document]; [host addSubview:clip];
-        PatternView *pattern=[[PatternView alloc] initWithFrame:NSMakeRect(20,100,100,60)]; [host addSubview:pattern];
+        PatternView *pattern=[[PatternView alloc] initWithFrame:NSMakeRect(20,100,100,60)]; pattern->flipped=YES; [host addSubview:pattern];
+        PatternView *upright=[[PatternView alloc] initWithFrame:NSMakeRect(130,100,60,60)]; [host addSubview:upright];
+        NSView *empty=[[NSView alloc] initWithFrame:NSZeroRect]; [host addSubview:empty];
+        [empty setNeedsDisplay:YES]; [[empty layer] displayIfNeeded];
+        expect(![empty needsDisplay],"empty backing raster clears view invalidation");
         NSView *clipping=[[NSView alloc] initWithFrame:NSMakeRect(20,190,40,40)];
         CountView *overflow=[[CountView alloc] initWithFrame:NSMakeRect(30,0,30,40)];
         [clipping addSubview:overflow]; [host addSubview:clipping];
@@ -145,6 +150,7 @@ int main(int argc,char **argv) {
         expect(context!=nil,"real native layer context");
         [context render];
         expect(view->draws==1 && custom->draws==1,"view-owned backing layers each draw once");
+        expect(view->displays>0,"recursive display preserves public subclass overrides");
         expect(CGImageGetWidth((CGImageRef)[customLayer contents])==60 &&
                CGImageGetHeight((CGImageRef)[customLayer contents])==40,"2x view contents raster dimensions");
         CGFloat scale=[w backingScaleFactor];
@@ -159,6 +165,7 @@ int main(int argc,char **argv) {
         pixel(55,200,scale,255,0,0,255,"overflow child inside parent");
         pixel(65,200,scale,0,0,0,0,"default clipping hides child beyond parent");
         pixel(25,157,scale,0,255,0,255,"flipped asymmetric top marker stays at top");
+        pixel(135,103,scale,0,255,0,255,"unflipped asymmetric bottom marker stays at bottom");
         expect(CGImageGetHeight((CGImageRef)[[document layer] contents])<=ceil(80*scale),"40000-point document allocates visible height only");
         capture("initial.bgra",scale);
         unsigned documentBefore=document->draws;
@@ -194,7 +201,9 @@ int main(int argc,char **argv) {
         expect(p[0]>250 && p[1]<3 && p[2]<3,"layer content never painted into blue CPU backing");
         [view setNeedsDisplayInRect:NSMakeRect(0,0,2,2)]; [view displayIfNeeded]; [context render];
         expect(view->draws==2,"view invalidation redraws its layer once");
+        unsigned displaysBefore=view->displays;
         [view displayRectIgnoringOpacity:[view bounds]];
+        expect(view->displays==displaysBefore+1,"explicit display calls subclass override");
         expect(view->draws==3,"explicit displayRect forces a raster refresh");
         [outer setMasksToBounds:NO]; [inner setMasksToBounds:NO]; [context render];
         pixel(270,140,scale,0,255,0,255,"unmasked child visible on next composite");

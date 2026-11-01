@@ -673,7 +673,8 @@ static inline void configureLayerGeometry(NSView *self) {
 
     if ([layer delegate] == (id)self &&
         (!CGSizeEqualToSize([layer bounds].size, self->_bounds.size) ||
-         (self->_validTransforms && !CGRectEqualToRect([layer _contentsRasterRect], self->_visibleRect))))
+         (self->_validTransforms && ![self wantsUpdateLayer] &&
+          !CGRectEqualToRect([layer _contentsRasterRect], self->_visibleRect))))
         [layer setNeedsDisplay];
     [layer setBounds: self->_bounds];
     [layer setGeometryFlipped: [self isFlipped] !=
@@ -2776,7 +2777,8 @@ static NSView *viewBeingPrinted = nil;
 }
 
 - (void) displayRectIgnoringOpacity: (NSRect) rect {
-    if (_layer != nil && viewBeingPrinted == nil) [self setNeedsDisplay:YES];
+    if ([_layer delegate] == (id)self && viewBeingPrinted == nil &&
+        (_superview == nil || !_superview->_displayingSubviews)) [self setNeedsDisplay:YES];
     [self _displayRectIgnoringOpacity:rect];
 }
 
@@ -2846,14 +2848,16 @@ static NSView *viewBeingPrinted = nil;
             NSEnumerator *viewEnumerator = [self _subviewsInDisplayOrderEnumerator];
 
             NSView *child = nil;
-            while ((child = [viewEnumerator nextObject])) {
-                NSRect check = [self convertRect: rect toView: child];
-
-                check = NSIntersectionRect(check, [child bounds]);
-
-                if (!NSIsEmptyRect(check))
-                    [child _displayRectIgnoringOpacity: check];
-            }
+            BOOL displayingSubviews = _displayingSubviews;
+            _displayingSubviews = YES;
+            @try {
+                while ((child = [viewEnumerator nextObject])) {
+                    NSRect check = [self convertRect: rect toView: child];
+                    check = NSIntersectionRect(check, [child bounds]);
+                    if (!NSIsEmptyRect(check))
+                        [child displayRectIgnoringOpacity: check];
+                }
+            } @finally { _displayingSubviews = displayingSubviews; }
         }
 
         [_layerContext render];
