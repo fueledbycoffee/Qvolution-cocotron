@@ -38,6 +38,8 @@
     // over a Unix domain socket, not a Mach port.
     CFSocketRef _cfSocket;
     CFRunLoopSourceRef _source;
+    // Set when CGL accepted this display for EGL; otherwise windows draw on the CPU.
+    BOOL _eglAvailable;
 #endif
     NSMutableDictionary *_windowsByID;
 

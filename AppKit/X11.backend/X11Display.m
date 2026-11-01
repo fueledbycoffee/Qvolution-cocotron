@@ -137,7 +137,12 @@ static void socketCallback(CFSocketRef s, CFSocketCallBackType type,
                 CFSocketCreateRunLoopSource(kCFAllocatorDefault, _cfSocket, 0);
         CFRunLoopAddSource(CFRunLoopGetMain(), _source, kCFRunLoopCommonModes);
 
-        CGLRegisterNativeDisplay(_display);
+        // EGL is an optional accelerator, as in the Wayland backend: without it
+        // windows keep drawing on the CPU. Report why instead of failing launch.
+        CGLError glError = CGLRegisterNativeDisplay(_display);
+        _eglAvailable = glError == kCGLNoError;
+        if (!_eglAvailable)
+            NSLog(@"X11 backend: EGL unavailable (CGL error %d); CPU drawing remains enabled", glError);
 #endif
 
         _windowsByID = [NSMutableDictionary new];
