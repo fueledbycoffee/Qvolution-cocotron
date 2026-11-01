@@ -964,6 +964,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
         _context = [[WaylandDrawingContext alloc] initWithSurface: surface logicalSize: logical
                                                           border: _margin];
         _decorationsDirty = YES;
+        _damageAll = YES;
         [surface release];
     }
     return _context;
@@ -1077,6 +1078,7 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
     O2SurfaceAddDamage([_context surface], 0, 0, bitmap.width, bitmap.height);
     [self drawTitle];
     _decorationsDirty = NO;
+    _damageAll = YES;
 }
 
 static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
@@ -1185,6 +1187,7 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
 }
 
 - (NSDictionary *) eglPresentationStatistics {
+    O2Surface *surface = [_context surface];
     return @{@"renderer": _eglRequested ? @"egl" : @"shm", @"swaps": @(_eglSwaps),
              @"captureRequested": @(_captureRequested), @"captureReady": @(_clientCapture!=nil),
              @"captureError": @(_captureRequested&&!_clientCapture?1:[_clientCapture errorCode]),
@@ -1194,7 +1197,19 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
              @"damageRects": @(_damageRects), @"damagePixels": @(_damagePixels),
              @"copiedPixels": @(_copiedPixels), @"wholeDamagePresents": @(_wholeDamagePresents),
              @"damageVerify": @(_damageVerify), @"verifiedPresents": @(_verifiedPresents),
-             @"staleVerifiedPresents": @(_staleVerifiedPresents)};
+             @"staleVerifiedPresents": @(_staleVerifiedPresents),
+             @"fullUploads": @(_eglFullUploads), @"partialUploads": @(_eglPartialUploads),
+             @"lastUploadBytes": @(_eglLastUploadBytes),
+             @"surfaceWidth": @(surface ? O2SurfaceGetWidth(surface) : 0),
+             @"surfaceHeight": @(surface ? O2SurfaceGetHeight(surface) : 0),
+             @"eglScale120": @(_renderScale120)};
+}
+
+- (void) addDamageRect: (CGRect) rect {
+    if (_damageCount == sizeof(_damage) / sizeof(_damage[0]))
+        _damageAll = YES;
+    else
+        _damage[_damageCount++] = rect;
 }
 
 - (void) destroyEGLPresenter {
@@ -1265,10 +1280,13 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     size_t width = O2SurfaceGetWidth(surface), height = O2SurfaceGetHeight(surface);
     CGLContextObj previous = CGLGetCurrentContext();
     NSString *failure = nil;
+    BOOL whole = _damageAll || _damageCount == 0;
     @try {
         if (width > INT32_MAX || height > INT32_MAX || ![self ensureEGLPresenterWidth:(int32_t)width height:(int32_t)height])
             failure = @"hardware RGBA8 EGL drawable unavailable";
-        else if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque] verify:_eglVerify corrupt:_eglCorrupt])
+        else if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque]
+                                         damage:_damage count:whole ? 0 : _damageCount
+                                         verify:_eglVerify corrupt:_eglCorrupt])
             failure = @"texture upload, GPU output or CPU reference verification";
         else {
             if (_eglVerify) ++_eglChecks;
@@ -1291,8 +1309,15 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
             else {
                 ++_clientPresents;
                 [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
-                ++_eglSwaps; _eglBytes += (uint64_t)width * height * 4;
+                ++_eglSwaps;
+                _eglLastUploadBytes = [_eglPresenter lastUploadBytes];
+                _eglBytes += _eglLastUploadBytes;
+                if (whole) ++_eglFullUploads; else ++_eglPartialUploads;
+                _damageAll = NO; _damageCount = 0;
                 _needsPresent = NO;
+                if (_eglVerify && (_eglChecks == 1 || _eglChecks % 100 == 0))
+                    NSLog(@"AppKit EGL: verified frame %llu of window %p (%zux%zu) against the CPU surface",
+                          (unsigned long long)_eglChecks, self, width, height);
                 [_display flush];
             }
         }
@@ -1478,6 +1503,7 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
     buffer->busy = YES;
     _needsPresent = NO;
+    _damageAll = NO; _damageCount = 0;
     [_display flush];
 }
 
