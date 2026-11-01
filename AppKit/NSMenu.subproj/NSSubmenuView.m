@@ -128,6 +128,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     // border. Magic constants that may not be right for Win7 vs XP
     result.width += WINDOW_BORDER_THICKNESS * 2;
     result.height += WINDOW_BORDER_THICKNESS * 2;
+    // Whole pixels, so the rounded frame and inset selection land on pixel
+    // edges instead of leaving a partly covered column at the right.
+    result.width = ceil(result.width);
+    result.height = ceil(result.height);
 
     return result;
 }
