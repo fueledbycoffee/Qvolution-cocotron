@@ -206,6 +206,22 @@ int main(void) {
         expect(near(at(text, 5, 11), rgb([NSColor textBackgroundColor], 1), 2, YES),
                "text field interior is textBackgroundColor");
 
+        // A real key change, without the fixture's isKeyWindow override,
+        // must invalidate the default button so it redraws with the accent.
+        NSWindow *plain = [[NSWindow alloc] initWithContentRect: NSMakeRect(0, 0, 200, 100)
+                                                      styleMask: NSTitledWindowMask
+                                                        backing: NSBackingStoreBuffered
+                                                          defer: YES];
+        NSButton *plainDefault = push(plain, @"OK");
+        [plain setDefaultButtonCell: [plainDefault cell]];
+        [plainDefault setNeedsDisplay: NO];
+        [plain becomeKeyWindow];
+        expect([plain isKeyWindow] && [plainDefault needsDisplay], "becoming key redraws the default button");
+        [plainDefault setNeedsDisplay: NO];
+        [window becomeKeyWindow];
+        expect(![plain isKeyWindow] && [plainDefault needsDisplay], "resigning key redraws the default button");
+        [plain release];
+
         printf("RESULT failures=%u\n", failures);
     }
     return failures ? 1 : 0;
