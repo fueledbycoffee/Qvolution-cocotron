@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 static int O2UIFontStyleWord(const char *word) {
     static const char *styles[] = {"thin", "ultralight", "extralight", "light",
@@ -103,6 +104,24 @@ static DBusConnection *O2UIFontOpenSessionBus(int timeout) {
     DBusConnection *bus = dbus_connection_open_private(address, &error);
     if (!bus) { dbus_error_free(&error); return NULL; }
     dbus_connection_set_exit_on_disconnect(bus, FALSE);
+    /* send_with_reply_and_block applies no timeout while the connection is
+     * still authenticating, so authenticate under the bound first. */
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    for (;;) {
+        if (dbus_connection_get_is_authenticated(bus) || !dbus_connection_get_is_connected(bus)) break;
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long spent = (now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
+        if (spent >= timeout) break;
+        dbus_connection_read_write(bus, (int)(timeout - spent));
+    }
+    if (!dbus_connection_get_is_authenticated(bus)) {
+        dbus_error_free(&error);
+        dbus_connection_close(bus);
+        dbus_connection_unref(bus);
+        return NULL;
+    }
     DBusMessage *hello = dbus_message_new_method_call(DBUS_SERVICE_DBUS, DBUS_PATH_DBUS,
         DBUS_INTERFACE_DBUS, "Hello");
     DBusMessage *reply = hello ? dbus_connection_send_with_reply_and_block(bus, hello, timeout, &error) : NULL;
