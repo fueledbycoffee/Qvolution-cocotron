@@ -44,10 +44,14 @@ static void raster(int scale) {
     [NSGraphicsContext restoreGraphicsState];[style release];[context release];[s release];
 }
 int main(int argc,char **argv) { @autoreleasepool {
+    // A dark style left in the global domain by an earlier session.
+    CFPreferencesSetValue(CFSTR("AppleInterfaceStyle"),CFSTR("Dark"),kCFPreferencesAnyApplication,kCFPreferencesCurrentUser,kCFPreferencesAnyHost);
+    CHECK([[[NSUserDefaults standardUserDefaults]stringForKey:@"AppleInterfaceStyle"]isEqualToString:@"Dark"]);
     [NSApplication sharedApplication];
     CHECK([[[NSApp effectiveAppearance]name]isEqualToString:NSAppearanceNameAqua]);
+    CHECK([[NSUserDefaults standardUserDefaults]stringForKey:@"AppleInterfaceStyle"]==nil);
     if(argc>1 && !strcmp(argv[1],"--no-portal")) {
-        rgb([NSColor controlAccentColor],10,122,255);puts("PASS no portal fallback and dark gate");return 0;
+        rgb([NSColor controlAccentColor],10,122,255);puts("PASS no portal fallback, dark gate and startup interface style");return 0;
     }
     NSColor *retained=[[NSColor controlAccentColor]retain];
     rgb(retained,213,97,153);rgb([NSColor selectedContentBackgroundColor],213,97,153);
@@ -70,5 +74,5 @@ int main(int argc,char **argv) { @autoreleasepool {
     [defaults removeObjectForKey:@"QvolutionFollowSystemAppearance"];
     CHECK([[[NSApp effectiveAppearance]name]isEqualToString:NSAppearanceNameAqua]);
     dbus_connection_close(c);dbus_connection_unref(c);[retained release];
-    puts("RESULT theme-p1 failures=0 (1x/2x O2Surface, retained accent, notification, dark gate, cached gate change)");return 0;
+    puts("RESULT theme-p1 failures=0 (1x/2x O2Surface, retained accent, notification, dark gate, cached gate change, startup interface style)");return 0;
 }}
