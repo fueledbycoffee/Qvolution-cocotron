@@ -131,6 +131,7 @@ CA_EXPORT CAToneMapMode const CAToneMapModeIfSupported;
     CGSize _shadowOffset;
     BOOL _hidden;
     id _textureContents;
+    CGRect _contentsRasterRect;
     BOOL _needsDisplayOnBoundsChange;
     NSString *_name;
     id _layoutManager;

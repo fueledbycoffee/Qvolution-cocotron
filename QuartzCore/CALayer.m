@@ -267,6 +267,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
     value = [value retain];
     [_contents release];
     _contents = value;
+    _contentsRasterRect = CGRectNull;
     [_context startTimerIfNeeded];
 }
 
@@ -408,6 +409,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
     _opaque = YES;
     _contents = nil;
     _contentsScale = 1.0;
+    _contentsRasterRect = CGRectNull;
     // The whole contents image stretches, i.e. no fixed border.
     _contentsCenter = CGRectMake(0, 0, 1, 1);
     _contentsFormat = [kCAContentsFormatRGBA8Uint copy];
@@ -471,6 +473,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
 
     // The copy has no context yet, so these setters only do the retain/copy.
     [self setContents: other->_contents];
+    _contentsRasterRect = other->_contentsRasterRect;
     [self setContentsFormat: other->_contentsFormat];
     [self setContentsGravity: other->_contentsGravity];
     [self setCornerCurve: other->_cornerCurve];
@@ -1108,6 +1111,14 @@ static void replaceColor(CGColorRef *slot, CGColorRef value) {
     value = [value copy];
     [_textureId release];
     _textureId = value;
+}
+
+- (CGRect) _contentsRasterRect {
+    return _contentsRasterRect;
+}
+
+- (void) _setContentsRasterRect: (CGRect) rect {
+    _contentsRasterRect = rect;
 }
 
 - (id) _textureContents {

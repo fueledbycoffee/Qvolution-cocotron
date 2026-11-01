@@ -47,6 +47,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <Foundation/NSKeyedArchiver.h>
 #import <Onyx2D/O2Context.h>
 #import <QuartzCore/CALayerContext.h>
+#import "../QuartzCore/CALayerInternal.h"
 #import <QuartzCore/CATransaction.h>
 #import <QuartzCore/CADisplayLink.h>
 #import <Foundation/NSHashTable.h>
@@ -559,6 +560,10 @@ static void invalidateTransform(NSView *self) {
     self->_validTransforms = NO;
     self->_validTrackingAreas = NO;
 
+    // Visibility can change without a display pass (e.g. bounds scrolling).
+    // Recompute the clip now so newly exposed backing pixels get rasterized.
+    if ([self->_layer delegate] == (id)self) [self visibleRect];
+
     for (NSView *check in self->_subviews)
         invalidateTransform(check);
 }
@@ -656,7 +661,8 @@ static inline void configureLayerGeometry(NSView *self) {
     [CATransaction begin];
     [CATransaction setDisableActions: YES];
 
-    if ([layer isKindOfClass:[NSViewBackingLayer class]] && self->_window != nil)
+    if ([layer delegate] == (id)self &&
+        [layer isKindOfClass:[NSViewBackingLayer class]] && self->_window != nil)
         [layer setContentsScale:[self->_window backingScaleFactor]];
     [layer setAnchorPoint: CGPointMake(0, 0)];
 
@@ -665,7 +671,9 @@ static inline void configureLayerGeometry(NSView *self) {
     else
         [layer setPosition: self->_frame.origin];
 
-    if (!CGSizeEqualToSize([layer bounds].size, self->_bounds.size))
+    if ([layer delegate] == (id)self &&
+        (!CGSizeEqualToSize([layer bounds].size, self->_bounds.size) ||
+         (self->_validTransforms && !CGRectEqualToRect([layer _contentsRasterRect], self->_visibleRect))))
         [layer setNeedsDisplay];
     [layer setBounds: self->_bounds];
     [layer setGeometryFlipped: [self isFlipped] !=
@@ -882,8 +890,7 @@ static inline void buildTransformsIfNeeded(NSView *self) {
 }
 
 - (BOOL) wantsDefaultClipping {
-    NSUnimplementedMethod();
-    return NO;
+    return YES;
 }
 
 - (NSBitmapImageRep *) bitmapImageRepForCachingDisplayInRect: (NSRect) rect {
@@ -2218,10 +2225,6 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
         }
 
         if (_layer != nil) {
-            if ([_layer delegate] == nil && [_layer contents] == nil && [_layer class] == [CALayer class]) {
-                [_layer setDelegate: (id)self];
-                [_layer setNeedsDisplay];
-            }
             [self _createLayersInTreeIfNeeded];
         }
         [_subviews
@@ -2388,7 +2391,7 @@ static void clearNeedsDisplay(NSView *self) {
     clearInvalidRects(self);
 
     if (_needsDisplay) {
-        [_layer setNeedsDisplay];
+        if ([_layer delegate] == (id)self) [_layer setNeedsDisplay];
         [[self window] setViewsNeedDisplay: YES];
     }
 }
@@ -2425,7 +2428,7 @@ static void clearNeedsDisplay(NSView *self) {
     }
 
     _needsDisplay = YES;
-    [_layer setNeedsDisplay];
+    if ([_layer delegate] == (id)self) [_layer setNeedsDisplay];
     [[self window] setViewsNeedDisplay: YES];
 }
 
@@ -2485,7 +2488,8 @@ static NSView *viewBeingPrinted = nil;
 
         if (context == windowContext) {
             CGContextSetCTM(graphicsPort, [self transformToWindow]);
-            CGContextClipToRect(graphicsPort, [self visibleRect]);
+            if ([self wantsDefaultClipping])
+                CGContextClipToRect(graphicsPort, [self visibleRect]);
         } else {
             CGAffineTransform transform = CGAffineTransformIdentity;
             if (viewBeingPrinted != nil) {
@@ -2806,14 +2810,14 @@ static NSView *viewBeingPrinted = nil;
                     NSGraphicsContext *context = [NSGraphicsContext currentContext];
                     CGContextRef graphicsPort = [context graphicsPort];
 
-                    CGContextClipToRect(graphicsPort, rect);
+                    if ([self wantsDefaultClipping]) CGContextClipToRect(graphicsPort, rect);
 
                     const NSRect *rects;
                     NSInteger rectsCount;
                     [self getRectsBeingDrawn: &rects count: &rectsCount];
                     // If there is only one rect, it's the visible rect - it's already
                     // clipped
-                    if (rectsCount > 1)
+                    if ([self wantsDefaultClipping] && rectsCount > 1)
                         CGContextClipToRects(graphicsPort, rects, rectsCount);
 
                     // [_window dirtyRect:[self convertRect:rect toView:nil]];
@@ -2825,7 +2829,7 @@ static NSView *viewBeingPrinted = nil;
                             [self updateLayer];
                             // A custom backing layer may implement -display (e.g. a Metal
                             // blit layer). View invalidation must also invalidate that layer.
-                            [_layer setNeedsDisplay];
+                            if ([_layer delegate] == (id)self) [_layer setNeedsDisplay];
                         }
                         else
                             [self drawRect: rect];
@@ -3309,42 +3313,60 @@ static CGFloat backingScaleFactor(NSView *view) {
 
 // Layer display never traverses subviews: each backing layer owns its raster.
 - (void) displayLayer: (CALayer *) layer {
-    if (layer != _layer) return;
+    if (layer != _layer || [layer delegate] != (id)self) return;
     if ([self wantsUpdateLayer]) {
         [self updateLayer];
         clearNeedsDisplay(self);
         return;
     }
-    NSRect bounds = [self bounds];
-    CGAffineTransform viewTransform = [self transformToLayer];
+    NSRect rasterRect = [self visibleRect];
     CGFloat scale = [layer contentsScale];
-    CGFloat w = ceil(bounds.size.width * scale), h = ceil(bounds.size.height * scale);
-    if (!isfinite(w) || !isfinite(h) || !isfinite(scale) || scale <= 0 ||
-        w < 0 || h < 0 || w > 16384 || h > 16384)
-        [NSException raise:NSInvalidArgumentException format:@"Invalid backing layer raster size"];
-    if (w == 0 || h == 0) { [layer setContents:nil]; return; }
+    if (NSIsEmptyRect(rasterRect) || !isfinite(rasterRect.size.width) ||
+        !isfinite(rasterRect.size.height) || !isfinite(scale) || scale <= 0) {
+        [layer setContents:nil];
+        [layer _setContentsRasterRect:rasterRect];
+        clearNeedsDisplay(self);
+        return;
+    }
+    // Bound memory even for an unusually large viewport or backing scale.
+    // Destination placement is independent of the raster's resolution.
+    scale = MIN(scale, 4096.0 / MAX(rasterRect.size.width, rasterRect.size.height));
+    size_t w = MAX(1, ceil(rasterRect.size.width * scale));
+    size_t h = MAX(1, ceil(rasterRect.size.height * scale));
     CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
     CGContextRef bitmap = CGBitmapContextCreate(NULL, w, h, 8, 0, space,
         kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
     CGColorSpaceRelease(space);
-    if (bitmap == NULL) [NSException raise:NSMallocException format:@"Backing layer raster allocation failed"];
+    if (bitmap == NULL) {
+        NSLog(@"Backing layer visible raster allocation failed (%zu x %zu)", w, h);
+        [layer setContents:nil];
+        clearNeedsDisplay(self);
+        return;
+    }
     @try {
         NSGraphicsContext *context = [NSGraphicsContext graphicsContextWithGraphicsPort:bitmap flipped:[self isFlipped]];
         [[self effectiveAppearance] performAsCurrentDrawingAppearance:^{
             [self _lockFocusInContext:context];
             @try {
-                CGAffineTransform transform = CGAffineTransformConcat(viewTransform,
-                    CGAffineTransformMakeScale(scale, scale));
-                CGContextSetCTM(bitmap, transform);
-                CGContextClipToRect(bitmap, bounds);
-                // A new image is a complete raster, even for a small invalidation.
+                BOOL flipped = [self isFlipped];
+                CGContextSetCTM(bitmap, CGAffineTransformMake(scale, 0, 0,
+                    flipped ? -scale : scale, -NSMinX(rasterRect) * scale,
+                    (flipped ? NSMaxY(rasterRect) : -NSMinY(rasterRect)) * scale));
+                if ([self wantsDefaultClipping]) CGContextClipToRect(bitmap, rasterRect);
+                // The new image replaces all visible pixels, including a small
+                // invalidation. Keep query APIs consistent with that draw.
                 clearInvalidRects(self);
+                _rectsBeingRedrawn = NSZoneCalloc(NULL, 1, sizeof(NSRect));
+                _rectsBeingRedrawn[0] = rasterRect;
+                _rectsBeingRedrawnCount = 1;
                 _needsDisplay = YES;
-                [self drawRect:bounds];
+                @try { [self drawRect:rasterRect]; }
+                @finally { clearRectsBeingRedrawn(self); }
             } @finally { [self unlockFocus]; }
         }];
         CGImageRef image = CGBitmapContextCreateImage(bitmap);
         [layer setContents:(id)image];
+        [layer _setContentsRasterRect:rasterRect];
         CGImageRelease(image);
         clearNeedsDisplay(self);
     } @finally { CGContextRelease(bitmap); }

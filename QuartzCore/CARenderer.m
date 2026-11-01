@@ -577,6 +577,12 @@ static void roundedRectOutline(CGRect r, CGFloat radius, GLfloat *xy) {
         BOOL bottom = [gravity isEqual:kCAGravityBottom] || [gravity isEqual:kCAGravityBottomLeft] || [gravity isEqual:kCAGravityBottomRight];
         if (top || bottom) target.origin.y = (top != flipped) ? bounds.size.height - h : 0;
     }
+    CGRect rasterRect = [layer _contentsRasterRect];
+    if (!CGRectIsNull(rasterRect)) {
+        target = rasterRect;
+        target.origin.x -= bounds.origin.x;
+        target.origin.y -= bounds.origin.y;
+    }
     const GLfloat vertices[4 * 2] = {CGRectGetMinX(target), CGRectGetMinY(target), CGRectGetMaxX(target), CGRectGetMinY(target),
                                     CGRectGetMinX(target), CGRectGetMaxY(target), CGRectGetMaxX(target), CGRectGetMaxY(target)};
 

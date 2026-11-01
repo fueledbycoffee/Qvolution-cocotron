@@ -24,6 +24,10 @@
 - (void) _setContext: (CALayerContext *) context;
 - (NSNumber *) _textureId;
 - (void) _setTextureId: (NSNumber *) value;
+// Optional view-coordinate destination for a visible-region backing raster.
+// CGRectNull preserves ordinary contentsGravity placement.
+- (CGRect) _contentsRasterRect;
+- (void) _setContentsRasterRect: (CGRect) rect;
 // The contents object last uploaded to the layer's texture.
 - (id) _textureContents;
 - (void) _setTextureContents: (id) value;
