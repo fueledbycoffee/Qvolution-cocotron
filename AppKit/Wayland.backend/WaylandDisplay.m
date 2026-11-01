@@ -47,6 +47,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <limits.h>
+#include <fcntl.h>
 
 @interface WaylandScreen : NSScreen {
 @public
@@ -134,6 +135,7 @@ static void WaylandCopyOutputText(NSString **destination, const char *text) {
                  arguments: (union wl_argument *) args;
 - (void) attachLogicalOutput: (WaylandOutput *) output;
 - (void) processPendingEvents;
+- (void) observeRunLoop: (CFRunLoopActivity) activity;
 - (void) handleEvent: (uint32_t) opcode
                 kind: (WaylandObjectKind) kind
                proxy: (struct wl_proxy *) proxy
@@ -236,6 +238,11 @@ static void wakeMain(void *info) {
     CFRunLoopWakeUp(CFRunLoopGetMain());
 }
 
+static void stallObserver(CFRunLoopObserverRef observer,
+                          CFRunLoopActivity activity, void *info) {
+    [(WaylandDisplay *)info observeRunLoop: activity];
+}
+
 static void repeatTimerCallback(CFRunLoopTimerRef timer, void *info) {
     [(WaylandDisplay *) info performSelector: @selector(repeatKey)];
 }
@@ -296,6 +303,27 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
               name ? name : "unset");
         [self release];
         return nil;
+    }
+
+    const char *boundaries = getenv("DARLING_WAYLAND_BOUNDARIES");
+    if (boundaries && strcmp(boundaries, "1") == 0) {
+        const char *path = getenv("DARLING_WAYLAND_BOUNDARY_LOG");
+        _eventPump.boundaryFD = path && *path ?
+                open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600) : -1;
+        if (_eventPump.boundaryFD < 0) {
+            NSLog(@"Wayland backend: boundaries require a writable DARLING_WAYLAND_BOUNDARY_LOG");
+            [self release];
+            return nil;
+        }
+        _eventPump.boundaries = true;
+        _lastBoundaryTime = WaylandBoundaryMilliseconds();
+        _lastBoundaryMode = CFRetain(CFSTR("startup"));
+        CFRunLoopObserverContext observerContext = {.version = 0, .info = self};
+        _stallObserver = CFRunLoopObserverCreate(NULL, kCFRunLoopAllActivities,
+                true, 0, stallObserver, &observerContext);
+        if (!_stallObserver) { [self release]; return nil; }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), _stallObserver, kCFRunLoopCommonModes);
+        dprintf(_eventPump.boundaryFD, "QV_WAYLAND enabled pid=%d threshold_ms=100\n", getpid());
     }
 
     _eventPump.library = &WL;
@@ -398,6 +426,12 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
 - (void) dealloc {
     WaylandPumpStop(&_eventPump);
+    if (_stallObserver) {
+        CFRunLoopObserverInvalidate(_stallObserver);
+        CFRelease(_stallObserver);
+    }
+    if (_lastBoundaryMode) CFRelease(_lastBoundaryMode);
+    if (_eventPump.boundaries) close(_eventPump.boundaryFD);
     [_draggingManager invalidate];
     [_draggingManager release];
     [self consumeDragPress];
@@ -457,6 +491,24 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 }
 
 #pragma mark - Connection and event loop
+
+- (void) observeRunLoop: (CFRunLoopActivity) activity {
+    double now = WaylandBoundaryMilliseconds();
+    double elapsed = now - _lastBoundaryTime;
+    // A sleeping run loop is responsive idle time, not main-thread work.
+    if (_lastBoundaryActivity != kCFRunLoopBeforeWaiting && elapsed > 100) {
+        char mode[256] = "unknown";
+        if (_lastBoundaryMode)
+            CFStringGetCString(_lastBoundaryMode, mode, sizeof(mode), kCFStringEncodingUTF8);
+        dprintf(_eventPump.boundaryFD,
+                "QV_WAYLAND main_stall pid=%d duration_ms=%.3f mode=%s activity=%lu\n",
+                getpid(), elapsed, mode, (unsigned long)_lastBoundaryActivity);
+    }
+    if (_lastBoundaryMode) CFRelease(_lastBoundaryMode);
+    _lastBoundaryMode = CFRunLoopCopyCurrentMode(CFRunLoopGetMain());
+    _lastBoundaryTime = now;
+    _lastBoundaryActivity = activity;
+}
 
 - (void) flush {
     if (_wlDisplay != NULL)

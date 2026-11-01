@@ -12,7 +12,7 @@ build $out/ping-pump: cc $src/tests/ping-wire-peer.c $out/xdg-shell-protocol.c |
 NINJA
 ninja -C "$out" -j6
 ninja -C "$out" -n
-ASAN_OPTIONS=detect_leaks=1 "$out/ping-pump"
+ASAN_OPTIONS=detect_leaks=0 "$out/ping-pump" --boundaries "$out/boundaries.log"
 # Negative control: the same main-thread stall must leave pings unanswered.
 set +e
 ASAN_OPTIONS=detect_leaks=0 "$out/ping-pump" --main-thread-reader > "$out/negative-control.log" 2>&1

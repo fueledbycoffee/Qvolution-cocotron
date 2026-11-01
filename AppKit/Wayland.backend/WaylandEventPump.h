@@ -7,6 +7,8 @@
 #include <poll.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <stdio.h>
+#include <time.h>
 
 /* Only xdg_wm_base is dispatched here. Application proxies stay on the default
  * queue, including objects constructed from xdg_wm_base through a wrapper. */
@@ -16,10 +18,19 @@ typedef struct {
     struct wl_event_queue *queue;
     pthread_t thread;
     int stop[2], error;
-    bool started;
+    bool started, boundaries;
+    int boundaryFD;
+    unsigned pendingPongs;
+    double oldestPing;
     void (*wake)(void *);
     void *info;
 } WaylandEventPump;
+
+static double WaylandBoundaryMilliseconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+}
 
 static struct wl_proxy *WaylandMainQueueObject(struct WaylandLibrary *wl,
         struct wl_proxy *proxy, uint32_t opcode,
@@ -37,6 +48,13 @@ static int WaylandPingDispatch(const void *implementation, void *proxy,
         uint32_t opcode, const struct wl_message *message, union wl_argument *args) {
     WaylandEventPump *pump = ((struct WaylandLibrary *)implementation)->wl_proxy_get_user_data(proxy);
     if (opcode == WP_WM_BASE_EV_PING) {
+        if (pump->boundaries) {
+            double received = WaylandBoundaryMilliseconds();
+            if (!pump->pendingPongs++) pump->oldestPing = received;
+            dprintf(pump->boundaryFD,
+                    "QV_WAYLAND ping_received pid=%d serial=%u monotonic_ms=%.3f\n",
+                    getpid(), args[0].u, received);
+        }
         union wl_argument pong[] = {{.u = args[0].u}};
         pump->library->wl_proxy_marshal_array_flags(proxy, WP_WM_BASE_PONG,
                 NULL, pump->library->wl_proxy_get_version(proxy), 0, pong);
@@ -46,7 +64,16 @@ static int WaylandPingDispatch(const void *implementation, void *proxy,
 
 static int WaylandPumpFlush(WaylandEventPump *pump) {
     struct WaylandLibrary *wl = pump->library;
-    if (wl->wl_display_flush(pump->display) >= 0) return 0;
+    if (wl->wl_display_flush(pump->display) >= 0) {
+        if (pump->boundaries && pump->pendingPongs) {
+            dprintf(pump->boundaryFD,
+                    "QV_WAYLAND pong_sent pid=%d count=%u max_latency_ms=%.3f\n",
+                    getpid(), pump->pendingPongs,
+                    WaylandBoundaryMilliseconds() - pump->oldestPing);
+            pump->pendingPongs = 0;
+        }
+        return 0;
+    }
     // Linux libwayland sets native errno, not Darwin's errno (EAGAIN is 35).
     // /usr/include/asm-generic/errno-base.h defines Linux EAGAIN as 11.
     return wl->native_errno() == 11 ? 1 : -1;

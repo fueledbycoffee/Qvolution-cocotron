@@ -3,6 +3,7 @@
 #include "WaylandEventPump.h"
 #include <wayland-client-protocol.h>
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -106,6 +107,10 @@ int main(int argc, char **argv) {
     pump.library = &library; pump.display = display;
     pump.queue = wl_display_create_queue(display); assert(pump.queue);
     pump.wake = wake_main;
+    if (argc > 2 && !strcmp(argv[1], "--boundaries")) {
+        pump.boundaryFD = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        assert(pump.boundaryFD >= 0); pump.boundaries = true;
+    }
     struct wl_registry *registry = wl_display_get_registry(display);
     wl_registry_add_listener(registry, &registry_listener, NULL);
     assert(wl_display_roundtrip(display) >= 0 && base);
@@ -142,6 +147,7 @@ int main(int argc, char **argv) {
     wl_proxy_destroy(base); wl_registry_destroy(registry);
     wl_event_queue_destroy(pump.queue); wl_display_disconnect(display);
     close(peer_stop[0]); close(peer_stop[1]);
+    if (pump.boundaries) close(pump.boundaryFD);
     puts("disconnect_wake_and_join=true");
     return 0;
 }
