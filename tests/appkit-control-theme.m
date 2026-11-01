@@ -122,6 +122,22 @@ int main(void) {
                "default button face is the accent fill");
         [window setDefaultButtonCell: nil];
 
+        // A defaulted square button keeps its grey face, so its title must
+        // keep the ordinary dark label colour, not the on-accent white.
+        NSButton *square = push(window, @"MMMM");
+        [square setBezelStyle: NSRegularSquareBezelStyle];
+        [window setDefaultButtonCell: [square cell]];
+        Raster sq = raster(square);
+        int light = 0, darkInk = 0;
+        for (int i = 0; i < sq.w * sq.h; i++) {
+            unsigned char *q = sq.p + i * 4;
+            light += q[3] > 200 && q[0] > 246 && q[1] > 246 && q[2] > 246;
+            darkInk += q[3] > 200 && q[0] < 90 && q[1] < 90 && q[2] < 90;
+        }
+        printf("MEASURE square-default light=%d dark=%d\n", light, darkInk);
+        expect(light == 0 && darkInk > 0, "defaulted square button title keeps the label colour on its grey face");
+        [window setDefaultButtonCell: nil];
+
         NSButton *pressed = push(window, @"");
         [[pressed cell] setHighlighted: YES];
         Raster down = raster(pressed);

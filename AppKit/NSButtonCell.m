@@ -1048,6 +1048,25 @@ static void drawRoundedBezel(CGContextRef context, CGRect frame) {
     return [window defaultButtonCell] == self && [window isKeyWindow];
 }
 
+// Only the bordered push-button styles (the switch's default branch in
+// drawBezelWithFrame:inView:) draw the accent default face; the square,
+// textured, shadowless and recessed bezels stay grey when defaulted.
+- (BOOL) _drawsAccentDefaultFace {
+    if (![self isBordered])
+        return NO;
+    switch (_bezelStyle) {
+    case NSDisclosureBezelStyle:
+    case NSRegularSquareBezelStyle:
+    case NSTexturedSquareBezelStyle:
+    case NSTexturedRoundedBezelStyle:
+    case NSShadowlessSquareBezelStyle:
+    case NSRecessedBezelStyle:
+        return NO;
+    default:
+        return YES;
+    }
+}
+
 - (void) drawBezelWithFrame: (NSRect) frame inView: (NSView *) controlView {
     BOOL defaulted = [self _isActiveDefaultButtonInView: controlView];
 
@@ -1262,7 +1281,7 @@ static NSSize scaledImageSizeInFrameSize(NSSize imageSize, NSSize frameSize,
     }
 
     NSAttributedString *title = [self titleForHighlight];
-    if (defaulted && [self isBordered] && [self isEnabled] && [title length]) {
+    if (defaulted && [self _drawsAccentDefaultFace] && [self isEnabled] && [title length]) {
         NSMutableAttributedString *onAccent =
                 [[title mutableCopy] autorelease];
         [onAccent addAttribute: NSForegroundColorAttributeName
