@@ -302,10 +302,14 @@ static void intersectClipContext(O2Context_builtin *self,
             phase->_clipSamples == NULL) {
         if (!allocateClipSamples(phase))
             phase = nil;
-        else
-            memcpy(phase->_clipSamples, old->_clipSamples,
-                    O2ImageGetWidth(self->_surface) * O2ImageGetHeight(self->_surface) *
-                    8 * sizeof(uint32_t));
+        else {
+            size_t width = O2ImageGetWidth(self->_surface);
+            for (int y = self->_vpy; y < self->_vpy + self->_vpheight; y++) {
+                size_t offset = ((size_t)y * width + self->_vpx) * 8;
+                memcpy(phase->_clipSamples + offset, old->_clipSamples + offset,
+                        (size_t)self->_vpwidth * 8 * sizeof(uint32_t));
+            }
+        }
     }
     if (phase == nil) {
         O2ContextDeviceClipReset_builtin(self);
@@ -314,11 +318,12 @@ static void intersectClipContext(O2Context_builtin *self,
     }
     if (old != nil) {
         size_t width = O2ImageGetWidth(self->_surface);
-        size_t height = O2ImageGetHeight(self->_surface);
+        int endX = self->_vpx + self->_vpwidth;
+        int endY = self->_vpy + self->_vpheight;
         O2argb32f pixels[256], previous[256];
-        for (int y = 0; y < height; y++)
-            for (int x = 0; x < width;) {
-                int length = MIN(width - x, 256);
+        for (int y = self->_vpy; y < endY; y++)
+            for (int x = self->_vpx; x < endX;) {
+                int length = MIN(endX - x, 256);
                 O2Image_read_argb32f(phase->_surface, x, y, pixels, length);
                 O2Image_read_argb32f(old->_surface, x, y, previous, length);
                 for (int i = 0; i < length; i++) {
@@ -403,6 +408,8 @@ static void clipToPath(O2Context_builtin *self, O2Path *path, int fillRule,
         phase = nil;
     }
     if (phase != nil) {
+        O2RasterizerSetViewport(phase, self->_vpx, self->_vpy,
+                self->_vpwidth, self->_vpheight);
         O2RasterizerSetShouldAntialias(phase, antialias, antialias ? MAX_SAMPLES : 1);
         O2Paint *paint = [[O2Paint_color alloc] initWithGray: 1 alpha: 1
                 surfaceToPaintTransform: O2AffineTransformIdentity];
@@ -410,6 +417,33 @@ static void clipToPath(O2Context_builtin *self, O2Path *path, int fillRule,
         [paint release];
         VGPath *vgPath = [[VGPath alloc] initWithKGPath: path];
         VGPathFill(vgPath, O2AffineTransformIdentity, phase);
+        // VGPathFill closes contours. Outside their flattened edge bounds the
+        // sample mask is zero, so later intersections need not visit it.
+        double minX = self->_vpx + self->_vpwidth, maxX = self->_vpx;
+        double minY = self->_vpy + self->_vpheight, maxY = self->_vpy;
+        BOOL finiteBounds = YES;
+        for (int i = 0; i < phase->_edgeCount; i++) {
+            Edge *edge = phase->_edges[i];
+            if (!isfinite(edge->v0.x) || !isfinite(edge->v1.x) ||
+                    !isfinite(edge->v0.y) || !isfinite(edge->v1.y)) {
+                finiteBounds = NO;
+                break;
+            }
+            minX = MIN(minX, MIN(edge->v0.x, edge->v1.x));
+            maxX = MAX(maxX, MAX(edge->v0.x, edge->v1.x));
+            minY = MIN(minY, edge->v0.y);
+            maxY = MAX(maxY, edge->v1.y);
+        }
+        if (finiteBounds) {
+            int endX = self->_vpx + self->_vpwidth;
+            int endY = self->_vpy + self->_vpheight;
+            int x = MIN(endX, MAX((double)self->_vpx, floor(minX)));
+            int y = MIN(endY, MAX((double)self->_vpy, floor(minY)));
+            endX = MAX(x, MIN((double)endX, ceil(maxX)));
+            endY = MAX(y, MIN((double)endY, ceil(maxY)));
+            O2RasterizerSetViewport(self, x, y, endX - x, endY - y);
+            O2RasterizerSetViewport(phase, x, y, endX - x, endY - y);
+        }
         O2DContextClipAndFillEdges(phase, fillRule);
         [vgPath release];
     }
@@ -531,6 +565,8 @@ static void clipToMask(O2Context_builtin *self, O2ClipPhase *clipPhase) {
         phase = nil;
     }
     if (phase != nil) {
+        O2RasterizerSetViewport(phase, self->_vpx, self->_vpy,
+                self->_vpwidth, self->_vpheight);
         phase->_clipIsSoftPhase = YES;
         O2GState *target = O2ContextCurrentGState(phase);
         O2GStateSetDeviceSpaceCTM(target, transform);
@@ -568,11 +604,12 @@ static void normalizeClipToLayerDomain(O2Context_builtin *self,
     if (self->_clipContext == nil || domain == nil || domain->_clipSamples == NULL)
         return;
     size_t width = O2ImageGetWidth(self->_surface);
-    size_t height = O2ImageGetHeight(self->_surface);
+    int endX = self->_vpx + self->_vpwidth;
+    int endY = self->_vpy + self->_vpheight;
     O2argb32f pixels[256];
-    for (int y = 0; y < height; y++)
-        for (int x = 0; x < width;) {
-            int length = MIN(width - x, 256);
+    for (int y = self->_vpy; y < endY; y++)
+        for (int x = self->_vpx; x < endX;) {
+            int length = MIN(endX - x, 256);
             O2Image_read_argb32f(self->_clipContext->_surface, x, y, pixels, length);
             for (int i = 0; i < length; i++) {
                 unsigned count = clipSampleCount(domain->_clipSamples +
@@ -652,6 +689,17 @@ static BOOL hasViewportClip(O2Context_builtin *self) {
         _viewportClipW = _vpwidth;
         _viewportClipH = _vpheight;
         return;
+    }
+    // Binary integral rectangles commute with every coverage phase. Establish
+    // their common viewport before allocating/rasterizing any path mask, even
+    // when the invalidation rectangle is last in the saved clip stack.
+    for (O2ClipPhase *phase in inherited) {
+        if (O2ClipPhasePhaseType(phase) != O2ClipPhaseMask)
+            clipToIntegralRect(self, O2ClipPhaseObject(phase));
+    }
+    for (O2ClipPhase *phase in phases) {
+        if (O2ClipPhasePhaseType(phase) != O2ClipPhaseMask)
+            clipToIntegralRect(self, O2ClipPhaseObject(phase));
     }
     // Layer drawing uses conditional coverage within inherited path samples.
     // The parent applies that domain and inherited soft masks once at composite.
