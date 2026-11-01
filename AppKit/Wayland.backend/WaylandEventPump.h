@@ -8,6 +8,10 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 /* Only xdg_wm_base is dispatched here. Application proxies stay on the default
@@ -91,6 +95,37 @@ static int WaylandRecordedFlush(WaylandEventPump *pump, const char *site, int *e
     return rc;
 }
 
+/* Opt-in: one line with the scheduler state and CPU ticks of each thread of
+ * this process, read from the host /proc tree. It says whether the owner thread
+ * is runnable or sleeping, without looking inside any image. */
+static void WaylandLogThreads(WaylandEventPump *pump, unsigned long second) {
+    DIR *dir = opendir("/Volumes/SystemRoot/proc/self/task");
+    if (!dir) { dprintf(pump->boundaryFD, "QV_WAYLAND threads second=%lu unavailable\n", second); return; }
+    char line[1024] = ""; size_t used = 0; int shown = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && shown < 24) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9') continue;
+        char path[256]; char buffer[512];
+        snprintf(path, sizeof(path), "/Volumes/SystemRoot/proc/self/task/%s/stat", entry->d_name);
+        int fd = open(path, O_RDONLY);
+        if (fd < 0) continue;
+        ssize_t n = read(fd, buffer, sizeof(buffer) - 1); close(fd);
+        if (n <= 0) continue;
+        buffer[n] = 0;
+        char *open_paren = strchr(buffer, '('), *close_paren = strrchr(buffer, ')');
+        if (!open_paren || !close_paren) continue;
+        *close_paren = 0;
+        char state = 0; unsigned long utime = 0, stime = 0;
+        // After ") ": state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt utime stime
+        sscanf(close_paren + 2, "%c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu", &state, &utime, &stime);
+        int w = snprintf(line + used, sizeof(line) - used, " %s:%c:%lu", entry->d_name, state, utime + stime);
+        if (w < 0 || (size_t)w >= sizeof(line) - used) break;
+        used += (size_t)w; shown++;
+    }
+    closedir(dir);
+    dprintf(pump->boundaryFD, "QV_WAYLAND threads second=%lu count=%d tid:state:cpu_ticks=%s\n", second, shown, line);
+}
+
 static int WaylandPumpFlush(WaylandEventPump *pump) {
     struct WaylandLibrary *wl = pump->library;
     int err = 0;
@@ -159,6 +194,7 @@ static void *WaylandPumpRun(void *data) {
                         __atomic_load_n(&pump->flushedRequests, __ATOMIC_RELAXED),
                     __atomic_load_n(&pump->mainActivities, __ATOMIC_RELAXED),
                     __atomic_load_n(&pump->lastActivity, __ATOMIC_RELAXED), pump->reads);
+            if (idle == 1 || idle % 5 == 0) WaylandLogThreads(pump, idle);
         }
         if (pump->boundaries)
             dprintf(pump->boundaryFD,
