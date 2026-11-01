@@ -160,3 +160,16 @@ CTFontDescriptorRef CTFontDescriptorCreateCopyWithVariation(CTFontDescriptorRef 
     [variations release];
     return result;
 }
+
+CFTypeRef CTFontDescriptorCopyLocalizedAttribute(CTFontDescriptorRef descriptor,
+    CFStringRef attribute, CFStringRef *language)
+{
+    // Descriptor dictionaries have no localized alternatives. Return the
+    // ordinary attribute with Copy ownership and no claimed language.
+    if (language) *language = NULL;
+    return CTFontDescriptorCopyAttribute(descriptor, attribute);
+}
+
+// GUESS: Spotify supplies the private name only. No system-font provenance is
+// stored in these dictionary descriptors, so never claim a system UI font.
+bool CTFontDescriptorIsSystemUIFont(CTFontDescriptorRef descriptor) { return false; }

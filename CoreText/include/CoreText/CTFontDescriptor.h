@@ -59,4 +59,6 @@ CORETEXT_EXPORT CTFontDescriptorRef CTFontDescriptorCreateCopyWithSymbolicTraits
 CORETEXT_EXPORT CTFontDescriptorRef CTFontDescriptorCreateCopyWithFeature(CTFontDescriptorRef descriptor, CFNumberRef featureTypeIdentifier, CFNumberRef featureSelectorIdentifier);
 CORETEXT_EXPORT CTFontDescriptorRef CTFontDescriptorCreateCopyWithVariation(CTFontDescriptorRef descriptor, CFNumberRef variationIdentifier, CGFloat variationValue);
 
+CORETEXT_EXPORT CFTypeRef CTFontDescriptorCopyLocalizedAttribute(CTFontDescriptorRef descriptor, CFStringRef attribute, CFStringRef *language);
+
 CF_IMPLICIT_BRIDGING_DISABLED
