@@ -54,6 +54,7 @@ struct xkb_state;
 typedef struct {
     CFRunLoopRef loop;
     CFRunLoopSourceRef source;
+    WaylandEventPump *pump;
 } WaylandEventTarget;
 
 // Identifies the object a dispatched event belongs to.

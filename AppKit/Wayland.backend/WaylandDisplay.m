@@ -236,6 +236,17 @@ static void sourceCallback(void *info) {
 
 static void wakeMain(void *info) {
     WaylandEventTarget *target = info;
+    if (target->pump->boundaries) {
+        // Query the target even when it never handles our source (for example
+        // a direct CF wait in a private mode that bypasses nextEvent:).
+        CFStringRef currentMode = CFRunLoopCopyCurrentMode(target->loop);
+        char mode[256] = "none";
+        if (currentMode) CFStringGetCString(currentMode, mode, sizeof(mode), kCFStringEncodingUTF8);
+        dprintf(target->pump->boundaryFD,
+                "QV_WAYLAND wake_target pid=%d display=%p queue=default source_loop=%p mode=%s\n",
+                getpid(), target->pump->display, target->loop, mode);
+        if (currentMode) CFRelease(currentMode);
+    }
     CFRunLoopSourceSignal(target->source);
     CFRunLoopWakeUp(target->loop);
 }
@@ -310,6 +321,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     // NSDisplay is thread-local (NSThreadSharedInstance). Its callbacks must
     // run on the loop that owns its event queue, not an unrelated main loop.
     _eventTarget.loop = (CFRunLoopRef)CFRetain(CFRunLoopGetCurrent());
+    _eventTarget.pump = &_eventPump;
     _eventModes = [NSMutableSet new];
     const char *boundaries = getenv("DARLING_WAYLAND_BOUNDARIES");
     if (boundaries && strcmp(boundaries, "1") == 0) {

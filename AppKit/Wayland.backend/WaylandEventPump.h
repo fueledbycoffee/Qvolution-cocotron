@@ -99,6 +99,10 @@ static void *WaylandPumpRun(void *data) {
             if (WaylandPumpDispatch(pump) < 0)
                 goto failed;
         }
+        if (pump->boundaries)
+            dprintf(pump->boundaryFD,
+                    "QV_WAYLAND prepared_read pid=%d display=%p queue=ping mode=worker\n",
+                    getpid(), pump->display);
         int flush = WaylandPumpFlush(pump);
         if (flush < 0) {
             wl->wl_display_cancel_read(pump->display);
