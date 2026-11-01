@@ -360,6 +360,26 @@ static void scalarTests(void){
  NSTabView *emptyTab=[NSTabView new];emptyTab->_items=[NSArray array];bind(emptyTab,@"selectedIndex",nil,nil);
  assert(exceptions==0);puts("PASS scalar: popup tag/index, matrix tag/index, tab index, nil/NSNull/marker placeholders, reverse selection, empty controls");
 }
+static void contentValuesTests(void){
+ for(int alias=0;alias<2;alias++) {
+  NSPopUpButton *p=popup();id a=[NSObject new],b=[NSObject new];
+  bind(p,alias?@"contentObjects":@"content",[NSArray arrayWithObjects:a,b,nil],nil);
+  id first=[p itemAtIndex:0],second=[p itemAtIndex:1];
+  Model *titles=[Model new];[titles setValue:[NSArray arrayWithObjects:@"A",@"B",nil]];
+  [p bind:@"contentValues" toObject:titles withKeyPath:@"value" options:nil];
+  for(int update=0;update<2;update++) {
+   if(update)[titles setValue:[NSArray arrayWithObjects:@"AA",@"BB",nil] forKeyPath:@"value"];
+   if([p itemAtIndex:0]!=first||[p itemAtIndex:1]!=second||
+      [[p itemAtIndex:0]representedObject]!=a||[[p itemAtIndex:1]representedObject]!=b) {
+    puts("FAIL: contentValues cleared content/contentObjects represented objects");exit(1);
+   }
+   assert([[[p itemAtIndex:0]title]isEqual:update?@"AA":@"A"]);
+   assert([[[p itemAtIndex:1]title]isEqual:update?@"BB":@"B"]);
+   [p _setSelectedObject:b];assert([p selectedItem]==second);
+  }
+ }
+ puts("PASS contentValues: content and contentObjects identity, initial titles and KVO title updates");
+}
 static void selectedObjectTests(void){
  NSPopUpButton *p=popup();id a=[NSObject new],b=[NSObject new];
  [[p itemAtIndex:0]setRepresentedObject:a];[[p itemAtIndex:1]setRepresentedObject:b];
@@ -373,11 +393,7 @@ static void selectedObjectTests(void){
  bind(p,@"selectedObject",nil,option(NSNullPlaceholderBindingOption,a));assert([p selectedItem]==[p itemAtIndex:0]);[p unbind:@"selectedObject"];
  assert([[[NSPopUpButton new] _content]count]==0);
  assert([[popup() _content]count]==2);
- // Content titles can update without replacing represented objects.
- bind(p,@"content",[NSArray arrayWithObjects:a,b,nil],nil);
- bind(p,@"contentValues",[NSArray arrayWithObjects:@"A",@"B",nil],nil);
- assert([[p itemAtIndex:0]representedObject]==a&&[[p itemAtIndex:1]representedObject]==b);
- assert([[[p itemAtIndex:0]title]isEqual:@"A"]);
+ contentValuesTests();
  assert(exceptions==0);puts("PASS selectedObject: identity, model/UI updates, nil and marker placeholders, content/title composition");
 }
 static void enabledTests(void){
@@ -445,5 +461,6 @@ int main(void){NSMultipleValuesMarker=[NSObject new];NSNoSelectionMarker=[NSObje
  if(FIXTURE_CASE==0||FIXTURE_CASE==5)pathTests();
  if(FIXTURE_CASE==0||FIXTURE_CASE==6)markerTests();
  if(FIXTURE_CASE==0||FIXTURE_CASE==7)reverseMarkerTests();
+ if(FIXTURE_CASE==8)contentValuesTests();
  return 0;
 }
