@@ -537,12 +537,8 @@ static BOOL _allowsAutomaticWindowTabbing;
 }
 
 - (void) _updatePlatformWindowTitle {
-    NSString *title;
-
-    if ([self isMiniaturized])
-        title = [self miniwindowTitle];
-    else
-        title = [self title];
+    // Propagate stored state without re-entering subclass getters from setters.
+    NSString *title = [_platformWindow isMiniaturized] ? _miniwindowTitle : _title;
 
     if (_isDocumentEdited)
         title = [@"* " stringByAppendingString: title];
@@ -1213,8 +1209,8 @@ static BOOL _allowsAutomaticWindowTabbing;
 }
 
 - (BOOL) _isApplicationWindow {
-    return ![self isKindOfClass: [NSPanel class]] && [self isVisible] &&
-           ![self isExcludedFromWindowsMenu];
+    return ![self isKindOfClass: [NSPanel class]] && _isVisible &&
+           !_excludedFromWindowsMenu;
 }
 
 - (void) setTitle: (NSString *) title {
@@ -1229,7 +1225,7 @@ static BOOL _allowsAutomaticWindowTabbing;
     [_backgroundView setNeedsDisplay: YES];
 
     if ([self _isApplicationWindow])
-        [NSApp changeWindowsItem: self title: title filename: NO];
+        [NSApp changeWindowsItem: self title: _title filename: NO];
 }
 
 - (void) setTitleWithRepresentedFilename: (NSString *) filename {
@@ -1527,6 +1523,12 @@ static BOOL _allowsAutomaticWindowTabbing;
 
 - (void) setMovableByWindowBackground: (BOOL) value {
     _isMovableByWindowBackground = value;
+}
+
+- (void) performWindowDragWithEvent: (NSEvent *) event {
+    id platform = [self platformWindow];
+    if ([platform respondsToSelector: @selector(performWindowDragWithEvent:)])
+        [platform performWindowDragWithEvent: event];
 }
 
 - (void) setAllowsToolTipsWhenApplicationIsInactive: (BOOL) value {

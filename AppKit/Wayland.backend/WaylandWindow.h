@@ -93,6 +93,11 @@ struct WaylandBuffer {
     CGFloat _margin;
     O2Rect _sentGeometry;
     NSTitlebarTracker _buttonTracker;
+    // Non-NULL only until this content press is released, loses focus, or is
+    // consumed by an interactive move. The seat owns the serial's scope.
+    struct wl_proxy *_appMoveSeat;
+    uint32_t _appMoveSerial;
+    BOOL _appMoveDragged;
     NSTitlebarButton _shownPressed;
     BOOL _buttonHover;
     // Whether the current xdg_toplevel was asked for fullscreen, what the last
@@ -154,6 +159,12 @@ struct WaylandBuffer {
 // Surface-local pointer position, for traffic-light hover feedback.
 - (void) decorationPointerMoved: (CGPoint) point;
 - (void) decorationPointerLeft;
+- (void) appMoveMotion: (BOOL) leftHeld;
+- (void) appMoveButton: (uint32_t) button pressed: (BOOL) pressed
+                serial: (uint32_t) serial atPoint: (CGPoint) point;
+- (void) cancelAppMovePress;
+- (void) beginWindowDrag;
+- (void) performWindowDragWithEvent: (NSEvent *) event;
 - (BOOL) decorationButton: (uint32_t) button pressed: (BOOL) pressed
                    serial: (uint32_t) serial atPoint: (CGPoint) point;
 

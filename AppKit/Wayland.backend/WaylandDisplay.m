@@ -1064,6 +1064,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         [_draggingManager cancel];
         [self consumeDragPress];
         [self releaseInputDevice: &_pointer opcode: WP_POINTER_RELEASE];
+        [_pointerWindow decorationPointerLeft];
         _pointerWindow = nil;
         _pointerEnterSerial = 0;
         _pressedButtons = 0;
@@ -1138,6 +1139,9 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
     case WP_POINTER_EV_BUTTON: {
         BOOL firstPress = _pressedButtons == 0;
+        [_pointerWindow appMoveButton: args[2].u
+                pressed: args[3].u == WP_POINTER_BUTTON_STATE_PRESSED
+                serial: args[0].u atPoint: _pointerSurfacePoint];
         if (_pressedButtons == 0 && [_pointerWindow decorationButton: args[2].u
                 pressed: args[3].u == WP_POINTER_BUTTON_STATE_PRESSED
                 serial: args[0].u atPoint: _pointerSurfacePoint])
@@ -1189,6 +1193,8 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
     NSPoint location = [window transformPoint: _pointerSurfacePoint];
     NSPoint last = [window mouseLocationOutsideOfEventStream];
+    if (!NSEqualPoints(location, last))
+        [window appMoveMotion: (_pressedButtons & 1) != 0];
     [window setLastKnownCursorPosition: location];
     [window decorationPointerMoved: _pointerSurfacePoint];
 
