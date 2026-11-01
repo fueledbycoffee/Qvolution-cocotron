@@ -3,6 +3,7 @@
 @interface NSObject (OwnWindowList)
 - (id)platformWindow;
 - (BOOL)isMapped;
+- (NSDictionary *)eglPresentationStatistics;
 @end
 @interface NibVisibleWindowList : NSObject
 + (void)poll:(NSTimer *)timer;
@@ -21,8 +22,9 @@
     NSMutableArray *rows=[NSMutableArray array];
     for(NSWindow *window in [NSApp windows]) {
         id backend=[window platformWindow];
-        if(![backend respondsToSelector:@selector(isMapped)])continue;
-        [rows addObject:@{@"title":[window title]?:@"",@"visible":@([window isVisible]),@"mapped":@([backend isMapped])}];
+        if(![backend respondsToSelector:@selector(isMapped)]||![backend respondsToSelector:@selector(eglPresentationStatistics)])continue;
+        NSNumber *presents=[backend eglPresentationStatistics][@"clientPresents"];
+        [rows addObject:@{@"title":[window title]?:@"",@"visible":@([window isVisible]),@"mapped":@([backend isMapped]),@"presented_frames":presents}];
     }
     NSData *data=[NSJSONSerialization dataWithJSONObject:rows options:0 error:NULL];
     if(!data||![data writeToFile:output atomically:YES])exit(3);
