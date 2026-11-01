@@ -162,6 +162,23 @@ static void *NSBinderChangeContext;
     return _destination;
 }
 
+- (id) destinationValue {
+    id value = _destination;
+    NSString *remaining = _keyPath;
+    while ([remaining length] && value) {
+        if (NSIsControllerMarker(value))
+            return value;
+        if ([remaining hasPrefix: @"@"])
+            return [value valueForKeyPath: remaining];
+        NSRange dot = [remaining rangeOfString: @"."];
+        if (dot.location == NSNotFound)
+            return [value valueForKey: remaining];
+        value = [value valueForKey: [remaining substringToIndex: dot.location]];
+        remaining = [remaining substringFromIndex: dot.location + 1];
+    }
+    return value;
+}
+
 - (void) setDestination: (id) value {
     value = [value retain];
     [_destination release];

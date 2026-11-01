@@ -195,7 +195,7 @@ NSString *NSFormatDisplayPattern(NSString *pattern, id *values,
 
     for (i = 0; i < count; i++) {
         _NSBinder *binder = allBinders[i];
-        id dstValue = [[binder destination] valueForKeyPath: [binder keyPath]];
+        id dstValue = [binder destinationValue];
         BOOL isPlaceholder = NO;
 
         if (dstValue == NSMultipleValuesMarker) {

@@ -41,6 +41,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 - (void) setSource: (id) value;
 
 - (id) destination;
+- (id) destinationValue;
 - (void) setDestination: (id) value;
 
 - (NSString *) keyPath;
