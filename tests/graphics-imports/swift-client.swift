@@ -12,6 +12,15 @@ let standard = CGRectMake(7, 16, 3, 4)
 check(reversed == standard, "CGRect standardized equality")
 check(Set([reversed, standard]).count == 1, "CGRect Hashable witness")
 check(Set([CGRectNull, CGRectNull]).count == 1, "CGRect null hashing")
+check(reversed.width == 3 && reversed.height == 4, "CGRect width/height getters")
+check(standard.width == 3 && standard.height == 4, "CGRect positive dimensions")
+check(CGRectZero.width == 0 && CGRectZero.height == 0, "CGRect zero dimensions")
+check(CGRectEqualToRect(CGRectStandardize(reversed), standard), "C standardized equality from Swift")
+func equal<T: Equatable>(_ lhs: T, _ rhs: T) -> Bool { return lhs == rhs }
+check(equal(reversed, standard), "CGRect generic Equatable witness")
+check(reversed.hashValue == standard.hashValue, "CGRect equal hash values")
+check(Set([reversed, standard, CGRectMake(8, 16, 3, 4)]).count == 2,
+    "CGRect hashing distinguishes different rectangles")
 
 let path = CGMutablePath()
 let transform = CGAffineTransform(a: 2, b: 0, c: 0, d: 3, tx: 5, ty: 7)
