@@ -36,6 +36,7 @@
 #include <stdint.h>
 #include <wayland-util.h>
 #include "WaylandFullscreen.h"
+#include "WaylandEventPump.h"
 
 struct wl_display;
 struct wl_proxy;
@@ -123,7 +124,7 @@ struct wl_proxy *WaylandCreateObject(struct wl_proxy *proxy, uint32_t opcode,
     WaylandWindow *_lockWindow; // Nonretained; cleared on unmap.
     CGFloat _pinchScale;
     struct wl_proxy *_keyboard;
-    CFSocketRef _wlSocket;
+    WaylandEventPump _eventPump;
     CFRunLoopSourceRef _wlSource;
     NSMutableArray *_outputs;
     NSArray *_screens;

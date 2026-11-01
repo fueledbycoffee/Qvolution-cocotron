@@ -132,6 +132,7 @@ bool WaylandLibraryLoad(void) {
     WAYLAND_EGL_FUNCTIONS(WAYLAND_RESOLVE_EGL)
 #undef WAYLAND_RESOLVE_EGL
 
+    WL.native_errno = _elfcalls->get_errno;
     WL.memfd_create = _elfcalls->dlsym(NULL, "memfd_create");
 
     loaded = 1;

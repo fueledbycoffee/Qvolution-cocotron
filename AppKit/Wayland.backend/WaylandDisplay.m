@@ -215,7 +215,8 @@ struct wl_proxy *WaylandCreateObject(struct wl_proxy *proxy, uint32_t opcode,
                                      union wl_argument *args,
                                      WaylandObjectKind kind, id object)
 {
-    struct wl_proxy *created = WaylandMarshal(proxy, opcode, interface, 0, args);
+    struct wl_proxy *created = WaylandMainQueueObject(&WL, proxy, opcode,
+                                                     interface, args);
     if (created == NULL) {
         NSLog(@"Wayland backend: cannot create a %s", interface->name);
         exit(1);
@@ -226,10 +227,13 @@ struct wl_proxy *WaylandCreateObject(struct wl_proxy *proxy, uint32_t opcode,
     return created;
 }
 
-static void socketCallback(CFSocketRef socket, CFSocketCallBackType type,
-                           CFDataRef address, const void *data, void *info)
-{
-    [(WaylandDisplay *) info processPendingEvents];
+static void sourceCallback(void *info) {
+    [(WaylandDisplay *)info processPendingEvents];
+}
+
+static void wakeMain(void *info) {
+    CFRunLoopSourceSignal((CFRunLoopSourceRef)info);
+    CFRunLoopWakeUp(CFRunLoopGetMain());
 }
 
 static void repeatTimerCallback(CFRunLoopTimerRef timer, void *info) {
@@ -290,6 +294,14 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         NSLog(@"Wayland backend: cannot connect to the compositor "
               @"(WAYLAND_DISPLAY=%s), trying the next backend",
               name ? name : "unset");
+        [self release];
+        return nil;
+    }
+
+    _eventPump.library = &WL;
+    _eventPump.display = _wlDisplay;
+    _eventPump.queue = WL.wl_display_create_queue(_wlDisplay);
+    if (!_eventPump.queue) {
         [self release];
         return nil;
     }
@@ -363,19 +375,13 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
             &wp_viewport_interface, viewport, 0, nil);
     }
 
-    CFSocketContext context = {.version = 0, .info = self};
-    _wlSocket = CFSocketCreateWithNative(NULL, WL.wl_display_get_fd(_wlDisplay),
-                                         kCFSocketReadCallBack, socketCallback,
-                                         &context);
-    if (_wlSocket != NULL) {
-        // The descriptor belongs to libwayland.
-        CFSocketSetSocketFlags(_wlSocket, CFSocketGetSocketFlags(_wlSocket) &
-                                                  ~kCFSocketCloseOnInvalidate);
-        _wlSource = CFSocketCreateRunLoopSource(NULL, _wlSocket, 0);
-    }
-    if (_wlSource == NULL) {
-        NSLog(@"Wayland backend: cannot watch the compositor connection, trying "
-              @"the next backend");
+    CFRunLoopSourceContext context = {.version = 0, .info = self,
+                                       .perform = sourceCallback};
+    _wlSource = CFRunLoopSourceCreate(NULL, 0, &context);
+    _eventPump.wake = wakeMain;
+    _eventPump.info = _wlSource;
+    if (_wlSource == NULL || !WaylandPumpStart(&_eventPump)) {
+        NSLog(@"Wayland backend: cannot start the compositor event pump");
         [self release];
         return nil;
     }
@@ -391,6 +397,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 }
 
 - (void) dealloc {
+    WaylandPumpStop(&_eventPump);
     [_draggingManager invalidate];
     [_draggingManager release];
     [self consumeDragPress];
@@ -407,10 +414,6 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         CFRunLoopRemoveSource(CFRunLoopGetMain(), _wlSource,
                               kCFRunLoopCommonModes);
         CFRelease(_wlSource);
-    }
-    if (_wlSocket != NULL) {
-        CFSocketInvalidate(_wlSocket);
-        CFRelease(_wlSocket);
     }
     if (_xkbState != NULL)
         WL.xkb_state_unref(_xkbState);
@@ -435,6 +438,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
             if (output->_logicalProxy) WL.wl_proxy_destroy(output->_logicalProxy);
             WL.wl_proxy_destroy(output->_proxy);
         }
+        if (_eventPump.queue) WL.wl_event_queue_destroy(_eventPump.queue);
         WL.wl_display_disconnect(_wlDisplay);
     }
 
@@ -486,20 +490,8 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     if (_wlDisplay == NULL)
         return;
 
-    while (WL.wl_display_prepare_read(_wlDisplay) != 0) {
-        if (WL.wl_display_dispatch_pending(_wlDisplay) < 0)
-            [self connectionFailed];
-    }
-    WL.wl_display_flush(_wlDisplay);
-
-    struct pollfd pfd = {.fd = WL.wl_display_get_fd(_wlDisplay),
-                         .events = POLLIN};
-    if (poll(&pfd, 1, 0) > 0) {
-        if (WL.wl_display_read_events(_wlDisplay) < 0)
-            [self connectionFailed];
-    } else {
-        WL.wl_display_cancel_read(_wlDisplay);
-    }
+    if (__atomic_load_n(&_eventPump.error, __ATOMIC_ACQUIRE))
+        [self connectionFailed];
 
     if (WL.wl_display_dispatch_pending(_wlDisplay) < 0)
         [self connectionFailed];
@@ -584,8 +576,10 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         _wmBase = [self bindGlobal: name
                          interface: &xdg_wm_base_interface
                            version: MIN(version, 3)
-                              kind: WaylandObjectWmBase
-                            object: self];
+                              kind: 0
+                            object: nil];
+        WL.wl_proxy_set_queue(_wmBase, _eventPump.queue);
+        WL.wl_proxy_add_dispatcher(_wmBase, WaylandPingDispatch, &WL, &_eventPump);
     } else if (strcmp(interface, "zxdg_decoration_manager_v1") == 0 &&
                _decorationManager == NULL)
     {
@@ -866,13 +860,6 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                          version: args[2].u];
         else if (opcode == WP_REGISTRY_EV_GLOBAL_REMOVE)
             [self registryGlobalRemoved: args[0].u];
-        break;
-
-    case WaylandObjectWmBase:
-        if (opcode == WP_WM_BASE_EV_PING) {
-            union wl_argument pong[1] = {{.u = args[0].u}};
-            WaylandMarshal(_wmBase, WP_WM_BASE_PONG, NULL, 0, pong);
-        }
         break;
 
     case WaylandObjectOutput:
