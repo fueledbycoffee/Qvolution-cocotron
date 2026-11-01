@@ -24,7 +24,8 @@ replies; disable/error and owner/query failure; initial and previously engaged
 reply-send failures; allocation failure; window-list mutation from synchronous
 resize observers; actual canonical reply receipt; writable-only progress with
 queued transport; silent-peer timeout; a watch deadline that fires while its
-reply is already readable; daemon loss/restart and Shell/transport loss. The
+reply is already readable; per-watch retry budgets and the owner snapshot
+refresh a late watch triggers; daemon loss/restart and Shell/transport loss. The
 baseline's missing allocation guard is reported as an assertion instead of
 intentionally passing NULL into its legacy serializer.
 

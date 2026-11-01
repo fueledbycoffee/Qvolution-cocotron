@@ -196,7 +196,7 @@ static NSApplication *NSApp;
     DBusConnection *_connection; CFSocketRef _cfSocket; id _itemsByID; unsigned int _revision; BOOL _available, _globalMenuEngaged, _waylandApplicationMenu, _orbitOwnerMatchAdded;
     BOOL _orbitProgressFailed, _orbitOwnerWatchReady, _orbitStateWatchReady;
     BOOL _orbitExtensionActive, _orbitMenuRead; NSString *_orbitOwner, *_orbitShellOwner;
-    unsigned int _orbitShellGeneration, _orbitOwnerGeneration; NSMenu *_currentMenu;
+    unsigned int _orbitShellGeneration, _orbitOwnerGeneration, _orbitOwnerWatchRetries, _orbitStateWatchRetries; NSMenu *_currentMenu;
 }
 - (void)deferDBusProgressFailure; - (void)processPendingDBusEvents; - (void)scheduleDBusWrite; - (void)handleDBusDisconnect;
 - (void)appendMenu:(NSMenu *)menu asNode:(int32_t)node toIter:(DBusMessageIter *)iter depth:(int32_t)depth;
@@ -422,6 +422,24 @@ int main(void) {
     if(timerCount==raceTimer+1){ CFRunLoopTimerRef timer=timers[raceTimer]; timer->callback(timer,timer->info); }
     CHECK(raceExporter->_orbitOwnerWatchReady,"deadline firing before socket dispatch still accepts the already-received owner-watch reply");
     CHECK(!timers[raceTimer]->valid,"received reply retires its deadline timer");
+    // A watch that genuinely fails is retried rather than left unready until another window maps.
+    raceExporter->_orbitOwnerWatchReady=NO; unsigned int raceGeneration=raceExporter->_orbitOwnerGeneration;
+    DBusMessage *watchError=dbus_message_new(DBUS_MESSAGE_TYPE_ERROR); dbus_message_set_error_name(watchError,DBUS_ERROR_NO_REPLY);
+    [raceExporter receiveOrbitReply:watchError kind:OrbitOwnerWatchQuery generation:raceExporter->_orbitShellGeneration]; dbus_message_unref(watchError);
+    for(int n=0;n<20 && !raceExporter->_orbitOwnerWatchReady;n++) pump(raceExporter);
+    CHECK(raceExporter->_orbitOwnerWatchRetries==1 && raceExporter->_orbitStateWatchRetries==0 && raceExporter->_orbitOwnerWatchReady,"failed owner watch is retried on its own budget and becomes ready");
+    for(int n=0;n<20 && !raceExporter->_orbitOwner;n++) pump(raceExporter);
+    CHECK(raceExporter->_orbitOwnerGeneration==raceGeneration+1 && raceExporter->_orbitOwner && strcmp([raceExporter->_orbitOwner UTF8String],sender)==0,"late owner watch refreshes the owner snapshot it guards");
+    // Each watch has its own budget: exhausting the owner watch leaves the state watch's retries intact.
+    raceExporter->_orbitOwnerWatchRetries=2; raceExporter->_orbitOwnerMatchAdded=YES;
+    watchError=dbus_message_new(DBUS_MESSAGE_TYPE_ERROR); dbus_message_set_error_name(watchError,DBUS_ERROR_NO_REPLY);
+    [raceExporter receiveOrbitReply:watchError kind:OrbitOwnerWatchQuery generation:raceExporter->_orbitShellGeneration]; dbus_message_unref(watchError);
+    CHECK(!raceExporter->_orbitOwnerWatchReady && !raceExporter->_orbitOwnerMatchAdded,"exhausted owner watch waits for the next window registration");
+    raceExporter->_orbitStateWatchReady=NO;
+    watchError=dbus_message_new(DBUS_MESSAGE_TYPE_ERROR); dbus_message_set_error_name(watchError,DBUS_ERROR_NO_REPLY);
+    [raceExporter receiveOrbitReply:watchError kind:OrbitStateWatchQuery generation:raceExporter->_orbitShellGeneration]; dbus_message_unref(watchError);
+    for(int n=0;n<20 && !raceExporter->_orbitStateWatchReady;n++) pump(raceExporter);
+    CHECK(raceExporter->_orbitStateWatchRetries==1 && raceExporter->_orbitStateWatchReady,"state watch retries independently of an exhausted owner watch");
     dbus_connection_close(raceExporter->_connection);
     dbus_connection_close(receiver);
     if(failures) return 1;

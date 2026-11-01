@@ -416,9 +416,27 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
             _orbitOwnerWatchReady = ready;
         else
             _orbitStateWatchReady = ready;
-        if (!ready) {
+        unsigned int *retries = kind == OrbitOwnerWatchQuery ? &_orbitOwnerWatchRetries : &_orbitStateWatchRetries;
+        if (!ready && *retries < 2) {
+            // The window registration that issued this watch may not recur, so
+            // retry here instead of leaving the local menu up for the session.
+            (*retries)++;
+            orbitDiagnostic("watch-retry", "kind=%d attempt=%u", kind, *retries);
+            [self queryOrbitIntegration: kind];
+        } else if (!ready) {
             _orbitOwnerMatchAdded = NO;
             NSLog(@"Orbit global menu: cannot watch integration changes");
+        } else if (*retries) {
+            // Changes before a late match were not observed: refresh the snapshot it guards.
+            if (kind == OrbitOwnerWatchQuery) {
+                _orbitOwnerGeneration++;
+                _orbitShellGeneration++;
+                [self queryOrbitIntegration: OrbitOwnerQuery];
+                [self queryOrbitIntegration: OrbitShellOwnerQuery];
+            } else if (_orbitShellOwner) {
+                _orbitShellGeneration++;
+                [self queryOrbitIntegration: OrbitExtensionQuery];
+            }
         }
     } else if (kind == OrbitExtensionQuery) {
         DBusMessageIter dictionary;
@@ -899,6 +917,8 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
     [self updateMenu: menu];
     if (!_orbitOwnerMatchAdded) {
         _orbitOwnerMatchAdded = YES;
+        _orbitOwnerWatchRetries = 0;
+        _orbitStateWatchRetries = 0;
         _orbitOwnerWatchReady = NO;
         _orbitStateWatchReady = NO;
         [self queryOrbitIntegration: OrbitOwnerWatchQuery];

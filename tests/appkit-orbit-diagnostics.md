@@ -12,10 +12,12 @@ identity and each GetLayout predicate, reply queue/signature result, transport
 queue progress, and every presentation decision with all gate values.
 No menu content, guest internals or proprietary implementation is recorded.
 
-Query kinds: 0 Orbit owner, 1 Shell owner, 2 extension info, 3 owner watch,
-4 extension-state watch. A query's `error` is the D-Bus error name, including
-access-denied, unknown-name and timeout errors. A stale reply is logged before
-being rejected. Owner changes and layout requests identify both generations.
+Query kinds: 0 Orbit owner, 1 Shell owner, 2 extension info, 3 owner watch, 4
+extension-state watch. Each failed watch is retried up to twice on its own
+budget (`watch-retry`) before it waits for the next window registration. A
+query's `error` is the D-Bus error name, including access-denied, unknown-name
+and timeout errors. A stale reply is logged before being rejected. Owner changes
+and layout requests identify both generations.
 
 `layout-reply queued=1` is the existing successful `dbus_connection_send`
 criterion. `transport-progress pending-write=0` means the local connection's

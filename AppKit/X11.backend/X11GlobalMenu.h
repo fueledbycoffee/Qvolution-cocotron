@@ -28,6 +28,8 @@ typedef struct DBusConnection DBusConnection;
     NSString *_orbitShellOwner;
     unsigned int _orbitShellGeneration;
     unsigned int _orbitOwnerGeneration;
+    unsigned int _orbitOwnerWatchRetries;
+    unsigned int _orbitStateWatchRetries;
 }
 
 + (instancetype) sharedGlobalMenu;
