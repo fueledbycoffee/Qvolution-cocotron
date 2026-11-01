@@ -106,6 +106,7 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
     BOOL changed=NO;
     // Only this main-thread drain writes the shared state.
     QVDesktopState next; QVDesktopSharedLoad(&_shared,&next);
+    BOOL wasOverlayScrolling=next.overlayScrolling;
     dbus_connection_read_write(_connection,0);
     DBusMessage *message;
     while ((message=dbus_connection_pop_message(_connection))) {
@@ -128,7 +129,7 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
     }
     if (!dbus_connection_get_is_connected(_connection)) [self disconnect];
     if (changed) {
-        BOOL scrollerStyleChanged=next.overlayScrolling!=_state.overlayScrolling;
+        BOOL scrollerStyleChanged=next.overlayScrolling!=wasOverlayScrolling;
         [NSApp willChangeValueForKey:@"effectiveAppearance"];
         QVDesktopSharedStore(&_shared,&next);
         [self invalidateAppearance];
