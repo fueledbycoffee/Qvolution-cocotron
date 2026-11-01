@@ -1,24 +1,35 @@
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <Onyx2D/O2Context.h>
+#import <Onyx2D/O2GraphicsState.h>
+#import <Onyx2D/O2ClipState.h>
 #include <stdio.h>
 #include <string.h>
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); failures++; } } while (0)
 
+static NSArray *clipPhases(CGContextRef context) {
+    return [O2GStateClipState(O2ContextCurrentGState((O2ContextRef)context)) clipPhases];
+}
+
 static void layers(CGContextRef context) {
     CGRect parent = CGRectMake(0, 0, 16, 16);
     CGContextClipToRect(context, parent);
-    CGRect initial = CGContextGetClipBoundingBox(context);
+    NSArray *initial = [clipPhases(context) copy];
+    CHECK(initial.count > 0);
     CGContextBeginTransparencyLayerWithRect(context, CGRectMake(0, 0, 8, 8), NULL);
-    CGRect outer = CGContextGetClipBoundingBox(context);
+    NSArray *outer = [clipPhases(context) copy];
+    CHECK(outer.count == initial.count + 1);
     CGContextBeginTransparencyLayerWithRect(context, CGRectMake(0, 0, 4, 4), NULL);
     CGContextSetRGBFillColor(context, 1, 0, 0, 1);
     CGContextFillRect(context, CGRectMake(0, 0, 16, 16));
     CGContextEndTransparencyLayer(context);
-    CHECK(CGRectEqualToRect(CGContextGetClipBoundingBox(context), outer));
+    CHECK([clipPhases(context) isEqualToArray:outer]);
     CGContextEndTransparencyLayer(context);
-    CHECK(CGRectEqualToRect(CGContextGetClipBoundingBox(context), initial));
+    CHECK([clipPhases(context) isEqualToArray:initial]);
+    [outer release];
+    [initial release];
     CGContextSetRGBFillColor(context, 0, 1, 0, 1);
     CGContextFillRect(context, CGRectMake(12, 12, 2, 2));
 }
