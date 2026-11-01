@@ -17,15 +17,16 @@ reply construction/send path runs. Existing serialization/action fixtures and
 literal source comparisons cover those unchanged menu-item paths separately.
 
 Checks include both zero and 30-point titlebar policies; content geometry,
-toolbar placement, frame conversion and repeated hide/restore without drift;
-no Shell, no reader, unrelated readers, authenticated ACTIVE state and current
+toolbar placement, frame conversion and repeated hide/restore without drift; no
+Shell, no reader, unrelated readers, authenticated ACTIVE state and current
 Orbit reads; forged/irrelevant state and query senders; stale state/owner query
 replies; disable/error and owner/query failure; initial and previously engaged
 reply-send failures; allocation failure; window-list mutation from synchronous
 resize observers; actual canonical reply receipt; writable-only progress with
-queued transport; silent-peer timeout; daemon loss/restart and Shell/transport
-loss. The baseline's missing allocation guard is reported as an assertion
-instead of intentionally passing NULL into its legacy serializer.
+queued transport; silent-peer timeout; a watch deadline that fires while its
+reply is already readable; daemon loss/restart and Shell/transport loss. The
+baseline's missing allocation guard is reported as an assertion instead of
+intentionally passing NULL into its legacy serializer.
 
 The Shell contract is documented in the installed primary interface
 `/usr/share/dbus-1/interfaces/org.gnome.Shell.Extensions.xml`:

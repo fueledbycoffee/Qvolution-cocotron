@@ -122,11 +122,21 @@ static void orbitTimeoutFree(void *data) {
     free(context);
 }
 
+// A busy main thread can leave both a reply on the socket and its deadline timer
+// due. Read first, so a reply that already arrived completes its pending call and
+// removes this timeout; only an unanswered call then becomes NoReply. Removal
+// invalidates the timer before freeing the context, so validity is checked on our
+// own timer reference before the context is touched again.
 static void orbitTimeoutFired(CFRunLoopTimerRef timer, void *data) {
     OrbitTimeout *context = data;
     X11GlobalMenu *exporter = [context->exporter retain];
-    dbus_timeout_handle(context->timeout);
+    CFRetain(timer);
     [exporter processPendingDBusEvents];
+    if (CFRunLoopTimerIsValid(timer)) {
+        dbus_timeout_handle(context->timeout);
+        [exporter processPendingDBusEvents];
+    }
+    CFRelease(timer);
     [exporter release];
 }
 

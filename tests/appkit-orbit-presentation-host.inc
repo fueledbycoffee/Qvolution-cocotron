@@ -40,6 +40,8 @@ static CFRunLoopTimerRef CFRunLoopTimerCreate(int a,double next,double interval,
 static void CFRunLoopAddTimer(void *loop,CFRunLoopTimerRef timer,int mode) { timers[timerCount++]=timer; }
 static void CFRunLoopTimerInvalidate(CFRunLoopTimerRef timer) { timer->valid=NO; }
 static void CFRelease(void *object) {} // Keep invalidated shim timers inspectable until fixture exit.
+static void *CFRetain(void *object) { return object; }
+static BOOL CFRunLoopTimerIsValid(CFRunLoopTimerRef timer) { return timer->valid; }
 struct FixtureSocket { int fd; unsigned enabled; };
 typedef struct FixtureSocket *CFSocketRef;
 #define kCFSocketReadCallBack 1
@@ -407,6 +409,20 @@ int main(void) {
     CHECK(failureExporter->_orbitProgressFailed && !menu->hidden,"unobserved pending-query allocation failure permanently restores fallback");
     [failureExporter updateWaylandMenuPresentation]; CHECK(!menu->hidden,"progress failure cannot reengage from old ACTIVE/read evidence");
     dbus_connection_close(failureExporter->_connection);
+    // A busy main loop can find a watch deadline due while the bus reply is already readable.
+    X11GlobalMenu *raceExporter=[X11GlobalMenu new];
+    raceExporter->_connection=dbus_bus_get_private(DBUS_BUS_SESSION,&error); dbus_connection_set_exit_on_disconnect(raceExporter->_connection,FALSE);
+    struct FixtureSocket raceSocket={.enabled=kCFSocketReadCallBack}; dbus_connection_get_unix_fd(raceExporter->_connection,&raceSocket.fd); raceExporter->_cfSocket=&raceSocket;
+    dbus_connection_set_timeout_functions(raceExporter->_connection,orbitAddTimeout,orbitRemoveTimeout,orbitToggleTimeout,raceExporter,NULL);
+    raceExporter->_available=YES; raceExporter->_waylandApplicationMenu=YES;
+    pump(raceExporter); // consume NameAcquired so only the watch reply can be readable
+    int raceTimer=timerCount; [raceExporter queryOrbitIntegration:OrbitOwnerWatchQuery]; dbus_connection_flush(raceExporter->_connection);
+    struct pollfd raceReadable={.fd=raceSocket.fd,.events=POLLIN}; poll(&raceReadable,1,5000);
+    CHECK(timerCount==raceTimer+1 && (raceReadable.revents&POLLIN),"owner-watch reply is readable while its deadline timer is pending");
+    if(timerCount==raceTimer+1){ CFRunLoopTimerRef timer=timers[raceTimer]; timer->callback(timer,timer->info); }
+    CHECK(raceExporter->_orbitOwnerWatchReady,"deadline firing before socket dispatch still accepts the already-received owner-watch reply");
+    CHECK(!timers[raceTimer]->valid,"received reply retires its deadline timer");
+    dbus_connection_close(raceExporter->_connection);
     dbus_connection_close(receiver);
     if(failures) return 1;
     puts("PASS: production layout, GNOME/Orbit activation, authenticated readers, state/owner fallback and repeated transitions");
