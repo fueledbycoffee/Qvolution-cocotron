@@ -361,11 +361,13 @@ int VGPathCountNumCoordinates(const uint8_t *segments, int numSegments) {
 
 // Tessellates a path for filling and appends resulting edges to a context.
 
+static void VGPathTessellatePositionsIfNeeded(VGPath *self);
+
 void VGPathFill(VGPath *self, O2AffineTransform pathToSurface,
                 O2Context_builtin *context)
 {
 
-    VGPathTessellateIfNeeded(self);
+    VGPathTessellatePositionsIfNeeded(self);
 
     O2Point p0 = O2PointMake(0, 0);
     int i;
@@ -1257,7 +1259,7 @@ void VGPathAddEdge(VGPath *self, O2Point p0, O2Point p1, O2Point t0, O2Point t1,
     }
 
     // other than implicit close paths (caused by a MOVE_TO) add to path length
-    if (!(endFlags & IMPLICIT_CLOSE_SUBPATH)) {
+    if (!(endFlags & IMPLICIT_CLOSE_SUBPATH) && !self->_positionsOnly) {
         // NOTE: with extremely large coordinates the floating point path length
         // is infinite
         O2Float l = Vector2Length(Vector2Subtract(p1, p0));
@@ -1362,13 +1364,16 @@ BOOL VGPathAddQuadTo(VGPath *self, O2Point p0, O2Point p1, O2Point p2,
                 Vector2Add(Vector2Add(Vector2MultiplyByFloat(p0, u * u),
                                       Vector2MultiplyByFloat(p1, 2.0f * t * u)),
                            Vector2MultiplyByFloat(p2, t * t));
-        O2Point tn = Vector2Add(
-                Vector2Add(Vector2MultiplyByFloat(p0, (-1.0f + t)),
-                           Vector2MultiplyByFloat(p1, (1.0f - 2.0f * t))),
-                Vector2MultiplyByFloat(p2, t));
-        tn = Vector2Normalize(tn);
-        if (Vector2IsZero(tn))
-            tn = tp;
+        O2Point tn = tp;
+        if (!self->_positionsOnly) {
+            tn = Vector2Add(
+                    Vector2Add(Vector2MultiplyByFloat(p0, (-1.0f + t)),
+                               Vector2MultiplyByFloat(p1, (1.0f - 2.0f * t))),
+                    Vector2MultiplyByFloat(p2, t));
+            tn = Vector2Normalize(tn);
+            if (Vector2IsZero(tn))
+                tn = tp;
+        }
 
         VGPathAddEdge(self, pp, pn, tp, tn, prevFlags, 0);
 
@@ -1475,17 +1480,20 @@ BOOL VGPathAddCubicTo(VGPath *self, O2Point p0, O2Point p1, O2Point p2,
                                                              3.0f * t * u * u)),
                            Vector2MultiplyByFloat(p2, 3.0f * t * t * u)),
                 Vector2MultiplyByFloat(p3, t * t * t));
-        O2Point tn = Vector2Add(
-                Vector2Add(
-                        Vector2Add(Vector2MultiplyByFloat(
-                                           p0, (-1.0f + 2.0f * t - t * t)),
-                                   Vector2MultiplyByFloat(p1, (1.0f - 4.0f * t +
-                                                               3.0f * t * t))),
-                        Vector2MultiplyByFloat(p2, (2.0f * t - 3.0f * t * t))),
-                Vector2MultiplyByFloat(p3, t * t));
-        tn = Vector2Normalize(tn);
-        if (Vector2IsZero(tn))
-            tn = tp;
+        O2Point tn = tp;
+        if (!self->_positionsOnly) {
+            tn = Vector2Add(
+                    Vector2Add(
+                            Vector2Add(Vector2MultiplyByFloat(
+                                               p0, (-1.0f + 2.0f * t - t * t)),
+                                       Vector2MultiplyByFloat(p1, (1.0f - 4.0f * t +
+                                                                   3.0f * t * t))),
+                            Vector2MultiplyByFloat(p2, (2.0f * t - 3.0f * t * t))),
+                    Vector2MultiplyByFloat(p3, t * t));
+            tn = Vector2Normalize(tn);
+            if (Vector2IsZero(tn))
+                tn = tp;
+        }
 
         VGPathAddEdge(self, pp, pn, tp, tn, prevFlags, 0);
 
@@ -1507,10 +1515,28 @@ BOOL VGPathAddCubicTo(VGPath *self, O2Point p0, O2Point p1, O2Point p2,
                 and end of segments and subpaths have been flagged, as well as
                 implicit and explicit close subpath segments. */
 
-void VGPathTessellateIfNeeded(VGPath *self) {
-    if (self->_vertexCount > 0)
-        return; // already tessellated
+static void VGPathTessellate(VGPath *self);
 
+void VGPathTessellateIfNeeded(VGPath *self) {
+    if (self->_vertexCount > 0 && !self->_positionsOnly)
+        return; // already tessellated
+    // A fill-only tessellation lacks tangents and lengths; redo it in full.
+    self->_vertexCount = 0;
+    self->_positionsOnly = NO;
+    VGPathTessellate(self);
+}
+
+// Filling reads only vertex positions and flags, so the per-segment curve
+// tangents (a square root each) and path lengths are skipped. Positions use
+// the same expressions, so the edges are the same.
+static void VGPathTessellatePositionsIfNeeded(VGPath *self) {
+    if (self->_vertexCount > 0)
+        return; // already tessellated, with or without tangents
+    self->_positionsOnly = YES;
+    VGPathTessellate(self);
+}
+
+static void VGPathTessellate(VGPath *self) {
     self->m_userMinx = RI_FLOAT_MAX;
     self->m_userMiny = RI_FLOAT_MAX;
     self->m_userMaxx = -RI_FLOAT_MAX;

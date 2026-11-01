@@ -43,6 +43,9 @@
     O2Float m_userMiny;
     O2Float m_userMaxx;
     O2Float m_userMaxy;
+    // Tessellated for VGPathFill only: vertex positions and flags are exact,
+    // curve tangents and path lengths were not computed.
+    BOOL _positionsOnly;
 }
 
 - initWithKGPath: (O2Path *) path;
