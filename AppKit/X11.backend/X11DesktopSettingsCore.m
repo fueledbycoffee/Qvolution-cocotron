@@ -1,4 +1,8 @@
 // Copyright (c) 2026 Qvolution contributors. SPDX-License-Identifier: MIT
+#if defined(__linux__) && !defined(_POSIX_C_SOURCE)
+// clock_gettime for the native -std=c11 fixture build; the guest build sees it already.
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "X11DesktopSettingsCore.h"
 #include <math.h>
 #include <stdlib.h>
