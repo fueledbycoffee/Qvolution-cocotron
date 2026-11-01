@@ -27,6 +27,7 @@ static struct wl_buffer *buffer;
 static unsigned configured, acked, attached, committed;
 static int injected;
 static bool main_thread_reader;
+unsigned long WaylandRequestsMarshalled; /* defined by WaylandLibrary.m in the backend */
 static int native_errno(void) { return errno; }
 static int flush_with_backpressure(struct wl_display *display) {
     // Exercise the production POLLOUT/cancel-read retry path.

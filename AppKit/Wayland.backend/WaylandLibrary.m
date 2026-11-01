@@ -324,10 +324,15 @@ bool WaylandCheckOpcodes(void) {
     return true;
 }
 
+// Requests marshalled so far; the opt-in flush records compare it with the count
+// that had been flushed when the last flush succeeded.
+unsigned long WaylandRequestsMarshalled;
+
 struct wl_proxy *WaylandMarshal(struct wl_proxy *proxy, uint32_t opcode,
                                 const struct wl_interface *interface,
                                 uint32_t flags, union wl_argument *args)
 {
+    __atomic_add_fetch(&WaylandRequestsMarshalled, 1, __ATOMIC_RELEASE);
     return WL.wl_proxy_marshal_array_flags(proxy, opcode, interface,
                                            WL.wl_proxy_get_version(proxy),
                                            flags, args);

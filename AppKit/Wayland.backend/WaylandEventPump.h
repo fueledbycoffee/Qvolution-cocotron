@@ -22,10 +22,15 @@ typedef struct {
     int boundaryFD;
     unsigned pendingPongs;
     unsigned long reads, pingEvents, wakes;
+    /* Flush bookkeeping, shared by the owner thread and the worker. */
+    unsigned long flushes, flushFailures, flushedRequests, mainActivities, lastActivity;
     double oldestPing;
     void (*wake)(void *);
     void *info;
 } WaylandEventPump;
+
+/* Counts every request marshalled through WaylandMarshal (WaylandLibrary.m). */
+extern unsigned long WaylandRequestsMarshalled;
 
 static double WaylandBoundaryMilliseconds(void) {
     struct timespec ts;
@@ -63,9 +68,33 @@ static int WaylandPingDispatch(const void *implementation, void *proxy,
     return 0;
 }
 
+/* Every flush goes through here so an opt-in record shows its result: rc is
+ * wl_display_flush's, errno is the native Linux errno (EAGAIN is 11), and
+ * unflushed is the number of requests marshalled since the last flush that
+ * returned success. */
+static int WaylandRecordedFlush(WaylandEventPump *pump, const char *site, int *errOut) {
+    struct WaylandLibrary *wl = pump->library;
+    unsigned long marshalled = __atomic_load_n(&WaylandRequestsMarshalled, __ATOMIC_ACQUIRE);
+    int rc = wl->wl_display_flush(pump->display);
+    int err = rc < 0 ? wl->native_errno() : 0;
+    if (errOut) *errOut = err;
+    unsigned long n = __atomic_add_fetch(&pump->flushes, 1, __ATOMIC_RELAXED);
+    unsigned long before = __atomic_load_n(&pump->flushedRequests, __ATOMIC_RELAXED);
+    if (rc < 0) __atomic_add_fetch(&pump->flushFailures, 1, __ATOMIC_RELAXED);
+    else __atomic_store_n(&pump->flushedRequests, marshalled, __ATOMIC_RELAXED);
+    if (pump->boundaries)
+        dprintf(pump->boundaryFD,
+                "QV_WAYLAND flush pid=%d display=%p site=%s rc=%d errno=%d n=%lu failures=%lu requests=%lu unflushed_before=%lu thread=%p\n",
+                getpid(), pump->display, site, rc, err, n,
+                __atomic_load_n(&pump->flushFailures, __ATOMIC_RELAXED), marshalled,
+                marshalled - before, (void *)pthread_self());
+    return rc;
+}
+
 static int WaylandPumpFlush(WaylandEventPump *pump) {
     struct WaylandLibrary *wl = pump->library;
-    if (wl->wl_display_flush(pump->display) >= 0) {
+    int err = 0;
+    if (WaylandRecordedFlush(pump, "worker", &err) >= 0) {
         if (pump->boundaries && pump->pendingPongs) {
             dprintf(pump->boundaryFD,
                     "QV_WAYLAND pong_sent pid=%d count=%u max_latency_ms=%.3f\n",
@@ -77,7 +106,7 @@ static int WaylandPumpFlush(WaylandEventPump *pump) {
     }
     // Linux libwayland sets native errno, not Darwin's errno (EAGAIN is 35).
     // /usr/include/asm-generic/errno-base.h defines Linux EAGAIN as 11.
-    return wl->native_errno() == 11 ? 1 : -1;
+    return err == 11 ? 1 : -1;
 }
 
 static int WaylandPumpDispatch(WaylandEventPump *pump) {
@@ -113,7 +142,24 @@ static void *WaylandPumpRun(void *data) {
              .events = POLLIN | (flush ? POLLOUT : 0)},
             {.fd = pump->stop[0], .events = POLLIN}
         };
-        int result = poll(fds, 2, -1);
+        int result;
+        unsigned long idle = 0;
+        // With records on, wake once a second to log the idle state; the read
+        // intent stays registered, so behaviour is otherwise unchanged.
+        while ((result = poll(fds, 2, pump->boundaries ? 1000 : -1)) == 0) {
+            struct pollfd probe = {.fd = fds[0].fd, .events = POLLIN | POLLOUT};
+            int probed = poll(&probe, 1, 0);
+            dprintf(pump->boundaryFD,
+                    "QV_WAYLAND idle_state pid=%d display=%p idle_s=%lu probe=%d revents=%d flushes=%lu flush_failures=%lu requests=%lu unflushed=%lu main_activities=%lu last_activity=%lu reads=%lu\n",
+                    getpid(), pump->display, ++idle, probed, probe.revents,
+                    __atomic_load_n(&pump->flushes, __ATOMIC_RELAXED),
+                    __atomic_load_n(&pump->flushFailures, __ATOMIC_RELAXED),
+                    __atomic_load_n(&WaylandRequestsMarshalled, __ATOMIC_ACQUIRE),
+                    __atomic_load_n(&WaylandRequestsMarshalled, __ATOMIC_ACQUIRE) -
+                        __atomic_load_n(&pump->flushedRequests, __ATOMIC_RELAXED),
+                    __atomic_load_n(&pump->mainActivities, __ATOMIC_RELAXED),
+                    __atomic_load_n(&pump->lastActivity, __ATOMIC_RELAXED), pump->reads);
+        }
         if (pump->boundaries)
             dprintf(pump->boundaryFD,
                     "QV_WAYLAND fd_ready pid=%d display=%p queue=ping mode=worker fd=%d result=%d revents=%d stop=%d\n",
@@ -126,7 +172,12 @@ static void *WaylandPumpRun(void *data) {
             if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) goto failed;
             continue;
         }
-        if (wl->wl_display_read_events(pump->display) < 0) goto failed;
+        int readRC = wl->wl_display_read_events(pump->display);
+        if (pump->boundaries)
+            dprintf(pump->boundaryFD,
+                    "QV_WAYLAND read_events_rc pid=%d display=%p rc=%d errno=%d\n",
+                    getpid(), pump->display, readRC, readRC < 0 ? wl->native_errno() : 0);
+        if (readRC < 0) goto failed;
         ++pump->reads;
         if (WaylandPumpDispatch(pump) < 0)
             goto failed;

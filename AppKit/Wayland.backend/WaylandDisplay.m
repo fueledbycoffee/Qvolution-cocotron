@@ -373,8 +373,15 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
     // The first roundtrip delivers the globals; the second one the initial
     // events of the objects bound meanwhile (output modes, seat capabilities).
-    if (WL.wl_display_roundtrip(_wlDisplay) < 0 ||
-        WL.wl_display_roundtrip(_wlDisplay) < 0)
+    int roundtrip1 = WL.wl_display_roundtrip(_wlDisplay);
+    int roundtripErrno1 = roundtrip1 < 0 ? WL.native_errno() : 0;
+    int roundtrip2 = roundtrip1 < 0 ? -1 : WL.wl_display_roundtrip(_wlDisplay);
+    if (_eventPump.boundaries)
+        dprintf(_eventPump.boundaryFD,
+                "QV_WAYLAND roundtrip pid=%d display=%p first=%d first_errno=%d second=%d second_errno=%d\n",
+                getpid(), _wlDisplay, roundtrip1, roundtripErrno1, roundtrip2,
+                roundtrip2 < 0 ? WL.native_errno() : 0);
+    if (roundtrip1 < 0 || roundtrip2 < 0)
     {
         NSLog(@"Wayland backend: the compositor connection failed during setup "
               @"(error %d), trying the next backend",
@@ -547,6 +554,8 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                 "QV_WAYLAND main_stall pid=%d duration_ms=%.3f mode=%s activity=%lu\n",
                 getpid(), elapsed, mode, (unsigned long)_lastBoundaryActivity);
     }
+    __atomic_add_fetch(&_eventPump.mainActivities, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&_eventPump.lastActivity, (unsigned long)activity, __ATOMIC_RELAXED);
     if (_lastBoundaryMode) CFRelease(_lastBoundaryMode);
     _lastBoundaryMode = CFRunLoopCopyCurrentMode(_eventTarget.loop);
     _lastBoundaryTime = now;
@@ -555,7 +564,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
 - (void) flush {
     if (_wlDisplay != NULL)
-        WL.wl_display_flush(_wlDisplay);
+        WaylandRecordedFlush(&_eventPump, "main", NULL);
 }
 
 - (void) connectionFailed {
@@ -599,7 +608,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         [self connectionFailed];
 
     [self runAfterDispatchBlocks];
-    WL.wl_display_flush(_wlDisplay);
+    WaylandRecordedFlush(&_eventPump, "process_events", NULL);
 }
 
 - (NSEvent *) nextEventMatchingMask: (NSEventMask) mask
@@ -641,6 +650,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     args[2].u = version;
     args[3].o = NULL;
 
+    __atomic_add_fetch(&WaylandRequestsMarshalled, 1, __ATOMIC_RELEASE);
     struct wl_proxy *proxy = WL.wl_proxy_marshal_array_flags(
             _registry, WP_REGISTRY_BIND, interface, version, 0, args);
     if (proxy == NULL) {
