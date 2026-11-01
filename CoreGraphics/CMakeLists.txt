@@ -150,19 +150,13 @@ add_framework(CoreGraphics
 set_property(TARGET CoreGraphics APPEND_STRING PROPERTY
 	LINK_FLAGS " -Wl,-reexport_library,${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCoreGraphics.dylib -Wl,-rpath,/usr/lib/swift ")
 
-# Optional source-built supplement for the x86_64 Swift imports found by the
-# application audit. Darwin stdlib/overlay modules must come from the matching
-# Swift compiler build. Never synthesize Swift ABI metadata in C or assembly.
-set(DARLING_COREGRAPHICS_SWIFTC "" CACHE FILEPATH "Darwin-capable Swift compiler")
-set(DARLING_COREGRAPHICS_SWIFT_RESOURCE_DIR "" CACHE PATH "Darwin Swift resource directory")
-set(DARLING_COREGRAPHICS_SWIFT_MODULES_DIR "" CACHE PATH "Matching Darwin overlay modules")
-if(DARLING_COREGRAPHICS_SWIFTC AND BUILD_TARGET_64BIT AND APPLE_ARCH_64BIT STREQUAL "x86_64")
-    if(NOT DARLING_COREGRAPHICS_SWIFT_RESOURCE_DIR OR NOT DARLING_COREGRAPHICS_SWIFT_MODULES_DIR)
-        message(FATAL_ERROR "CoreGraphics Swift imports require matching Darwin Swift modules")
-    endif()
+# The x86_64 import supplement is required, with compiler-generated Swift ABI.
+include("${CMAKE_CURRENT_SOURCE_DIR}/SwiftToolchain.cmake")
+if(BUILD_TARGET_64BIT AND APPLE_ARCH_64BIT STREQUAL "x86_64")
     set(import_object "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports/CoreGraphicsImports.o")
+    set(import_module "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports/CoreGraphics.swiftmodule")
     file(GLOB_RECURSE import_headers "${CMAKE_CURRENT_SOURCE_DIR}/include/CoreGraphics/*.h")
-    add_custom_command(OUTPUT "${import_object}"
+    add_custom_command(OUTPUT "${import_object}" "${import_module}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports"
         COMMAND "${DARLING_COREGRAPHICS_SWIFTC}" -frontend -c
             "${CMAKE_CURRENT_SOURCE_DIR}/SwiftImportSupport.swift"
@@ -175,6 +169,7 @@ if(DARLING_COREGRAPHICS_SWIFTC AND BUILD_TARGET_64BIT AND APPLE_ARCH_64BIT STREQ
             -I "${CMAKE_CURRENT_SOURCE_DIR}/include"
             -Xcc "-fmodule-map-file=${CMAKE_SOURCE_DIR}/src/external/swift/overlays/shims/overlay-shims.modulemap"
             -Xcc "-I${CMAKE_SOURCE_DIR}/src/frameworks/CoreServices/include"
+            -emit-module-path "${import_module}"
             -o "${import_object}"
         DEPENDS SwiftImportSupport.swift ${import_headers}
         VERBATIM)
