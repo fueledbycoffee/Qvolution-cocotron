@@ -125,6 +125,69 @@ static BOOL clampDamage(CGRect rect, size_t width, size_t height, size_t box[4])
     return YES;
 }
 
+static BOOL hasBufferStorage(void) {
+    const char *version = (const char *)glGetString(GL_VERSION);
+    char *end = NULL;
+    long major = version ? strtol(version, &end, 10) : 0;
+    long minor = end && *end == '.' ? strtol(end + 1, NULL, 10) : 0;
+    if (major > 4 || (major == 4 && minor >= 4))
+        return YES;
+    GLint extensions = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &extensions);
+    for (GLint i = 0; i < extensions; ++i) {
+        const char *name = (const char *)glGetStringi(GL_EXTENSIONS, i);
+        if (name && strcmp(name, "GL_ARB_buffer_storage") == 0)
+            return YES;
+    }
+    return NO;
+}
+
+// The next staging buffer of a three-buffer ring, bound to GL_PIXEL_UNPACK_BUFFER
+// and safe to write (its last upload has completed), or NULL to upload from
+// client memory. Buffers are reallocated when the surface size changes.
+- (uint8_t *) stagingBufferForSize: (size_t) size {
+    if (_uploadStaging == 0)
+        _uploadStaging = hasBufferStorage() ? 1 : -1;
+    if (_uploadStaging < 0 || size > PTRDIFF_MAX)
+        return NULL;
+    if (_uploadBufferSize != size) {
+        for (unsigned i = 0; i < 3; ++i) {
+            if (_uploadFences[i]) glDeleteSync(_uploadFences[i]);
+            _uploadFences[i] = NULL; _uploadMaps[i] = NULL;
+        }
+        if (_uploadBuffers[0]) glDeleteBuffers(3, _uploadBuffers);
+        glGenBuffers(3, _uploadBuffers);
+        const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+        for (unsigned i = 0; i < 3; ++i) {
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, _uploadBuffers[i]);
+            glBufferStorage(GL_PIXEL_UNPACK_BUFFER, (GLsizeiptr)size, NULL, flags);
+            _uploadMaps[i] = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, (GLsizeiptr)size, flags);
+            if (!_uploadMaps[i]) {
+                NSLog(@"AppKit EGL: no persistent staging buffer (GL error 0x%x); uploading from the surface", glGetError());
+                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+                glDeleteBuffers(3, _uploadBuffers);
+                memset(_uploadBuffers, 0, sizeof(_uploadBuffers));
+                memset(_uploadMaps, 0, sizeof(_uploadMaps));
+                _uploadBufferSize = 0; _uploadStaging = -1;
+                return NULL;
+            }
+        }
+        _uploadBufferSize = size; _uploadNext = 0;
+    }
+    unsigned i = _uploadNext;
+    _uploadNext = (_uploadNext + 1) % 3;
+    if (_uploadFences[i]) {
+        // Normally long signalled: the ring is three frames deep and frames are paced.
+        GLenum waited = glClientWaitSync(_uploadFences[i], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
+        glDeleteSync(_uploadFences[i]);
+        _uploadFences[i] = NULL;
+        if (waited != GL_ALREADY_SIGNALED && waited != GL_CONDITION_SATISFIED)
+            return NULL;
+    }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, _uploadBuffers[i]);
+    return _uploadMaps[i];
+}
+
 - (uint64_t) lastUploadBytes {
     return _lastUploadBytes;
 }
@@ -178,25 +241,12 @@ static BOOL clampDamage(CGRect rect, size_t width, size_t height, size_t box[4])
     CGRect all = CGRectMake(0, 0, width, height);
     const CGRect *rects = whole ? &all : damage;
     unsigned rectCount = whole ? 1 : count, uploaded = 0;
-    // Copy the damaged rows into a mapped staging buffer laid out like the
-    // surface; the texture update then reads it asynchronously. Uploading from
-    // client memory instead makes the driver copy synchronously inside
+    // Copy the damaged rows into a persistently mapped staging buffer laid out
+    // like the surface; the texture update then reads it asynchronously.
+    // Uploading from client memory makes the driver copy synchronously inside
     // glTexSubImage2D (about 7 ms for 1932x1144 on an RTX 4070).
-    size_t needed = stride * height;
     const uint8_t *base = source;
-    if (!_uploadBuffers[0])
-        glGenBuffers(3, _uploadBuffers);
-    if (_uploadBufferSize != needed) {
-        for (unsigned i = 0; i < 3; ++i) {
-            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, _uploadBuffers[i]);
-            glBufferData(GL_PIXEL_UNPACK_BUFFER, (GLsizeiptr)needed, NULL, GL_STREAM_DRAW);
-        }
-        _uploadBufferSize = needed;
-    }
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, _uploadBuffers[_uploadNext]);
-    _uploadNext = (_uploadNext + 1) % 3;
-    uint8_t *staging = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, (GLsizeiptr)needed,
-                                        GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+    uint8_t *staging = [self stagingBufferForSize:stride * height];
     if (staging) {
         for (unsigned i = 0; i < rectCount; ++i) {
             size_t box[4];
@@ -209,12 +259,8 @@ static BOOL clampDamage(CGRect rect, size_t width, size_t height, size_t box[4])
                 for (size_t y = 0; y < box[3]; ++y)
                     memcpy(staging + offset + y * stride, source + offset + y * stride, rowBytes);
         }
-        // GL_FALSE means the store was lost while mapped; upload from the surface instead.
-        if (glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER))
-            base = NULL;
+        base = NULL; // offsets into the bound GL_PIXEL_UNPACK_BUFFER
     }
-    if (base)
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     // Texture row 0 is the surface's top row, as in the CPU storage.
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)(stride / 4));
@@ -229,6 +275,10 @@ static BOOL clampDamage(CGRect rect, size_t width, size_t height, size_t box[4])
         glTexSubImage2D(GL_TEXTURE_2D, 0, (GLint)box[0], (GLint)box[1], (GLsizei)box[2], (GLsizei)box[3],
                         GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, base);
         bytes += (uint64_t)box[2] * box[3] * 4; ++uploaded;
+    }
+    if (staging) {
+        unsigned used = (_uploadNext + 2) % 3;
+        _uploadFences[used] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
