@@ -133,6 +133,11 @@ static void socketCallback(CFSocketRef s, CFSocketCallBackType type,
         _cfSocket = CFSocketCreateWithNative(
                 kCFAllocatorDefault, _fileDescriptor, kCFSocketReadCallBack,
                 socketCallback, &context);
+        if (_cfSocket != NULL) {
+            // The descriptor belongs to Xlib, which closes it in XCloseDisplay.
+            CFSocketSetSocketFlags(_cfSocket, CFSocketGetSocketFlags(_cfSocket) &
+                                                      ~kCFSocketCloseOnInvalidate);
+        }
         _source =
                 CFSocketCreateRunLoopSource(kCFAllocatorDefault, _cfSocket, 0);
         CFRunLoopAddSource(CFRunLoopGetMain(), _source, kCFRunLoopCommonModes);
@@ -183,16 +188,23 @@ static void socketCallback(CFSocketRef s, CFSocketCallBackType type,
     if (_xim)
         XCloseIM(_xim);
 
-    if (_display)
-        XCloseDisplay(_display);
 #ifdef DARLING
+    // The descriptor belongs to Xlib and XCloseDisplay closes it below, so the
+    // socket must stop watching it first and must not close it a second time
+    // (it could by then belong to something else).
     if (_source != NULL) {
         CFRunLoopRemoveSource(CFRunLoopGetMain(), _source, kCFRunLoopCommonModes);
         CFRelease(_source);
     }
-    if (_cfSocket != NULL)
+    if (_cfSocket != NULL) {
+        CFSocketSetSocketFlags(_cfSocket, CFSocketGetSocketFlags(_cfSocket) &
+                                                  ~kCFSocketCloseOnInvalidate);
+        CFSocketInvalidate(_cfSocket);
         CFRelease(_cfSocket);
+    }
 #endif
+    if (_display)
+        XCloseDisplay(_display);
 
     [_windowsByID release];
     [_buttonClickCounts release];
