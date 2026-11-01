@@ -82,6 +82,7 @@ const NSViewFullScreenModeOptionKey NSFullScreenModeApplicationPresentationOptio
 - (void) _updateLayerVisibility;
 - (void) _removeLayerFromSuperlayer;
 - (void) _createLayersInTreeIfNeeded;
+- (void) _displayRectIgnoringOpacity: (NSRect) rect;
 @end
 
 @interface _NSViewDisplayLinkTarget : NSObject {
@@ -2146,6 +2147,7 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
     if (_layer == nil) {
         _layer = [[self makeBackingLayer] retain];
         [_layer setOpacity: _alphaValue];
+        [_layer setMasksToBounds:[self wantsDefaultClipping]];
         [_layer setDelegate: (id)self];
         [_layer setNeedsDisplay];
         configureLayerGeometry(self);
@@ -2668,7 +2670,6 @@ static NSView *viewBeingPrinted = nil;
 }
 
 - (void) display {
-    [_layer setNeedsDisplay];
     [self displayRect: [self visibleRect]];
 }
 
@@ -2771,6 +2772,11 @@ static NSView *viewBeingPrinted = nil;
 }
 
 - (void) displayRectIgnoringOpacity: (NSRect) rect {
+    if (_layer != nil && viewBeingPrinted == nil) [self setNeedsDisplay:YES];
+    [self _displayRectIgnoringOpacity:rect];
+}
+
+- (void) _displayRectIgnoringOpacity: (NSRect) rect {
     NSRect visibleRect = [self visibleRect];
 
     rect = NSIntersectionRect(rect, visibleRect);
@@ -2842,7 +2848,7 @@ static NSView *viewBeingPrinted = nil;
                 check = NSIntersectionRect(check, [child bounds]);
 
                 if (!NSIsEmptyRect(check))
-                    [child displayRectIgnoringOpacity: check];
+                    [child _displayRectIgnoringOpacity: check];
             }
         }
 
@@ -3310,6 +3316,7 @@ static CGFloat backingScaleFactor(NSView *view) {
         return;
     }
     NSRect bounds = [self bounds];
+    CGAffineTransform viewTransform = [self transformToLayer];
     CGFloat scale = [layer contentsScale];
     CGFloat w = ceil(bounds.size.width * scale), h = ceil(bounds.size.height * scale);
     if (!isfinite(w) || !isfinite(h) || !isfinite(scale) || scale <= 0 ||
@@ -3326,7 +3333,7 @@ static CGFloat backingScaleFactor(NSView *view) {
         [[self effectiveAppearance] performAsCurrentDrawingAppearance:^{
             [self _lockFocusInContext:context];
             @try {
-                CGAffineTransform transform = CGAffineTransformConcat([self transformToLayer],
+                CGAffineTransform transform = CGAffineTransformConcat(viewTransform,
                     CGAffineTransformMakeScale(scale, scale));
                 CGContextSetCTM(bitmap, transform);
                 CGContextClipToRect(bitmap, bounds);

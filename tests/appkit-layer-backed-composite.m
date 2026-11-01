@@ -83,6 +83,10 @@ int main(int argc,char **argv) {
             [context flush];
         }
         expect(view->draws==1 && custom->draws==1,"move/fade never re-runs drawRect");
+        [host setBoundsOrigin:NSMakePoint(10,0)]; [context render];
+        pixel(15+(frames-1)%100,25,scale,128,0,0,128,"view bounds scrolling composites cached subviews");
+        expect(view->draws==1 && custom->draws==1,"scroll never re-runs drawRect");
+        [host setBoundsOrigin:NSZeroPoint]; [context render];
         expect(cpu->draws>cpuBefore,"non-layer-backed CPU view still draws");
         O2Surface *surface=[(O2Context *)[[w platformWindow] cgContext] surface];
         const unsigned char *bytes=O2SurfaceGetPixelBytes(surface);
@@ -90,6 +94,8 @@ int main(int argc,char **argv) {
         expect(p[0]>250 && p[1]<3 && p[2]<3,"layer content never painted into blue CPU backing");
         [view setNeedsDisplayInRect:NSMakeRect(0,0,2,2)]; [view displayIfNeeded]; [context render];
         expect(view->draws==2,"view invalidation redraws its layer once");
+        [view displayRectIgnoringOpacity:[view bounds]];
+        expect(view->draws==3,"explicit displayRect forces a raster refresh");
         [outer setMasksToBounds:NO]; [inner setMasksToBounds:NO]; [context render];
         pixel(270,140,scale,0,255,0,255,"unmasked child visible on next composite");
         expect(glGetError()==GL_NO_ERROR,"no GL errors");
