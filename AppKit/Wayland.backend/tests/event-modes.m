@@ -2,6 +2,7 @@
  * Run under Darling on a compositor; all code and inspected state are ours. */
 #import <AppKit/AppKit.h>
 #import <AppKit/NSDisplay.h>
+#import <CoreGraphics/CGWindowPrivate.h>
 #include <stdio.h>
 
 static unsigned exposures;
@@ -9,7 +10,7 @@ static BOOL mapped;
 @interface ModeWindow : NSWindow
 @end
 @implementation ModeWindow
-- (void) platformWindowExposed: (id) platform inRect: (NSRect) rect {
+- (void) platformWindowExposed: (CGWindow *) platform inRect: (NSRect) rect {
     ++exposures;
     [super platformWindowExposed: platform inRect: rect];
 }
