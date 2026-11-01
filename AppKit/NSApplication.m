@@ -1690,6 +1690,25 @@ static void _hookXcodeDevTools(void)
     }
 }
 
+// -beginSheet:modalForWindow:modalDelegate:didEndSelector:contextInfo: documents
+// the delegate and the selector as optional, so a sheet that has no callback
+// ends without one. Looking up a NULL selector on a nil or real delegate raises.
+static void NSSheetPerformDidEnd(NSSheetContext *context, NSWindow *sheet,
+                                 NSModalResponse returnCode)
+{
+    id delegate = [context modalDelegate];
+    SEL didEndSelector = [context didEndSelector];
+
+    if (delegate == nil || didEndSelector == NULL)
+        return;
+
+    IMP function = [delegate methodForSelector: didEndSelector];
+    if (function != NULL)
+        ((void (*)(id, SEL, id, NSModalResponse, void *)) function)(
+                delegate, didEndSelector, sheet, returnCode,
+                [context contextInfo]);
+}
+
 - (void) endSheet: (NSWindow *) sheet returnCode: (NSModalResponse) returnCode {
     NSSheetContext *context = [sheet _sheetContext];
     if (context != nil) {
@@ -1698,12 +1717,7 @@ static void _hookXcodeDevTools(void)
             [session stopModalWithCode: NSRunStoppedResponse];
         }
 
-        IMP function = [[context modalDelegate]
-                methodForSelector: [context didEndSelector]];
-        if (function != NULL) {
-            ((void(*)(id, SEL, id, NSModalResponse, void *))function)([context modalDelegate], [context didEndSelector], sheet,
-                     returnCode, [context contextInfo]);
-        }
+        NSSheetPerformDidEnd(context, sheet, returnCode);
         [sheet _setSheetContext: nil];
         [sheet orderOut: nil];
         return;
@@ -1713,18 +1727,13 @@ static void _hookXcodeDevTools(void)
         while (--count >= 0) {
             NSWindow *check = _windows[count];
             NSSheetContext *context = [check _sheetContext];
-            IMP function;
 
             if ([context sheet] == sheet) {
                 [[context retain] autorelease];
 
                 [check _detachSheetContextAnimateAndOrderOut];
 
-                function = [[context modalDelegate]
-                        methodForSelector: [context didEndSelector]];
-                if (function != NULL)
-                    ((void(*)(id, SEL, id, NSModalResponse, void *))function)([context modalDelegate], [context didEndSelector],
-                             sheet, returnCode, [context contextInfo]);
+                NSSheetPerformDidEnd(context, sheet, returnCode);
 
                 return;
             }
