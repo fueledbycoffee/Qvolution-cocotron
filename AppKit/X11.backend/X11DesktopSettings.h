@@ -6,6 +6,7 @@
 @interface X11DesktopSettings : NSObject {
     QVDesktopShared _shared;
     DBusConnection *_connection;
+    dbus_uint32_t _readAllSerial;
     CFSocketRef _socket;
     CFRunLoopSourceRef _source;
     // Cached QVDesktopAppearance index, tagged with the generation it was

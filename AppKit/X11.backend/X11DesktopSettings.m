@@ -14,6 +14,7 @@
 @end
 @interface X11DesktopSettings ()
 - (void)processPendingEvents;
+- (void)requestState;
 - (void)disconnect;
 @end
 static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFDataRef address, const void *data, void *info) {
@@ -42,27 +43,26 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
     [defaults addObserver:self forKeyPath:@"QvolutionFollowSystemAppearance" options:0 context:NULL];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(invalidateAppearance)
         name:NSUserDefaultsDidChangeNotification object:defaults];
-    // Avoid libdbus autolaunch (and any display-dependent side effects) without a bus.
-    if (!getenv("DBUS_SESSION_BUS_ADDRESS")) return self;
-    DBusError error; dbus_error_init(&error);
-    _connection = dbus_bus_get_private(DBUS_BUS_SESSION, &error);
-    if (dbus_error_is_set(&error)) dbus_error_free(&error);
+    _connection = QVDesktopOpenSessionBus(QV_DESKTOP_BUS_TIMEOUT_MS);
     if (!_connection) return self;
-    dbus_connection_set_exit_on_disconnect(_connection, FALSE);
+    // Without an error argument AddMatch does not wait for the bus; the
+    // ReadAll below flushes both rules ahead of itself.
     dbus_bus_add_match(_connection, "type='signal',sender='org.freedesktop.portal.Desktop',"
         "interface='org.freedesktop.portal.Settings',member='SettingChanged',"
-        "path='/org/freedesktop/portal/desktop'", &error);
-    if (dbus_error_is_set(&error)) { dbus_error_free(&error); [self disconnect]; return self; }
+        "path='/org/freedesktop/portal/desktop'", NULL);
+    dbus_bus_add_match(_connection, "type='signal',sender='org.freedesktop.DBus',"
+        "interface='org.freedesktop.DBus',member='NameOwnerChanged',"
+        "path='/org/freedesktop/DBus',arg0='org.freedesktop.portal.Desktop'", NULL);
+    DBusError error; dbus_error_init(&error);
     DBusMessage *request=QVDesktopReadRequest(), *reply=NULL;
-    if (request) reply=dbus_connection_send_with_reply_and_block(_connection,request,300,&error);
+    if (request) reply=dbus_connection_send_with_reply_and_block(_connection,request,QV_DESKTOP_BUS_TIMEOUT_MS,&error);
     if (request) dbus_message_unref(request);
-    if (dbus_error_is_set(&error)) dbus_error_free(&error);
-    if (!reply || !dbus_message_has_signature(reply,"a{sa{sv}}")) {
-        if (reply) dbus_message_unref(reply);
-        [self disconnect]; return self;
-    }
-    QVDesktopReadAll(&initial,reply); dbus_message_unref(reply);
-    QVDesktopSharedStore(&_shared,&initial);
+    dbus_error_free(&error);
+    if (reply && QVDesktopReadAll(&initial,reply)) QVDesktopSharedStore(&_shared,&initial);
+    // A portal that is slow or not yet running at login is not fatal: keep
+    // the connection, ask again without blocking, and again when it appears.
+    else if (!reply) [self requestState];
+    if (reply) dbus_message_unref(reply);
     int fd=-1;
     if (!dbus_connection_get_unix_fd(_connection,&fd)) { [self disconnect]; return self; }
     CFSocketContext context={.info=self};
@@ -76,6 +76,14 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
     // Drain them on the main loop, which owns every later state change.
     dispatch_async(dispatch_get_main_queue(), ^{ [self processPendingEvents]; });
     return self;
+}
+// Asks for the whole state without waiting; processPendingEvents applies the reply.
+- (void)requestState {
+    DBusMessage *request=QVDesktopReadRequest();
+    if (!request) return;
+    dbus_uint32_t serial=0;
+    if (dbus_connection_send(_connection,request,&serial)) _readAllSerial=serial;
+    dbus_message_unref(request);
 }
 - (void)disconnect {
     if (_source) { CFRunLoopSourceInvalidate(_source); CFRelease(_source); _source=NULL; }
@@ -103,8 +111,17 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
         // Only this private connection's authenticated broadcast match is used.
         // Reject unicast messages, which can bypass a bus match rule.
         const char *sender=dbus_message_get_sender(message);
-        if (sender && dbus_message_is_signal(message,"org.freedesktop.portal.Settings","SettingChanged")) {
-            if (!dbus_message_get_destination(message)) changed |= QVDesktopChanged(&next,message);
+        int type=dbus_message_get_type(message);
+        if (!sender) ;
+        else if (type==DBUS_MESSAGE_TYPE_SIGNAL && !dbus_message_get_destination(message)) {
+            if (dbus_message_is_signal(message,"org.freedesktop.portal.Settings","SettingChanged"))
+                changed |= QVDesktopChanged(&next,message);
+            else if (QVDesktopPortalAppeared(message)) [self requestState];
+        } else if (_readAllSerial && dbus_message_get_reply_serial(message)==_readAllSerial &&
+                   (type==DBUS_MESSAGE_TYPE_METHOD_RETURN || type==DBUS_MESSAGE_TYPE_ERROR)) {
+            // The bus forwards only replies to calls this connection made.
+            _readAllSerial=0;
+            if (type==DBUS_MESSAGE_TYPE_METHOD_RETURN) changed |= QVDesktopReadAll(&next,message);
         }
         dbus_message_unref(message);
     }

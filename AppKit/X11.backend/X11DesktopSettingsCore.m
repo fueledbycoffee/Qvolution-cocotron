@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Qvolution contributors. SPDX-License-Identifier: MIT
 #include "X11DesktopSettingsCore.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 void QVDesktopStateInit(QVDesktopState *s) {
@@ -106,6 +107,39 @@ DBusMessage *QVDesktopReadRequest(void) {
     if (!ok) { dbus_message_unref(m); return NULL; }
     dbus_message_set_auto_start(m, FALSE);
     return m;
+}
+
+DBusConnection *QVDesktopOpenSessionBus(int timeout) {
+    // dbus_bus_get would autolaunch without an address and send an unbounded Hello.
+    const char *address = getenv("DBUS_SESSION_BUS_ADDRESS");
+    if (!address || !address[0]) return NULL;
+    DBusError error; dbus_error_init(&error);
+    DBusConnection *bus = dbus_connection_open_private(address, &error);
+    if (!bus) { dbus_error_free(&error); return NULL; }
+    dbus_connection_set_exit_on_disconnect(bus, FALSE);
+    DBusMessage *hello = dbus_message_new_method_call(DBUS_SERVICE_DBUS, DBUS_PATH_DBUS, DBUS_INTERFACE_DBUS, "Hello");
+    DBusMessage *reply = hello ? dbus_connection_send_with_reply_and_block(bus, hello, timeout, &error) : NULL;
+    if (hello) dbus_message_unref(hello);
+    dbus_error_free(&error);
+    DBusMessageIter value; const char *name = NULL;
+    if (reply && dbus_message_has_signature(reply, "s") && dbus_message_iter_init(reply, &value))
+        dbus_message_iter_get_basic(&value, &name);
+    bool registered = name && dbus_bus_set_unique_name(bus, name);
+    if (reply) dbus_message_unref(reply);
+    if (registered) return bus;
+    dbus_connection_close(bus); dbus_connection_unref(bus);
+    return NULL;
+}
+
+bool QVDesktopPortalAppeared(DBusMessage *message) {
+    if (!dbus_message_is_signal(message, DBUS_INTERFACE_DBUS, "NameOwnerChanged") ||
+        !dbus_message_has_sender(message, DBUS_SERVICE_DBUS) ||
+        !dbus_message_has_signature(message, "sss")) return false;
+    DBusMessageIter v; const char *name, *previous, *owner;
+    dbus_message_iter_init(message, &v); dbus_message_iter_get_basic(&v, &name);
+    dbus_message_iter_next(&v); dbus_message_iter_get_basic(&v, &previous);
+    dbus_message_iter_next(&v); dbus_message_iter_get_basic(&v, &owner);
+    return !strcmp(name, "org.freedesktop.portal.Desktop") && owner[0];
 }
 
 unsigned QVDesktopAppearance(const QVDesktopState *s, bool follow, bool requiresAqua, const char *override) {

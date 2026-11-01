@@ -26,5 +26,12 @@ bool QVDesktopApply(QVDesktopState *state, const char *space, const char *key, D
 bool QVDesktopReadAll(QVDesktopState *state, DBusMessage *message);
 bool QVDesktopChanged(QVDesktopState *state, DBusMessage *message);
 DBusMessage *QVDesktopReadRequest(void);
+// libdbus waits 25 s by default; display initialization must not.
+#define QV_DESKTOP_BUS_TIMEOUT_MS 300
+// The session bus named by DBUS_SESSION_BUS_ADDRESS, registered with a
+// bounded Hello. NULL without an address (no autolaunch) or on failure.
+DBusConnection *QVDesktopOpenSessionBus(int timeoutMilliseconds);
+// A NameOwnerChanged broadcast saying the portal service now has an owner.
+bool QVDesktopPortalAppeared(DBusMessage *message);
 // 0 Aqua, 1 DarkAqua, 2 high-contrast Aqua, 3 high-contrast DarkAqua.
 unsigned QVDesktopAppearance(const QVDesktopState *state, bool follow, bool requiresAqua, const char *override);

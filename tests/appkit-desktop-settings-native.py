@@ -10,6 +10,9 @@ root=Path(__file__).resolve().parents[1]
 source=(root/'AppKit/X11.backend/X11DesktopSettings.m').read_text()
 start=source.index('- (void)processPendingEvents {');end=source.index('\n- (NSAppearance *)systemAppearance',start)
 method=source[start:end]
+def production(signature):
+ begin=source.index(signature);return source[begin:source.index('\n}\n',begin)+3]
+method+='\n'+production('- (void)requestState {')+production('- (void)invalidateAppearance {')
 harness=r'''
 #include <dbus/dbus.h>
 #include <objc/runtime.h>
@@ -18,9 +21,13 @@ harness=r'''
 #include <assert.h>
 #include <math.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <time.h>
+#include <unistd.h>
 #include "X11DesktopSettingsCore.h"
 #include "X11ThemePalette.h"
-static DBusMessage *queue[16]; static int head,tail,will,did,notifications,disconnected;
+static DBusMessage *queue[16]; static int head,tail,will,did,notifications,disconnected; static double oldAccent=.835,newAccent=0;
 __attribute__((objc_root_class)) @interface NSAppearance { Class isa; }
 + (id)new; - (id)retain; - (void)release;
 @end
@@ -35,21 +42,26 @@ __attribute__((objc_root_class)) @interface NSAppearance { Class isa; }
 - (void)_desktopSettingsDidChangeFrom:(id)previous;
 @end
 @interface X11DesktopSettings : NSAppearance {
-@public QVDesktopShared _shared; DBusConnection *_connection;
+@public QVDesktopShared _shared; DBusConnection *_connection; dbus_uint32_t _readAllSerial; uint64_t _appearanceGeneration;
 }
-- (void)processPendingEvents; - (void)disconnect;
+- (void)processPendingEvents; - (void)disconnect; - (void)requestState; - (void)invalidateAppearance;
 @end
 static Application *NSApp;
 static X11DesktopSettings *settings;
 static QVDesktopState published(void) { QVDesktopState s; QVDesktopSharedLoad(&settings->_shared,&s); return s; }
 @implementation Application
 - (id)effectiveAppearance { return self; }
-- (void)willChangeValueForKey:(id)key { assert(published().accent[0]>.8); will++; }
-- (void)_desktopSettingsDidChangeFrom:(id)previous { assert(published().accent[2]==1); did++; notifications++; }
+- (void)willChangeValueForKey:(id)key { assert(published().accent[0]==oldAccent); will++; }
+- (void)_desktopSettingsDidChangeFrom:(id)previous { assert(published().accent[0]==newAccent); did++; notifications++; }
 @end
 static dbus_bool_t fixtureRead(DBusConnection *c,int timeout) { assert(timeout==0);return 1; }
 static DBusMessage *fixturePop(DBusConnection *c) { return head<tail?queue[head++]:NULL; }
 static dbus_bool_t fixtureConnected(DBusConnection *c) { return !disconnected; }
+static DBusMessage *sent; static dbus_uint32_t nextSerial=40;
+static dbus_bool_t fixtureSend(DBusConnection *c,DBusMessage *m,dbus_uint32_t *serial) {
+ assert(!sent);sent=dbus_message_ref(m);*serial=++nextSerial;return 1;
+}
+#define dbus_connection_send fixtureSend
 #define dbus_connection_read_write fixtureRead
 #define dbus_connection_pop_message fixturePop
 #define dbus_connection_get_is_connected fixtureConnected
@@ -97,7 +109,23 @@ static DBusMessage *snapshot(const double a[3]) {
 static void pixel(QVThemeColor c,int r,int g,int b) {
  assert(abs((int)lround(c.r*255)-r)<=2);assert(abs((int)lround(c.g*255)-g)<=2);assert(abs((int)lround(c.b*255)-b)<=2);
 }
+// No address: no autolaunch. A bus that accepts but never answers costs the
+// short Hello bound, not libdbus's 25 s default.
+static void busCases(void) {
+ unsetenv("DBUS_SESSION_BUS_ADDRESS");assert(!QVDesktopOpenSessionBus(QV_DESKTOP_BUS_TIMEOUT_MS));
+ char directory[]="/tmp/qv-silent-portal-XXXXXX";assert(mkdtemp(directory));
+ struct sockaddr_un address={.sun_family=AF_UNIX};snprintf(address.sun_path,sizeof(address.sun_path),"%s/bus",directory);
+ int listener=socket(AF_UNIX,SOCK_STREAM,0);
+ if(listener<0||bind(listener,(struct sockaddr *)&address,sizeof(address))||listen(listener,4))puts("SKIP silent bus: Unix sockets unavailable here");
+ else {
+  char bus[200];snprintf(bus,sizeof(bus),"unix:path=%s",address.sun_path);setenv("DBUS_SESSION_BUS_ADDRESS",bus,1);
+  struct timespec a,b;clock_gettime(CLOCK_MONOTONIC,&a);assert(!QVDesktopOpenSessionBus(QV_DESKTOP_BUS_TIMEOUT_MS));clock_gettime(CLOCK_MONOTONIC,&b);
+  double seconds=(b.tv_sec-a.tv_sec)+(b.tv_nsec-a.tv_nsec)/1e9;printf("silent-bus seconds=%.3f\n",seconds);assert(seconds<2);
+ }
+ if(listener>=0)close(listener);unlink(address.sun_path);rmdir(directory);unsetenv("DBUS_SESSION_BUS_ADDRESS");
+}
 int main(void) {
+ busCases();
  const double pink[]={.835,.380,.600},blue[]={0,0,1},invalid[]={-1,0,0},nan[]={NAN,0,0};
  QVDesktopState s;QVDesktopStateInit(&s);assert(!s.hasAccent&&s.colorScheme==0&&s.accent[0]==10.0/255);
  s.colorScheme=1;s.contrast=1;
@@ -141,8 +169,34 @@ int main(void) {
  // Unicast messages can bypass bus matches and must never modify the state.
  m=signalAccent(pink);dbus_message_set_destination(m,":1.43");queue[tail++]=m;
  [settings processPendingEvents];assert(notifications==1&&published().accent[2]==1);
+ assert(settings->_appearanceGeneration==1);
+ // A portal that starts after the app: its NameOwnerChanged triggers a
+ // non-blocking ReadAll, and only the reply to that call is applied.
+ DBusMessage *owner=dbus_message_new_signal("/org/freedesktop/DBus","org.freedesktop.DBus","NameOwnerChanged");
+ const char *portal="org.freedesktop.portal.Desktop",*none="",*unique=":1.77";
+ dbus_message_append_args(owner,DBUS_TYPE_STRING,&portal,DBUS_TYPE_STRING,&none,DBUS_TYPE_STRING,&unique,DBUS_TYPE_INVALID);
+ assert(!QVDesktopPortalAppeared(owner)); // no bus sender yet
+ dbus_message_set_sender(owner,"org.freedesktop.DBus");assert(QVDesktopPortalAppeared(owner));
+ DBusMessage *gone=dbus_message_new_signal("/org/freedesktop/DBus","org.freedesktop.DBus","NameOwnerChanged");
+ dbus_message_append_args(gone,DBUS_TYPE_STRING,&portal,DBUS_TYPE_STRING,&unique,DBUS_TYPE_STRING,&none,DBUS_TYPE_INVALID);
+ dbus_message_set_sender(gone,"org.freedesktop.DBus");assert(!QVDesktopPortalAppeared(gone));
+ DBusMessage *ownerAgain=dbus_message_copy(owner);
+ queue[tail++]=gone;[settings processPendingEvents];assert(!sent);
+ queue[tail++]=owner;[settings processPendingEvents];
+ assert(sent&&!strcmp(dbus_message_get_member(sent),"ReadAll")&&!dbus_message_get_auto_start(sent));
+ assert(settings->_readAllSerial==nextSerial&&notifications==1);dbus_message_unref(sent);sent=NULL;
+ m=snapshot(pink);dbus_message_set_sender(m,":1.77");dbus_message_set_reply_serial(m,nextSerial+5);queue[tail++]=m;
+ [settings processPendingEvents];assert(notifications==1&&published().accent[2]==1); // unrelated reply
+ m=snapshot(pink);dbus_message_set_sender(m,":1.77");dbus_message_set_reply_serial(m,nextSerial);queue[tail++]=m;
+ oldAccent=0;newAccent=.835;[settings processPendingEvents];assert(notifications==2&&published().accent[0]>.8&&!settings->_readAllSerial);
+ assert(settings->_appearanceGeneration==2);
+ // A failed ReadAll (portal not answering) keeps the connection for later.
+ queue[tail++]=ownerAgain;[settings processPendingEvents];assert(sent);dbus_message_unref(sent);sent=NULL;
+ m=dbus_message_new(DBUS_MESSAGE_TYPE_ERROR);dbus_message_set_error_name(m,"org.freedesktop.DBus.Error.ServiceUnknown");
+ dbus_message_set_sender(m,"org.freedesktop.DBus");dbus_message_set_reply_serial(m,nextSerial);queue[tail++]=m;
+ [settings processPendingEvents];assert(settings->_connection&&!settings->_readAllSerial&&notifications==2);
  disconnected=1;[settings processPendingEvents];assert(!settings->_connection);
- puts("PASS native fake portal: ReadAll, pink accent/menu/text pixels, invalid values, exact one-turn notification, duplicate/unicast rejection, disconnect");
+ puts("PASS native fake portal: ReadAll, pink accent/menu/text pixels, invalid values, exact one-turn notification, duplicate/unicast rejection, late portal ReadAll, failed ReadAll kept, bounded silent bus, disconnect");
  return 0;
 }
 '''.replace('/* PRODUCTION */',method)
