@@ -206,6 +206,7 @@ static void *NSBinderChangeContext,*NSKVOBinderChangeContext;
 - (BOOL)conditionallySetsEditable; - (BOOL)conditionallySetsEnabled; - (BOOL)raisesForNotApplicableKeys;
 - (id)nullPlaceholder; - (id)noSelectionPlaceholder; - (id)multipleValuesPlaceholder;
 - (id)transformedObject:(id)o; - (id)reverseTransformedObject:(id)o;
+- (BOOL)_isCombinedBooleanBinding;
 @end
 @interface _NSKVOBinder : _NSBinder {BOOL _isObserving;}
 - (void)syncUp;
@@ -224,6 +225,7 @@ SUPPORT_METHODS
 @implementation _NSBinder
 - (id)defaultBindingOptionsForBinding:(id)b{return [NSDictionary dictionary];}
 BINDER_METHODS
+COMBINED_METHOD
 DESTINATION_METHOD
 BINDER_OPTIONS
 @end
@@ -281,6 +283,12 @@ KVO_METHODS
 - (id)valueForKeyPath:(id)k{if([k hasPrefix:@"itemArray."]){NSMutableArray *a=[NSMutableArray array];for(id item in [self itemArray])[a addObject:[item valueForKeyPath:[k substringFromIndex:10]]];return a;}return [super valueForKeyPath:k];}
 POPUP_METHODS
 SELECTED_OBJECT_METHODS
+@end
+@interface TextField : NSControl {id objectValue;}
+- (id)objectValue; - (void)setObjectValue:(id)v;
+@end
+@implementation TextField
+- (id)objectValue{return objectValue;} - (void)setObjectValue:(id)v{objectValue=v;}
 @end
 @interface NSCell : NSMenuItem @end
 @implementation NSCell @end
@@ -453,6 +461,23 @@ static void reverseMarkerTests(void){
  assert([[nested value]integerValue]==7&&exceptions==0);
  puts("PASS reverse marker: placeholder edits preserve model; selected model writes resume");
 }
+static void displayPatternTests(void){
+ // value and displayPatternValueN all write objectValue; sharing the property
+ // must not make them peers of each other (only numbered booleans combine).
+ TextField *f=[TextField new];Model *v=[Model new],*p1=[Model new],*p2=[Model new];
+ [v setValue:@"value"];[p1 setValue:@"one"];[p2 setValue:@"two"];
+ [f bind:@"value" toObject:v withKeyPath:@"value" options:nil];
+ [f bind:@"displayPatternValue1" toObject:p1 withKeyPath:@"value" options:nil];
+ [f bind:@"displayPatternValue2" toObject:p2 withKeyPath:@"value" options:nil];
+ id names[]={@"value",@"displayPatternValue1",@"displayPatternValue2"};
+ for(int i=0;i<3;i++)assert([[[f _binderForBinding:names[i]]peerBinders]count]==1);
+ [v setValue:@"changed" forKeyPath:@"value"];assert([[f objectValue]isEqual:@"changed"]);
+ [p2 setValue:@"later" forKeyPath:@"value"];assert([[f objectValue]isEqual:@"later"]);
+ Model *a=[Model new],*b=[Model new];[a setValue:[NSNumber numberWithBool:YES]];[b setValue:[NSNumber numberWithBool:YES]];
+ NSPopUpButton *p=popup();[p bind:@"enabled" toObject:a withKeyPath:@"value" options:nil];[p bind:@"enabled2" toObject:b withKeyPath:@"value" options:nil];
+ assert([[[p _binderForBinding:@"enabled2"]peerBinders]count]==2);
+ assert(exceptions==0);puts("PASS display pattern: value and displayPatternValueN stay separate; numbered enabled still combine");
+}
 int main(void){NSMultipleValuesMarker=[NSObject new];NSNoSelectionMarker=[NSObject new];NSNotApplicableMarker=[NSObject new];
  if(FIXTURE_CASE==0||FIXTURE_CASE==1)scalarTests();
  if(FIXTURE_CASE==0||FIXTURE_CASE==2)selectedObjectTests();
@@ -461,6 +486,7 @@ int main(void){NSMultipleValuesMarker=[NSObject new];NSNoSelectionMarker=[NSObje
  if(FIXTURE_CASE==0||FIXTURE_CASE==5)pathTests();
  if(FIXTURE_CASE==0||FIXTURE_CASE==6)markerTests();
  if(FIXTURE_CASE==0||FIXTURE_CASE==7)reverseMarkerTests();
- if(FIXTURE_CASE==8)contentValuesTests();
+ if(FIXTURE_CASE==0||FIXTURE_CASE==8)displayPatternTests();
+ if(FIXTURE_CASE==9)contentValuesTests();
  return 0;
 }

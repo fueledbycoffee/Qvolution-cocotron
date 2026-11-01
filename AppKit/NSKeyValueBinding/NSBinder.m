@@ -134,6 +134,8 @@ static void *NSBinderChangeContext;
 - (BOOL) allowsReverseTransformation {
     NSValueTransformer *transformer = [self valueTransformer];
 
+    if ([self _isCombinedBooleanBinding])
+        return NO;
     if (transformer == nil)
         return YES;
 
@@ -291,6 +293,12 @@ static void *NSBinderChangeContext;
     return [_binding compare: [other binding]];
 }
 
+- (BOOL) _isCombinedBooleanBinding {
+    return [_bindingPath isEqual: @"enabled"] ||
+           [_bindingPath isEqual: @"editable"] ||
+           [_bindingPath isEqual: @"hidden"];
+}
+
 // Returns all of the source binders sharing the same binding (or fake binding -
 // like enabled, enabled2...)
 - (NSArray *) peerBinders {
@@ -299,6 +307,19 @@ static void *NSBinderChangeContext;
     // there is only one binder and it's self
     if ([allUsedBinders count] == 1)
         return allUsedBinders;
+
+    // Numbered boolean bindings are mapped onto their shared property by
+    // -_replacementKeyPathForBinding:, so their peers are exactly the binders
+    // writing that property, including suffixes past 9. Only this family is
+    // matched by property: value and displayPatternValueN also all write
+    // objectValue, and they keep the name-based grouping below.
+    if ([self _isCombinedBooleanBinding]) {
+        NSMutableArray *result = [NSMutableArray array];
+        for (_NSBinder *check in allUsedBinders)
+            if ([[check bindingPath] isEqual: _bindingPath])
+                [result addObject: check];
+        return result;
+    }
 
     // FIXME: total hack. assume only one digit at end, 1-9
 

@@ -225,6 +225,17 @@ NSString *NSFormatDisplayPattern(NSString *pattern, id *values,
 
     if (pattern != nil) {
         value = NSFormatDisplayPattern(pattern, allValues, count);
+    } else if ([self _isCombinedBooleanBinding]) {
+        // "hidden" is the OR of all peers, enabled and editable the AND;
+        // a missing or non-boolean value counts as NO.
+        BOOL useOr = [_bindingPath isEqual: @"hidden"];
+        BOOL result = !useOr;
+        for (i = 0; i < count; i++) {
+            BOOL flag = [allValues[i] respondsToSelector: @selector(boolValue)] &&
+                        [allValues[i] boolValue];
+            result = useOr ? (result || flag) : (result && flag);
+        }
+        value = [NSNumber numberWithBool: result];
     } else if (count == 1) {
         value = allValues[0];
     } else {

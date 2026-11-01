@@ -2,7 +2,7 @@
 """Production binding methods on libobjc, with controlled collection/KVC/UI doubles."""
 import argparse,pathlib,subprocess,tempfile,re
 root=pathlib.Path(__file__).resolve().parents[1]
-a=argparse.ArgumentParser();a.add_argument('--source-ref');a.add_argument('--case',default='all',choices=['all','scalar','selected-object','enabled','browser','path','marker','reverse-marker','content-values']);args=a.parse_args()
+a=argparse.ArgumentParser();a.add_argument('--source-ref');a.add_argument('--case',default='all',choices=['all','scalar','selected-object','enabled','browser','path','marker','reverse-marker','display-pattern','content-values']);args=a.parse_args()
 def source(path):
  return subprocess.check_output(['git','show',args.source_ref+':AppKit/'+path],cwd=root,text=True) if args.source_ref else (root/'AppKit'/path).read_text()
 def method(s,start):
@@ -27,11 +27,11 @@ parts={
 }
 for key,(path,starts) in parts.items():
  s=source(path);program=program.replace(key,'\n'.join(method(s,x) for x in starts))
-s=source('NSKeyValueBinding/NSBinder.m');program=program.replace('DESTINATION_METHOD',method(s,'- (id) destinationValue') if '- (id) destinationValue' in s else '')
+s=source('NSKeyValueBinding/NSBinder.m');program=program.replace('COMBINED_METHOD',method(s,'- (BOOL) _isCombinedBooleanBinding') if '- (BOOL) _isCombinedBooleanBinding' in s else '');program=program.replace('DESTINATION_METHOD',method(s,'- (id) destinationValue') if '- (id) destinationValue' in s else '')
 s=source('NSPopUpButton.m');program=program.replace('SELECTED_OBJECT_METHODS','\n'.join(method(s,x) for x in ['- (id) _selectedObject','- (void) _setSelectedObject:']) if '- (id) _selectedObject' in s else '')
 s=source('NSKeyValueBinding/NSKVOBinder.m');program=program.replace('SCALAR_FUNCTION',method(s,'static BOOL NSKVOBinderKeyIsScalar'))
 s=source('NSColorPicker.subproj/NSColorPickerColorList.m');program=program.replace('OUTLET_METHOD',method(s,'- (void) setColorBrowser:') if '- (void) setColorBrowser:' in s else '')
-program=program.replace('FIXTURE_CASE',str(['all','scalar','selected-object','enabled','browser','path','marker','reverse-marker','content-values'].index(args.case)))
+program=program.replace('FIXTURE_CASE',str(['all','scalar','selected-object','enabled','browser','path','marker','reverse-marker','display-pattern','content-values'].index(args.case)))
 inc=subprocess.check_output(['gcc','-print-file-name=include'],text=True).strip()
 with tempfile.TemporaryDirectory(prefix='qv-bindings-') as tmp:
  src=pathlib.Path(tmp)/'fixture.m';exe=pathlib.Path(tmp)/'fixture';src.write_text(program)
