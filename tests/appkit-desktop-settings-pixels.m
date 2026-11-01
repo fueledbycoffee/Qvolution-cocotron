@@ -63,6 +63,12 @@ int main(int argc,char **argv) { @autoreleasepool {
     CFRunLoopRunInMode(kCFRunLoopDefaultMode,.2,false);
     CHECK(notifications==1);rgb(retained,0,0,255);rgb([NSColor selectedMenuItemColor],0,0,255);
     CHECK([[[NSApp effectiveAppearance]name]isEqualToString:NSAppearanceNameAqua]);
+    // The cached system appearance follows the dark gate as soon as it changes.
+    NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
+    [defaults setBool:YES forKey:@"QvolutionFollowSystemAppearance"];
+    CHECK([[[NSApp effectiveAppearance]name]isEqualToString:NSAppearanceNameDarkAqua]);
+    [defaults removeObjectForKey:@"QvolutionFollowSystemAppearance"];
+    CHECK([[[NSApp effectiveAppearance]name]isEqualToString:NSAppearanceNameAqua]);
     dbus_connection_close(c);dbus_connection_unref(c);[retained release];
-    puts("RESULT theme-p1 failures=0 (1x/2x O2Surface, retained accent, notification, dark gate)");return 0;
+    puts("RESULT theme-p1 failures=0 (1x/2x O2Surface, retained accent, notification, dark gate, cached gate change)");return 0;
 }}

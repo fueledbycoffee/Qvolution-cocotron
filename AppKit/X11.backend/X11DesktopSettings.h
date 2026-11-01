@@ -8,6 +8,11 @@
     DBusConnection *_connection;
     CFSocketRef _socket;
     CFRunLoopSourceRef _source;
+    // Cached QVDesktopAppearance index, tagged with the generation it was
+    // computed in; any invalidation bumps the generation.
+    uint64_t _appearanceCache, _appearanceGeneration;
+    BOOL _requiresAqua;
+    const char *_appearanceOverride;
 }
 + (instancetype)sharedSettings;
 - (NSAppearance *)systemAppearance;

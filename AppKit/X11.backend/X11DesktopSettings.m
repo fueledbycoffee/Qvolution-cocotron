@@ -6,6 +6,8 @@
 #import <AppKit/NSColor.h>
 #import <Foundation/Foundation.h>
 #include <dispatch/dispatch.h>
+#include <stdlib.h>
+#include <string.h>
 
 @interface NSApplication (DesktopSettings)
 - (void)_desktopSettingsDidChangeFrom:(NSAppearance *)previous;
@@ -30,6 +32,16 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
     if (!(self=[super init])) return nil;
     QVDesktopState initial; QVDesktopStateInit(&initial);
     QVDesktopSharedInit(&_shared,&initial);
+    // The Info.plist opt-out and the test override are fixed for the process.
+    _requiresAqua=[[[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSRequiresAquaSystemAppearance"] boolValue];
+    const char *override=getenv("QVOLUTION_APPEARANCE");
+    _appearanceOverride=override ? strdup(override) : NULL;
+    // setObject:forKey: sends KVO synchronously; the notification covers the
+    // other ways a defaults value changes, and arrives asynchronously.
+    NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
+    [defaults addObserver:self forKeyPath:@"QvolutionFollowSystemAppearance" options:0 context:NULL];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(invalidateAppearance)
+        name:NSUserDefaultsDidChangeNotification object:defaults];
     // Avoid libdbus autolaunch (and any display-dependent side effects) without a bus.
     if (!getenv("DBUS_SESSION_BUS_ADDRESS")) return self;
     DBusError error; dbus_error_init(&error);
@@ -70,7 +82,15 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
     if (_socket) { CFSocketInvalidate(_socket); CFRelease(_socket); _socket=NULL; }
     if (_connection) { dbus_connection_close(_connection); dbus_connection_unref(_connection); _connection=NULL; }
 }
-- (void)dealloc { [self disconnect]; pthread_mutex_destroy(&_shared.lock); [super dealloc]; }
+- (void)invalidateAppearance { __atomic_add_fetch(&_appearanceGeneration,1,__ATOMIC_ACQ_REL); }
+- (void)observeValueForKeyPath:(NSString *)path ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    [self invalidateAppearance];
+}
+- (void)dealloc {
+    [[NSUserDefaults standardUserDefaults] removeObserver:self forKeyPath:@"QvolutionFollowSystemAppearance"];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    free((void *)_appearanceOverride);
+    [self disconnect]; pthread_mutex_destroy(&_shared.lock); [super dealloc]; }
 - (void)processPendingEvents {
     if (!_connection) return;
     NSAppearance *previous=[[NSApp effectiveAppearance] retain];
@@ -92,19 +112,29 @@ static void settingsSocket(CFSocketRef socket, CFSocketCallBackType type, CFData
     if (changed) {
         [NSApp willChangeValueForKey:@"effectiveAppearance"];
         QVDesktopSharedStore(&_shared,&next);
+        [self invalidateAppearance];
         [NSApp _desktopSettingsDidChangeFrom:previous];
     }
     [previous release];
 }
+// Called for every view on every draw through effectiveAppearance, so the
+// defaults lookup runs only after an input changed.
 - (NSAppearance *)systemAppearance {
-    NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
-    QVDesktopState state; QVDesktopSharedLoad(&_shared,&state);
-    unsigned index=QVDesktopAppearance(&state,[defaults boolForKey:@"QvolutionFollowSystemAppearance"],
-        [[[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSRequiresAquaSystemAppearance"] boolValue],getenv("QVOLUTION_APPEARANCE"));
-    NSAppearanceName names[]={NSAppearanceNameAqua,NSAppearanceNameDarkAqua,
-        NSAppearanceNameAccessibilityHighContrastAqua,NSAppearanceNameAccessibilityHighContrastDarkAqua};
     static NSAppearance *appearances[4];
-    if (!appearances[index]) appearances[index]=[NSAppearance appearanceNamed:names[index]];
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSAppearanceName names[]={NSAppearanceNameAqua,NSAppearanceNameDarkAqua,
+            NSAppearanceNameAccessibilityHighContrastAqua,NSAppearanceNameAccessibilityHighContrastDarkAqua};
+        for (unsigned i=0;i<4;i++) appearances[i]=[[NSAppearance appearanceNamed:names[i]] retain];
+    });
+    uint64_t generation=__atomic_load_n(&_appearanceGeneration,__ATOMIC_ACQUIRE);
+    uint64_t cached=__atomic_load_n(&_appearanceCache,__ATOMIC_ACQUIRE);
+    if ((cached&7) && cached>>3==generation) return appearances[(cached&7)-1];
+    QVDesktopState state; QVDesktopSharedLoad(&_shared,&state);
+    unsigned index=QVDesktopAppearance(&state,[[NSUserDefaults standardUserDefaults] boolForKey:@"QvolutionFollowSystemAppearance"],
+        _requiresAqua,_appearanceOverride);
+    // A store tagged with a generation that was invalidated meanwhile is never used.
+    __atomic_store_n(&_appearanceCache,generation<<3|(index+1),__ATOMIC_RELEASE);
     return appearances[index];
 }
 - (NSColor *)colorWithName:(NSString *)name appearance:(NSAppearance *)appearance {
