@@ -23,7 +23,7 @@
     for(NSWindow *window in [NSApp windows]) {
         id backend=[window platformWindow];
         if(![backend respondsToSelector:@selector(isMapped)]||![backend respondsToSelector:@selector(eglPresentationStatistics)])continue;
-        NSNumber *presents=[backend eglPresentationStatistics][@"clientPresents"];
+        NSNumber *presents=[backend eglPresentationStatistics][@"clientPresents"]?:@0;
         [rows addObject:@{@"title":[window title]?:@"",@"visible":@([window isVisible]),@"mapped":@([backend isMapped]),@"presented_frames":presents}];
     }
     NSData *data=[NSJSONSerialization dataWithJSONObject:rows options:0 error:NULL];
