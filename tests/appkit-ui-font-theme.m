@@ -100,6 +100,11 @@ int main(int argc,char **argv) {@autoreleasepool {
     NSFont *system=[NSFont systemFontOfSize:0];expectUIFont(system && [system pointSize]==13,"system zero size is 13");
     expectUIFont([NSFont systemFontSize]==13 && [NSFont smallSystemFontSize]==11 && [NSFont labelFontSize]==10,"AppKit role sizes 13/11/10");
     expectUIFont([[NSFont toolTipsFontOfSize:0] pointSize]==11 && [[NSFont labelFontOfSize:0] pointSize]==10,"tooltip/label default sizes");
+    // UI fonts go through the font cache: one object per face and size.
+    expectUIFont([NSFont systemFontOfSize:0]==system && [NSFont systemFontOfSize:13]==system &&
+        [NSFont fontWithName:[system fontName] size:13]==system,"system font is the cached font object");
+    NSFont *bold=[NSFont boldSystemFontOfSize:13];
+    expectUIFont(bold && [NSFont boldSystemFontOfSize:13]==bold && bold!=system,"bold system font is cached separately");
     printf("MEASURE system-family=%s name=%s size=%.2f\n",[[system familyName] UTF8String],[[system fontName] UTF8String],[system pointSize]);
     if(argc>2)expectUIFont([[system familyName] isEqualToString:[NSString stringWithUTF8String:argv[2]]],"expected portal/fallback family");
     for(NSString *alias in [NSArray arrayWithObjects:@".AppleSystemUIFont",@"Helvetica",@"Helvetica Neue",@"Lucida Grande",nil]) {

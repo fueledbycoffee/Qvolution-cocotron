@@ -119,6 +119,8 @@ static NSUInteger _fontCacheSize = 0;
 static NSFont **_fontCache = NULL;
 
 static NSLock *_cacheLock = nil;
+// UI role and requested size to the cached font's name and point size.
+static NSMutableDictionary *_uiFontKeys = nil;
 
 + (void) initialize {
     if (self == [NSFont class]) {
@@ -130,6 +132,7 @@ static NSLock *_cacheLock = nil;
         _nibFontTranslator = [[NSNibFontNameTranslator alloc] init];
 #endif
         _cacheLock = [[NSLock alloc] init];
+        _uiFontKeys = [[NSMutableDictionary alloc] init];
     }
 }
 
@@ -226,10 +229,34 @@ static NSLock *_cacheLock = nil;
               fallbackName: (NSString *) fallbackName
 {
     NSFont *result = nil;
+    // The UI families are chosen once, when fontconfig loads, so a role and
+    // size always select the same face. Reuse the live cached font: one
+    // object per face and size, and no fontconfig sort or face open.
+    NSString *key = [NSString stringWithFormat: @"%d:%.17g", (int) type, (double) size];
+    [_cacheLock lock];
+    NSArray *known = [[_uiFontKeys objectForKey: key] retain];
+    [_cacheLock unlock];
+    if (known != nil) {
+        result = [[[self cachedFontWithName: [known objectAtIndex: 0]
+                                       size: [[known objectAtIndex: 1] doubleValue]] retain] autorelease];
+        [known release];
+        if (result != nil)
+            return result;
+    }
     CTFontRef ctFont = CTFontCreateUIFontForLanguage(type, size, nil);
     if (ctFont) {
         // CoreText already returns NSFont with the selected graphics face.
-        result = [(NSFont *)ctFont autorelease];
+        NSFont *created = [(NSFont *) ctFont autorelease];
+        NSString *name = [created fontName];
+        CGFloat pointSize = [created pointSize];
+        result = [[[self cachedFontWithName: name size: pointSize] retain] autorelease];
+        if (result == nil) {
+            [self addFontToCache: created];
+            result = created;
+        }
+        [_cacheLock lock];
+        [_uiFontKeys setObject: @[name, @(pointSize)] forKey: key];
+        [_cacheLock unlock];
     } else {
         result = [NSFont fontWithName: [O2Font postscriptNameForDisplayName:
                                                        fallbackName]
