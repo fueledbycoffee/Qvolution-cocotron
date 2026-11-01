@@ -110,11 +110,12 @@ int main(int argc, char **argv) {
     wl_registry_add_listener(registry, &registry_listener, NULL);
     assert(wl_display_roundtrip(display) >= 0 && base);
     // A factory assigned to the ping queue must still create a default child.
-    wl_proxy_set_queue((struct wl_proxy *)display, pump.queue);
+    struct wl_proxy *factory = wl_proxy_create_wrapper(display);
+    assert(factory); wl_proxy_set_queue(factory, pump.queue);
     union wl_argument args[] = {{.o = NULL}};
     struct wl_proxy *sync = WaylandMainQueueObject(&library,
-            (struct wl_proxy *)display, WP_DISPLAY_SYNC, &wl_callback_interface, args);
-    wl_proxy_set_queue((struct wl_proxy *)display, NULL);
+            factory, WP_DISPLAY_SYNC, &wl_callback_interface, args);
+    wl_proxy_wrapper_destroy(factory);
     assert(sync); wl_proxy_add_dispatcher(sync, callback, NULL, NULL);
     assert(wl_display_flush(display) >= 0);
     bool baseline = argc > 1 && !strcmp(argv[1], "--main-thread-reader");
