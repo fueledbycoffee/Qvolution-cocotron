@@ -601,6 +601,12 @@ static NSSavePanel *_newPanel = nil;
     id pool = [NSAutoreleasePool new];
     int ret = [self runModalForDirectory: path file: name];
 
+    // The delegate and selector are optional, as for -[NSApplication beginSheet:...].
+    if (modalDelegate == nil || didEndSelector == NULL) {
+        [pool release];
+        return;
+    }
+
     id inv = [NSInvocation
             invocationWithMethodSignature:
                     [self methodSignatureForSelector: @selector
