@@ -114,11 +114,12 @@ run(flags + ['-shared', '-fPIC', str(out / 'imports.c'), '-L' + str(out), '-lbri
              '-Wl,-rpath,$ORIGIN', '-Wl,--no-undefined', '-o', str(out / 'libimports.so')])
 run(flags + [str(out / 'loader.c'), '-ldl', '-o', str(out / 'loader')])
 run(flags + [str(root / 'tests/coregraphics-load-control.c'), '-ldl', '-o', str(out / 'control')])
+run(flags + [str(root / 'tests/coregraphics-launch-control.c'), '-o', str(out / 'trivial')])
 print(f'PASS {args.arch}: compiled strict-link bridge, sibling, loader and trivial control', flush=True)
 if args.build_only:
     raise SystemExit(0)
 print(f'RUN {args.arch}: trivial native launch control before bridge tests', flush=True)
-run([str(out / 'control'), '--trivial'])
+run([str(out / 'trivial')])
 cases = 0
 for image in ['libbridge.so', 'libimports.so']:
     for sibling, status, expected in [('libsibling.so', s, s) for s in [0, -4, -50, 1, -32768, 32767]] + [
