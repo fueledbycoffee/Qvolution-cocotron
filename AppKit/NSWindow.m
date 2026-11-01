@@ -1406,6 +1406,10 @@ static BOOL _allowsAutomaticWindowTabbing;
     _resizeIncrements.height = value.height / value.width;
 }
 
+- (NSColor *) contentSeparatorColor {
+    return [NSColor separatorColor];
+}
+
 - (void) _setContentHasShadow: (BOOL) value {
     [self setHasShadow: value];
 }
