@@ -24,5 +24,15 @@ CA_EXPORT NSString *const kCAScrollVertically;
 CA_EXPORT NSString *const kCAScrollHorizontally;
 CA_EXPORT NSString *const kCAScrollBoth;
 
-@interface CAScrollLayer : CALayer
+@interface CAScrollLayer : CALayer {
+    NSString *_scrollMode;
+}
+
+// Which axes -scrollToPoint: and -scrollToRect: may change (default kCAScrollBoth).
+@property (copy) NSString *scrollMode;
+
+// Moves the bounds origin to p, on the axes scrollMode allows.
+- (void) scrollToPoint: (CGPoint) p;
+// Scrolls as little as needed to make r (layer coordinates) visible.
+- (void) scrollToRect: (CGRect) r;
 @end

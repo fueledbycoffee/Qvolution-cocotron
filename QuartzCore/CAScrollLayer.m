@@ -25,4 +25,47 @@ NSString *const kCAScrollHorizontally = @"horizontally";
 NSString *const kCAScrollBoth = @"both";
 
 @implementation CAScrollLayer
+
+- init {
+    if ((self = [super init]) != nil)
+        _scrollMode = [kCAScrollBoth copy];
+    return self;
+}
+
+- (void) dealloc {
+    [_scrollMode release];
+    [super dealloc];
+}
+
+- (NSString *) scrollMode {
+    return _scrollMode;
+}
+
+- (void) setScrollMode: (NSString *) value {
+    value = [value copy];
+    [_scrollMode release];
+    _scrollMode = value;
+}
+
+- (void) scrollToPoint: (CGPoint) p {
+    BOOL horizontal = [_scrollMode isEqualToString: kCAScrollBoth] ||
+                      [_scrollMode isEqualToString: kCAScrollHorizontally];
+    BOOL vertical = [_scrollMode isEqualToString: kCAScrollBoth] ||
+                    [_scrollMode isEqualToString: kCAScrollVertically];
+    CGRect bounds = [self bounds];
+    if (horizontal) bounds.origin.x = p.x;
+    if (vertical) bounds.origin.y = p.y;
+    [self setBounds: bounds];
+}
+
+- (void) scrollToRect: (CGRect) r {
+    CGRect bounds = [self bounds];
+    CGPoint origin = bounds.origin;
+    if (CGRectGetMaxX(r) > CGRectGetMaxX(bounds)) origin.x = CGRectGetMaxX(r) - bounds.size.width;
+    if (CGRectGetMinX(r) < origin.x) origin.x = CGRectGetMinX(r);
+    if (CGRectGetMaxY(r) > CGRectGetMaxY(bounds)) origin.y = CGRectGetMaxY(r) - bounds.size.height;
+    if (CGRectGetMinY(r) < origin.y) origin.y = CGRectGetMinY(r);
+    [self scrollToPoint: origin];
+}
+
 @end
