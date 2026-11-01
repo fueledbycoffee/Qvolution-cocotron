@@ -25,6 +25,8 @@
 #import <CoreGraphics/CGWindowPrivate.h>
 #import <CoreGraphics/CGSSurface.h>
 #include <pthread.h>
+#include <HIServices/Processes.h>
+#include <CarbonCore/MacErrors.h>
 
 static NSMutableDictionary<NSNumber*, CGSConnection*>* g_connections = nil;
 static Boolean g_denyConnections = FALSE;
@@ -189,7 +191,9 @@ CGSConnectionID _CGSDefaultConnection(void)
 
 CGSConnectionID CGSDefaultConnectionForThread(void)
 {
-	return CGSMainConnectionID();
+	// SPEC.md Round 3: borrowed process default, unavailable maps to zero.
+	CGSConnectionID connection = _CGSDefaultConnection();
+	return connection > 0 ? connection : 0;
 }
 
 CGSConnectionID CGSMainConnectionID(void)
@@ -483,4 +487,52 @@ CGError CGSRemoveNotifyProc(CGSNotifyProcPtr proc, CGSNotificationType notificat
 	pthread_mutex_unlock(&g_cgsNotifyProcMutex);
 
 	return kCGSErrorSuccess;
+}
+
+// SPEC.md Round 3: unsupported-operation policies are GUESS, rung 6.
+// The radius-only and integer-style ABIs are also explicit rung-6 guesses.
+CGError CGSSetWindowBackgroundBlurRadius(CGSConnectionID cid, CGSWindowID wid, int radius)
+{
+    return kCGErrorNotImplemented;
+}
+
+CGError CGSSetWindowBackgroundBlurRadiusWithOpacityHint(CGSConnectionID cid, CGSWindowID wid, int radius, float opacityHint)
+{
+    return kCGErrorNotImplemented;
+}
+
+CGError CGSSetWindowBackgroundBlurRadiusStyle(CGSConnectionID cid, CGSWindowID wid, int radius, int style)
+{
+    return kCGErrorNotImplemented;
+}
+
+CGError CGSSetSecureEventInput(CGSConnectionID cid, bool enable)
+{
+    return kCGErrorNotImplemented;
+}
+
+// H1/H5 declarations (rung 2); public identity bridge is GUESS, rung 6.
+OSErr CPSGetCurrentProcess(CPSProcessSerNum *psn)
+{
+    if (psn == NULL)
+        return paramErr;
+
+    ProcessSerialNumber current;
+    OSErr result = GetCurrentProcess(&current);
+    if (result != noErr)
+        return result;
+
+    psn->highLongOfPSN = current.highLongOfPSN;
+    psn->lowLongOfPSN = current.lowLongOfPSN;
+    return noErr;
+}
+
+OSErr CPSStealKeyFocus(CPSProcessSerNum *psn, uint32_t options)
+{
+    return psn == NULL ? paramErr : unimpErr;
+}
+
+OSErr CPSReleaseKeyFocus(CPSProcessSerNum *psn)
+{
+    return psn == NULL ? paramErr : unimpErr;
 }

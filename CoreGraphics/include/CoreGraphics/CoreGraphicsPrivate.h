@@ -152,6 +152,28 @@ CGSConnection* _CGSConnectionForID(CGSConnectionID connId);
 CGSConnection* _CGSConnectionFromEventRecord(const CGSEventRecordPtr record);
 #endif
 
+// SPEC.md Round 3, H1/H3/H5: vendored declarations (rung 2).
+typedef struct {
+    uint32_t highLongOfPSN;
+    uint32_t lowLongOfPSN;
+} CPSProcessSerNum;
+
+extern OSErr CPSGetCurrentProcess(CPSProcessSerNum *psn);
+extern OSErr CPSStealKeyFocus(CPSProcessSerNum *psn, uint32_t options);
+extern OSErr CPSReleaseKeyFocus(CPSProcessSerNum *psn);
+extern CGError CGSSetSecureEventInput(CGSConnectionID cid, bool enable);
+extern CGError CGSSetWindowBackgroundBlurRadiusWithOpacityHint(CGSConnectionID cid, CGSWindowID wid, int radius, float opacityHint);
+extern bool CGContextGetAllowsAntialiasing(CGContextRef context);
+extern bool CGContextGetShouldAntialias(CGContextRef context);
+extern bool CGContextGetAllowsFontSmoothing(CGContextRef context);
+extern bool CGContextGetShouldSmoothFonts(CGContextRef context);
+extern uint32_t CGContextGetFontSmoothingStyle(CGContextRef context);
+extern void CGContextSetFontSmoothingStyle(CGContextRef context, uint32_t style);
+
+// GUESS ABIs, rung 6, selected explicitly in SPEC.md Round 3.
+extern CGError CGSSetWindowBackgroundBlurRadius(CGSConnectionID cid, CGSWindowID wid, int radius);
+extern CGError CGSSetWindowBackgroundBlurRadiusStyle(CGSConnectionID cid, CGSWindowID wid, int radius, int style);
+
 __END_DECLS
 
 #endif

@@ -61,7 +61,10 @@ int main(void) {
     CGContextRestoreGState(c[0]); CHECK(state(c[0], false, true, false, true, 0xabcdef01u) == 0);
     CGContextRestoreGState(c[0]); CHECK(state(c[0], false, true, false, true, 0xabcdef01u) == 0);
     CHECK(state(c[1], true, true, true, true, 0) == 0);
-    CGContextRelease(c[0]); CGContextRelease(c[1]); CGColorSpaceRelease(space);
+    CGContextRelease(c[0]); CGContextRelease(c[1]);
+    c[0] = CGBitmapContextCreate(pixels[0], 4, 4, 8, 16, space, kCGImageAlphaPremultipliedLast);
+    CHECK(c[0] != NULL); CHECK(state(c[0], true, true, true, true, 0) == 0);
+    CGContextRelease(c[0]); CGColorSpaceRelease(space);
 
     CGSConnectionID process = _CGSDefaultConnection();
     CGSConnectionID expected = process > 0 ? process : 0;

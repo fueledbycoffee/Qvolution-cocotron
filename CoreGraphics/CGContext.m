@@ -732,3 +732,28 @@ void CGContextShowGlyphsAtPositions(CGContextRef context,
                                     (unsigned) count);
     free(advances);
 }
+
+// Declarations: SPEC.md Round 3, H1/H3 (rung 2).
+bool CGContextGetAllowsAntialiasing(CGContextRef context) {
+    return O2ContextGetAllowsAntialiasing((O2ContextRef)context);
+}
+
+bool CGContextGetShouldAntialias(CGContextRef context) {
+    return O2ContextGetShouldAntialias((O2ContextRef)context);
+}
+
+bool CGContextGetAllowsFontSmoothing(CGContextRef context) {
+    return O2ContextGetAllowsFontSmoothing((O2ContextRef)context);
+}
+
+bool CGContextGetShouldSmoothFonts(CGContextRef context) {
+    return O2ContextGetShouldSmoothFonts((O2ContextRef)context);
+}
+
+uint32_t CGContextGetFontSmoothingStyle(CGContextRef context) {
+    return O2ContextGetFontSmoothingStyle((O2ContextRef)context);
+}
+
+void CGContextSetFontSmoothingStyle(CGContextRef context, uint32_t style) {
+    O2ContextSetFontSmoothingStyle((O2ContextRef)context, style);
+}

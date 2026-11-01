@@ -18,6 +18,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <Foundation/NSObject.h>
+#include <stdint.h>
 #import <Onyx2D/O2Geometry.h>
 
 #ifdef __cplusplus
@@ -433,6 +434,15 @@ void O2ContextConcatAdvancesToTextMatrix(O2ContextRef self,
                                          const O2Size *advances, size_t count);
 
 O2GState *O2ContextCurrentGState(O2ContextRef self);
+
+// Requested-state accessors; SPEC.md Round 3.
+BOOL O2ContextGetAllowsAntialiasing(O2ContextRef self);
+BOOL O2ContextGetShouldAntialias(O2ContextRef self);
+BOOL O2ContextGetAllowsFontSmoothing(O2ContextRef self);
+BOOL O2ContextGetShouldSmoothFonts(O2ContextRef self);
+uint32_t O2ContextGetFontSmoothingStyle(O2ContextRef self);
+void O2ContextSetFontSmoothingStyle(O2ContextRef self, uint32_t style);
+
 
 // Temporary hacks
 
