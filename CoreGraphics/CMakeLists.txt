@@ -248,5 +248,36 @@ set_property(TARGET CoreGraphics APPEND_STRING PROPERTY
     LINK_FLAGS " -Wl,-U,_GetCurrentProcess ")
 if(ENABLE_TESTS)
     add_darling_executable(imp_graphics_layer_test ../tests/graphics-imports/layer-clip.m)
-    target_link_libraries(imp_graphics_layer_test CoreGraphics Foundation)
+    target_link_libraries(imp_graphics_layer_test CoreGraphics Onyx2D Foundation)
+    if(TARGET swiftCoreGraphicsImports)
+        set(client_object "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports/SwiftClient.o")
+        add_custom_command(OUTPUT "${client_object}"
+            COMMAND "${DARLING_COREGRAPHICS_SWIFTC}" -frontend -c
+                "${CMAKE_CURRENT_SOURCE_DIR}/../tests/graphics-imports/swift-client.swift"
+                -target x86_64-apple-macosx26.0
+                -sdk "${CMAKE_SOURCE_DIR}/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+                -resource-dir "${DARLING_COREGRAPHICS_SWIFT_RESOURCE_DIR}"
+                -module-cache-path "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports/module-cache"
+                -module-name GraphicsImportClient -swift-version 5 -O
+                -I "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports"
+                -I "${DARLING_COREGRAPHICS_SWIFT_MODULES_DIR}"
+                -I "${CMAKE_CURRENT_SOURCE_DIR}/include"
+                -Xcc "-fmodule-map-file=${CMAKE_SOURCE_DIR}/src/external/swift/overlays/shims/overlay-shims.modulemap"
+                -Xcc "-I${CMAKE_SOURCE_DIR}/src/frameworks/CoreServices/include"
+                -o "${client_object}"
+            DEPENDS ../tests/graphics-imports/swift-client.swift "${import_module}"
+            VERBATIM)
+        set_source_files_properties("${client_object}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+        add_darling_executable(imp_graphics_swift_test "${client_object}")
+        set_target_properties(imp_graphics_swift_test PROPERTIES LINKER_LANGUAGE C)
+        target_link_directories(imp_graphics_swift_test PRIVATE "${CMAKE_SOURCE_DIR}/src/external/swift")
+        target_link_libraries(imp_graphics_swift_test CoreGraphics CoreFoundation objc system
+            "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCore.dylib"
+            "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftDarwin.dylib"
+            "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCoreFoundation.dylib"
+            "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftObjectiveC.dylib"
+            "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftDispatch.dylib")
+        set_property(TARGET imp_graphics_swift_test APPEND_STRING PROPERTY LINK_FLAGS
+            " -Wl,-rpath,/usr/lib/swift")
+    endif()
 endif()

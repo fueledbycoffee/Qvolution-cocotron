@@ -3,8 +3,9 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 
-root = Path(__file__).resolve().parents[2]
+root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[2]
 cmake = root / 'CoreGraphics/CMakeLists.txt'
 gate = root / 'CoreGraphics/SwiftToolchain.cmake'
 if gate.exists():

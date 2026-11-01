@@ -13,8 +13,8 @@ cmake -S <darling-source> -B <build> -G Ninja \
   -DDARLING_COREGRAPHICS_SWIFT_RESOURCE_DIR=<darwin-resources>/lib/swift \
   -DDARLING_COREGRAPHICS_SWIFT_MODULES_DIR=<matching-overlay-modules> \
   -DENABLE_TESTS=ON
-ninja -C <build> -j6 CoreGraphics imp_graphics_layer_test
-ninja -C <build> -n CoreGraphics imp_graphics_layer_test
+ninja -C <build> -j6 CoreGraphics imp_graphics_layer_test imp_graphics_swift_test
+ninja -C <build> -n CoreGraphics imp_graphics_layer_test imp_graphics_swift_test
 ```
 
 On the fleet host wrap build/install commands with `dashboard/qv-slot build`.
