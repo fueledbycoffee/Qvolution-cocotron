@@ -88,22 +88,63 @@ static char *O2UIFontDescriptionFromReply(DBusMessage *reply) {
     return description;
 }
 
-static char *O2UIFontPortalDescription(void) {
+/* libdbus waits 25 s by default for a reply; a bus that accepts but never
+ * answers must not hold up font initialization that long. */
+#define O2UI_FONT_BUS_TIMEOUT_MS 250
+
+/* Session bus from DBUS_SESSION_BUS_ADDRESS only. dbus_bus_get falls back to
+ * autolaunch (spawning dbus-launch when DISPLAY is set) without an address,
+ * and registers with an unbounded Hello; this does neither. */
+static DBusConnection *O2UIFontOpenSessionBus(int timeout) {
+    const char *address = getenv("DBUS_SESSION_BUS_ADDRESS");
+    if (!address || !address[0]) return NULL;
     DBusError error;
     dbus_error_init(&error);
-    DBusConnection *bus = dbus_bus_get_private(DBUS_BUS_SESSION, &error);
+    DBusConnection *bus = dbus_connection_open_private(address, &error);
     if (!bus) { dbus_error_free(&error); return NULL; }
     dbus_connection_set_exit_on_disconnect(bus, FALSE);
+    DBusMessage *hello = dbus_message_new_method_call(DBUS_SERVICE_DBUS, DBUS_PATH_DBUS,
+        DBUS_INTERFACE_DBUS, "Hello");
+    DBusMessage *reply = hello ? dbus_connection_send_with_reply_and_block(bus, hello, timeout, &error) : NULL;
+    if (hello) dbus_message_unref(hello);
+    dbus_error_free(&error);
+    DBusMessageIter value;
+    const char *name = NULL;
+    if (reply && dbus_message_has_signature(reply, "s") && dbus_message_iter_init(reply, &value))
+        dbus_message_iter_get_basic(&value, &name);
+    int registered = name && dbus_bus_set_unique_name(bus, name);
+    if (reply) dbus_message_unref(reply);
+    if (registered) return bus;
+    dbus_connection_close(bus);
+    dbus_connection_unref(bus);
+    return NULL;
+}
+
+/* Never activate the portal service just to read a font name. */
+static DBusMessage *O2UIFontPortalReadRequest(void) {
     DBusMessage *request = dbus_message_new_method_call("org.freedesktop.portal.Desktop",
         "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings", "Read");
-    DBusMessage *reply = NULL;
+    if (!request) return NULL;
+    DBusMessageIter args;
+    const char *space = "org.gnome.desktop.interface", *key = "font-name";
+    dbus_message_iter_init_append(request, &args);
+    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &space) ||
+        !dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &key)) {
+        dbus_message_unref(request);
+        return NULL;
+    }
+    dbus_message_set_auto_start(request, FALSE);
+    return request;
+}
+
+static char *O2UIFontPortalDescription(void) {
+    DBusConnection *bus = O2UIFontOpenSessionBus(O2UI_FONT_BUS_TIMEOUT_MS);
+    if (!bus) return NULL;
+    DBusError error;
+    dbus_error_init(&error);
+    DBusMessage *request = O2UIFontPortalReadRequest(), *reply = NULL;
     if (request) {
-        DBusMessageIter args;
-        const char *space = "org.gnome.desktop.interface", *key = "font-name";
-        dbus_message_iter_init_append(request, &args);
-        if (dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &space) &&
-            dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &key))
-            reply = dbus_connection_send_with_reply_and_block(bus, request, 250, &error);
+        reply = dbus_connection_send_with_reply_and_block(bus, request, O2UI_FONT_BUS_TIMEOUT_MS, &error);
         dbus_message_unref(request);
     }
     char *description = O2UIFontDescriptionFromReply(reply);

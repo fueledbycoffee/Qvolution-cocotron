@@ -6,6 +6,7 @@
 
 static char *uiFontFamily;
 static char *fixedFontFamily;
+#include <dispatch/dispatch.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -105,7 +106,7 @@ static void addAppFont(FcConfig *config, NSString *path) {
     }
 }
 
-static FcConfig *sharedFontConfigWithLockHeld() {
+static FcConfig *sharedFontConfigWithLockHeld(const char *description) {
     static FcConfig *fontConfig = NULL;
 
     if (fontConfig == NULL) {
@@ -121,10 +122,8 @@ static FcConfig *sharedFontConfigWithLockHeld() {
             }
         }
         if (fontConfig) {
-            char *description = O2UIFontPortalDescription();
             uiFontFamily = O2UIFontChooseFamily(fontConfig, description, 0);
             fixedFontFamily = O2UIFontChooseFamily(fontConfig, NULL, 1);
-            free(description);
             if (!uiFontFamily || !fixedFontFamily ||
                 !O2UIFontInstallAliases(fontConfig, uiFontFamily, 0) ||
                 !O2UIFontInstallAliases(fontConfig, fixedFontFamily, 1))
@@ -136,8 +135,13 @@ static FcConfig *sharedFontConfigWithLockHeld() {
 }
 
 FcConfig *O2FontSharedFontConfig() {
+    // Read the desktop font once, before taking the font lock: a slow bus must
+    // not stall every thread that only needs the already loaded config.
+    static dispatch_once_t once;
+    static char *description;
+    dispatch_once(&once, ^{ description = O2UIFontPortalDescription(); });
     @synchronized([O2Font_freetype class]) {
-        return sharedFontConfigWithLockHeld();
+        return sharedFontConfigWithLockHeld(description);
     }
 }
 

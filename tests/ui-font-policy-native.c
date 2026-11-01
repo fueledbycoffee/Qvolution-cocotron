@@ -6,6 +6,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <time.h>
 
 static void parsed(const char *input, const char *expected) {
     char *family = O2UIFontFamilyFromDescription(input);
@@ -87,11 +90,47 @@ static void replyCase(int nested, int malformed) {
     assert(malformed?!description:description&&!strcmp(description,text));
     free(description);dbus_message_unref(reply);
 }
+static double elapsed(struct timespec start) {
+    struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
+    return (now.tv_sec - start.tv_sec) + (now.tv_nsec - start.tv_nsec) / 1e9;
+}
+/* The bus guard: no address means no autolaunch attempt, and a bus that
+ * accepts the connection but never answers costs at most the short bound. */
+static void busGuardCases(void) {
+    DBusMessage *request = O2UIFontPortalReadRequest();
+    assert(request && !dbus_message_get_auto_start(request) && dbus_message_has_signature(request, "ss"));
+    dbus_message_unref(request);
+    char *saved = getenv("DBUS_SESSION_BUS_ADDRESS") ? strdup(getenv("DBUS_SESSION_BUS_ADDRESS")) : NULL;
+    unsetenv("DBUS_SESSION_BUS_ADDRESS");
+    struct timespec start; clock_gettime(CLOCK_MONOTONIC, &start);
+    assert(!O2UIFontOpenSessionBus(O2UI_FONT_BUS_TIMEOUT_MS) && !O2UIFontPortalDescription());
+    assert(elapsed(start) < 1);
+    char directory[] = "/tmp/qv-silent-bus-XXXXXX"; assert(mkdtemp(directory));
+    struct sockaddr_un address = {.sun_family = AF_UNIX};
+    snprintf(address.sun_path, sizeof(address.sun_path), "%s/bus", directory);
+    int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (listener < 0 || bind(listener, (struct sockaddr *)&address, sizeof(address)) || listen(listener, 4)) {
+        puts("SKIP silent bus: Unix sockets unavailable here");
+    } else {
+        char bus[200]; snprintf(bus, sizeof(bus), "unix:path=%s", address.sun_path);
+        setenv("DBUS_SESSION_BUS_ADDRESS", bus, 1);
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        assert(!O2UIFontPortalDescription());
+        double seconds = elapsed(start);
+        printf("silent-bus seconds=%.3f\n", seconds);
+        assert(seconds < 2);
+    }
+    if (listener >= 0) close(listener);
+    unlink(address.sun_path); rmdir(directory);
+    if (saved) { setenv("DBUS_SESSION_BUS_ADDRESS", saved, 1); free(saved); }
+    else unsetenv("DBUS_SESSION_BUS_ADDRESS");
+}
 int main(int argc, char **argv) {
     if (argc==4 && !strcmp(argv[1],"--serve")) {
         int ready=open(argv[3],O_WRONLY|O_CREAT|O_EXCL,0600);assert(ready>=0);
         fakePortal(ready,argv[2],1,0,1);
     }
+    busGuardCases();
     parsed("Inter 11", "Inter"); parsed("  Noto Sans Bold Italic 11.5  ", "Noto Sans");
     parsed("DejaVu Sans Semi-Bold Condensed 14px", "DejaVu Sans"); parsed("Example Book, 11", "Example Book");
     parsed("Font 42 Family Regular 13", "Font 42 Family"); assert(!O2UIFontFamilyFromDescription(NULL));
@@ -139,5 +178,5 @@ int main(int argc, char **argv) {
         printf("H-raster scale=%d height=%.1f\n",scale,height); assert(height>=8 && height<=10);
     }
     FT_Done_Face(face); FT_Done_FreeType(library); FcPatternDestroy(m); FcPatternDestroy(q); free(family); FcConfigDestroy(config);
-    puts("PASS production policy: portal variants/types, exact families, fallback order, aliases, XML, host H cap pixels (native; no AppKit acceptance)");
+    puts("PASS production policy: bus guard (no autolaunch, no autostart, bounded silent bus), portal variants/types, exact families, fallback order, aliases, XML, host H cap pixels (native; no AppKit acceptance)");
 }
