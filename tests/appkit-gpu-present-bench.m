@@ -18,6 +18,7 @@
 #include <sys/resource.h>
 #include <time.h>
 #include <unistd.h>
+#include "gpu-present-bench-policy.h"
 #ifdef NDEBUG
 #error Assertions required
 #endif
@@ -190,6 +191,10 @@ static double percentile(double *v, size_t n, double p) {
     int fdLate = openDescriptors(); long rssLate = residentKilobytes();
     double medianPresent = percentile(present, done, 0.5), p95Present = percentile(present, done, 0.95);
     double medianFrame = percentile(frameTimes, done, 0.5);
+    uint64_t backendFailures = [s[@"failures"] unsignedLongLongValue];
+    uint64_t failures = qvBenchFailures([s[@"requested"] UTF8String], [s[@"renderer"] UTF8String],
+        getenv("QV_BENCH_EXPECT_RENDERER"), [s[@"fallbackReason"] UTF8String], backendFailures,
+        [s[@"swaps"] unsignedLongLongValue], [s[@"checks"] unsignedLongLongValue]);
     NSMutableDictionary *r = [NSMutableDictionary dictionaryWithDictionary:@{
         @"mode": @(mode), @"frames": @(done), @"renderer": s[@"renderer"], @"requested": s[@"requested"],
         @"fallbackReason": s[@"fallbackReason"], @"surface": [NSString stringWithFormat:@"%@x%@", s[@"surfaceWidth"], s[@"surfaceHeight"]],
@@ -198,14 +203,13 @@ static double percentile(double *v, size_t n, double p) {
         @"cpuMsPerFrame": @(cpu * 1e3 / done), @"swaps": s[@"swaps"], @"checks": s[@"checks"],
         @"fullUploads": s[@"fullUploads"], @"partialUploads": s[@"partialUploads"],
         @"uploadedBytes": s[@"uploadedBytes"], @"lastUploadBytes": s[@"lastUploadBytes"],
-        @"failures": s[@"failures"], @"timed": @([s[@"presentsTimed"] unsignedLongLongValue] - timedEarly),
+        @"backendFailures": @(backendFailures), @"failures": @(failures), @"timed": @([s[@"presentsTimed"] unsignedLongLongValue] - timedEarly),
         @"eglSetupMedianMs": @(percentile(phases[0], done, 0.5)), @"eglCopyMedianMs": @(percentile(phases[1], done, 0.5)),
         @"eglUploadDrawMedianMs": @(percentile(phases[2], done, 0.5)), @"eglSwapMedianMs": @(percentile(phases[3], done, 0.5)),
         @"fdAt100": @(fdEarly), @"fdAtEnd": @(fdLate), @"rssKbAt100": @(rssEarly), @"rssKbAtEnd": @(rssLate)}];
     printf("RESULT %s\n", [[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:r options:0 error:NULL]
                                                  encoding:NSUTF8StringEncoding] UTF8String]);
-    const char *expect = getenv("QV_BENCH_EXPECT_RENDERER");
-    if (expect && strcmp(expect, [s[@"renderer"] UTF8String])) fail("unexpected renderer");
+    if (failures) fail("unexpected renderer or backend failure");
     if (!strcmp(mode, "damage") && [s[@"renderer"] isEqualToString:@"egl"] && [s[@"partialUploads"] unsignedLongLongValue] < done - 1)
         fail("damage frames were not partial uploads");
     if (!strcmp(mode, "soak") && frames >= 200) {
