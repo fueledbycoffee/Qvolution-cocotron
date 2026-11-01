@@ -255,16 +255,33 @@ static const NSTimeInterval kOverlayFadeStep = 1.0 / 60.0;
     }
 }
 
-- (void) _overlayFadeStep: (NSTimer *) timer {
-    NSTimeInterval elapsed =
-            [NSDate timeIntervalSinceReferenceDate] - _overlayFadeStart;
-    CGFloat opacity = 1.0 - elapsed / kOverlayFadeDuration;
+// The knob's opacity follows the clock from the last reveal (stored in
+// _overlayFadeStart), so it is gone 1.2 s after the last scroll even when
+// the run loop delivers the timers late. Timers only trigger redraws.
+- (CGFloat) _overlayOpacity {
+    NSTimeInterval elapsed;
 
-    if (opacity <= 0) {
+    if (_overlayOpacity <= 0)
+        return 0;
+    if (_isHovered || _isHighlighted)
+        return 1;
+    elapsed = [NSDate timeIntervalSinceReferenceDate] - _overlayFadeStart -
+              kOverlayIdleDelay;
+    if (elapsed < 0)
+        return 1;
+    // Reduced motion hides the knob at once instead of animating it.
+    if ([[X11DesktopSettings sharedSettings] reducedMotion])
+        return 0;
+    return MAX(0, 1 - elapsed / kOverlayFadeDuration);
+}
+
+- (void) _overlayFadeStep: (NSTimer *) timer {
+    if ([self _overlayOpacity] <= 0) {
         [self _stopOverlayTimer];
-        opacity = 0;
+        [self _setOverlayOpacity: 0];
+        return;
     }
-    [self _setOverlayOpacity: opacity];
+    [self setNeedsDisplay: YES];
 }
 
 - (void) _overlayIdle: (NSTimer *) timer {
@@ -272,33 +289,25 @@ static const NSTimeInterval kOverlayFadeStep = 1.0 / 60.0;
         [self _stopOverlayTimer];
         return;
     }
-    // Reduced motion hides the knob at once instead of animating it.
-    if ([[X11DesktopSettings sharedSettings] reducedMotion]) {
-        [self _stopOverlayTimer];
-        [self _setOverlayOpacity: 0];
-        return;
-    }
-    _overlayFadeStart = [NSDate timeIntervalSinceReferenceDate];
     [self _scheduleOverlayTimer: kOverlayFadeStep
                        selector: @selector(_overlayFadeStep:)
                         repeats: YES];
+    [self _overlayFadeStep: nil];
 }
 
 // Shows the overlay knob and restarts the idle delay before it fades.
 - (void) _revealOverlay {
     if (![self _isOverlay])
         return;
-    [self _setOverlayOpacity: 1];
+    _overlayFadeStart = [NSDate timeIntervalSinceReferenceDate];
+    _overlayOpacity = 1;
+    [self setNeedsDisplay: YES];
     if (_isHovered || _isHighlighted)
         [self _stopOverlayTimer];
     else
         [self _scheduleOverlayTimer: kOverlayIdleDelay
                            selector: @selector(_overlayIdle:)
                             repeats: NO];
-}
-
-- (CGFloat) _overlayOpacity {
-    return _overlayOpacity;
 }
 
 - (BOOL) _isHovered {
@@ -313,7 +322,7 @@ static const NSTimeInterval kOverlayFadeStep = 1.0 / 60.0;
     if ([self _isOverlay]) {
         if (hovered && [self isEnabled])
             [self _revealOverlay];
-        else if (!hovered && _overlayOpacity > 0)
+        else if (!hovered && [self _overlayOpacity] > 0)
             [self _revealOverlay];
     }
 }
@@ -343,7 +352,7 @@ static const NSTimeInterval kOverlayFadeStep = 1.0 / 60.0;
 
 // A faded overlay scroller lets clicks reach the content beneath it.
 - (NSView *) hitTest: (NSPoint) point {
-    if ([self _isOverlay] && _overlayOpacity <= 0 && !_isHovered)
+    if ([self _isOverlay] && [self _overlayOpacity] <= 0 && !_isHovered)
         return nil;
     return [super hitTest: point];
 }
@@ -694,7 +703,7 @@ static inline CGFloat roundFloat(CGFloat value) {
         [[self graphicsStyle] drawOverlayScrollerKnobInRect: knob
                                                    vertical: [self isVertical]
                                                    expanded: _isHovered || _isHighlighted
-                                                    opacity: _overlayOpacity];
+                                                    opacity: [self _overlayOpacity]];
     else
         [[self graphicsStyle] drawScrollerKnobInRect: knob
                                             vertical: [self isVertical]
@@ -721,12 +730,14 @@ static inline CGFloat roundFloat(CGFloat value) {
     if ([self _isOverlay]) {
         // Overlay scrollers float over the content: nothing but the knob,
         // plus a track while the pointer is over them.
-        if (_overlayOpacity <= 0)
+        CGFloat opacity = [self _overlayOpacity];
+
+        if (opacity <= 0)
             return;
         if (_isHovered || _isHighlighted)
             [[self graphicsStyle] drawOverlayScrollerTrackInRect: [self bounds]
                                                         vertical: [self isVertical]
-                                                         opacity: _overlayOpacity];
+                                                         opacity: opacity];
         [self drawKnob];
         return;
     }
