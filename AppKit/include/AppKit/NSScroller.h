@@ -60,6 +60,10 @@ typedef NS_ENUM(NSInteger, NSScrollerKnobStyle) {
 
 typedef NSUInteger NSUsableScrollerParts;
 
+@class NSTimer;
+
+APPKIT_EXPORT NSString *const NSPreferredScrollerStyleDidChangeNotification;
+
 @interface NSScroller : NSControl {
     id _target;
     SEL _action;
@@ -80,6 +84,13 @@ typedef NSUInteger NSUsableScrollerParts;
     NSScrollerStyle _scrollerStyle;
     NSScrollerKnobStyle _knobStyle;
     NSControlTint _controlTint;
+
+    // Overlay presentation: opacity of the knob, hover state and fade timer.
+    CGFloat _overlayOpacity;
+    BOOL _isHovered;
+    NSTimer *_overlayTimer;
+    NSTimeInterval _overlayFadeStart;
+    id _overlayTrackingArea;
 }
 
 + (CGFloat) scrollerWidth;

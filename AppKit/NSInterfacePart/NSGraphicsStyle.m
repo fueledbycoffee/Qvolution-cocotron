@@ -793,23 +793,132 @@ static void NSControlFillRing(NSRect outer, CGFloat outerRadius, NSRect inner,
     }
 }
 
+// Scroller geometry from the visual theme spec (section 5): a 7 px capsule
+// knob, centred in a legacy track or 2 px from the trailing edge of an
+// overlay scroller, where hovering widens it to 11 px.
+#define SCROLLER_KNOB_THICKNESS 7
+#define SCROLLER_KNOB_EXPANDED_THICKNESS 11
+#define SCROLLER_KNOB_EDGE_INSET 2
+
+static NSRect scrollerCapsuleRect(NSRect knob, BOOL vertical, CGFloat thickness,
+                                  BOOL trailing, BOOL flipped)
+{
+    if (vertical) {
+        knob = NSInsetRect(knob, 0, SCROLLER_KNOB_EDGE_INSET);
+        if (trailing)
+            knob.origin.x = NSMaxX(knob) - SCROLLER_KNOB_EDGE_INSET - thickness;
+        else
+            knob.origin.x += floor((NSWidth(knob) - thickness) / 2);
+        knob.size.width = thickness;
+    } else {
+        knob = NSInsetRect(knob, SCROLLER_KNOB_EDGE_INSET, 0);
+        if (trailing)
+            // The trailing edge of a horizontal scroller is its bottom.
+            knob.origin.y = flipped ? NSMaxY(knob) - SCROLLER_KNOB_EDGE_INSET - thickness
+                                    : NSMinY(knob) + SCROLLER_KNOB_EDGE_INSET;
+        else
+            knob.origin.y += floor((NSHeight(knob) - thickness) / 2);
+        knob.size.height = thickness;
+    }
+    return knob;
+}
+
+static void fillScrollerCapsule(NSRect rect, NSColor *color) {
+    CGFloat radius = MIN(NSWidth(rect), NSHeight(rect)) / 2;
+
+    if (NSIsEmptyRect(rect))
+        return;
+    [color setFill];
+    [[NSBezierPath bezierPathWithRoundedRect: rect xRadius: radius yRadius: radius]
+            fill];
+}
+
+static NSColor *scrollerColorWithOpacity(NSColor *color, CGFloat opacity) {
+    if (opacity >= 1)
+        return color;
+    return [color colorWithAlphaComponent: [color alphaComponent] * opacity];
+}
+
+// The leading edge is the one facing the content: the left of a vertical
+// scroller and the top of a horizontal one.
+- (void) drawScrollerLeadingEdgeInRect: (NSRect) rect
+                              vertical: (BOOL) vertical
+                                 color: (NSColor *) color
+{
+    NSRect line = rect;
+
+    if (vertical)
+        line.size.width = 1;
+    else {
+        line.size.height = 1;
+        if (![_view isFlipped])
+            line.origin.y = NSMaxY(rect) - 1;
+    }
+    [color setFill];
+    NSRectFillUsingOperation(line, NSCompositeSourceOver);
+}
+
 - (void) drawScrollerKnobInRect: (NSRect) rect
                        vertical: (BOOL) vertical
                       highlight: (BOOL) highlight
 {
-    [self drawPushButtonNormalInRect: rect defaulted: NO];
+    NSColor *knob = [NSColor knobColor];
+
+    // Hovered or dragged knobs double the knob colour's opacity.
+    if (highlight)
+        knob = [knob colorWithAlphaComponent: MIN(1, [knob alphaComponent] * 2)];
+    fillScrollerCapsule(scrollerCapsuleRect(rect, vertical, SCROLLER_KNOB_THICKNESS,
+                                            NO, [_view isFlipped]),
+                        knob);
 }
 
 - (void) drawScrollerTrackInRect: (NSRect) rect
                         vertical: (BOOL) vertical
                         upOrLeft: (BOOL) upOrLeft
 {
-    [[NSColor colorWithCalibratedWhite: 0.9 alpha: 1] setFill];
+    [[NSColor scrollBarColor] setFill];
     NSRectFill(rect);
+    [self drawScrollerLeadingEdgeInRect: rect
+                               vertical: vertical
+                                  color: [NSColor separatorColor]];
 }
 
 - (void) drawScrollerTrackInRect: (NSRect) rect vertical: (BOOL) vertical {
     [self drawScrollerTrackInRect: rect vertical: vertical upOrLeft: NO];
+}
+
+- (void) drawOverlayScrollerKnobInRect: (NSRect) rect
+                              vertical: (BOOL) vertical
+                              expanded: (BOOL) expanded
+                               opacity: (CGFloat) opacity
+{
+    CGFloat thickness = expanded ? SCROLLER_KNOB_EXPANDED_THICKNESS
+                                 : SCROLLER_KNOB_THICKNESS;
+    NSColor *knob = [NSColor knobColor];
+
+    if (opacity <= 0)
+        return;
+    fillScrollerCapsule(scrollerCapsuleRect(rect, vertical, thickness, YES,
+                                            [_view isFlipped]),
+                        scrollerColorWithOpacity(knob, opacity));
+}
+
+- (void) drawOverlayScrollerTrackInRect: (NSRect) rect
+                               vertical: (BOOL) vertical
+                                opacity: (CGFloat) opacity
+{
+    NSColor *track = [NSColor controlBackgroundColor];
+
+    if (opacity <= 0)
+        return;
+    track = [track colorWithAlphaComponent: [track alphaComponent] * 0.9];
+    [scrollerColorWithOpacity(track, opacity) setFill];
+    NSRectFillUsingOperation(rect, NSCompositeSourceOver);
+    [self drawScrollerLeadingEdgeInRect: rect
+                               vertical: vertical
+                                  color: scrollerColorWithOpacity(
+                                                 [NSColor separatorColor],
+                                                 opacity)];
 }
 
 @end

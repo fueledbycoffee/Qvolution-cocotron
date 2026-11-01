@@ -42,9 +42,6 @@ NSString *const NSScrollViewWillStartLiveMagnifyNotification =
 NSString *const NSScrollViewDidEndLiveMagnifyNotification =
         @"NSScrollViewDidEndLiveMagnifyNotification";
 
-NSString *const NSPreferredScrollerStyleDidChangeNotification =
-        @"NSPreferredScrollerStyleDidChangeNotification";
-
 @implementation NSScrollView
 
 @synthesize horizontalScrollElasticity = _horizontalScrollElasticity;
