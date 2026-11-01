@@ -47,6 +47,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <time.h>
+#include <dlfcn.h>
 #import "WaylandScale.h"
 #include <math.h>
 #import "../NSWindowFrameTrace.h"
@@ -86,6 +87,19 @@ static const CGFloat WaylandTitleHeight = NSTitlebarHeight;
 static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags) {
     union wl_argument args[1] = {{.o = NULL}};
     WaylandMarshal(proxy, opcode, NULL, flags, args);
+}
+
+// The swap flushes the presentation context, and the staging ring is fenced,
+// so the application thread need not wait for the GPU as CGLFlushDrawable's
+// glFinish does. Resolved at run time so this backend still loads against an
+// OpenGL framework without the entry point.
+static CGLError swapWithoutFinish(CGLContextObj context) {
+    static CGLError (*swap)(CGLContextObj);
+    if (!swap) {
+        swap = (CGLError (*)(CGLContextObj)) dlsym(RTLD_DEFAULT, "CGLFlushDrawableWithoutFinish");
+        if (!swap) swap = CGLFlushDrawable;
+    }
+    return swap(context);
 }
 
 static uint64_t elapsedNanoseconds(const struct timespec *from, const struct timespec *to) {
@@ -1345,7 +1359,7 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
             union wl_argument args[] = {{.o = NULL}};
             _frameCallback = WaylandCreateObject(_surface, WP_SURFACE_FRAME,
                 &wl_callback_interface, args, WaylandObjectFrameCallback, self);
-            if (!_frameCallback || CGLFlushDrawable(_eglContext) != kCGLNoError)
+            if (!_frameCallback || swapWithoutFinish(_eglContext) != kCGLNoError)
                 failure = @"native EGL swap failed";
             else {
                 if (_presentTiming) {
