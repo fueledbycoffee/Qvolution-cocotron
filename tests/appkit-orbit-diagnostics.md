@@ -26,6 +26,10 @@ RegisterWaylandMenu from the current owner of space.unmade.GlobalMenu
 (`registered=1`). `reader-is-registrar` is informational: Orbit reads from a
 sibling process whose unique name differs from the `registrar` owner.
 
+After every presentation change, `menu-view` records each affected window's
+local menu strip: whether it exists, whether it is hidden, and its height next
+to the window height.
+
 `layout-reply queued=1` is the existing successful `dbus_connection_send`
 criterion. `transport-progress pending-write=0` means the local connection's
 queue drained. Neither proves peer receipt or GNOME pixel presentation, and

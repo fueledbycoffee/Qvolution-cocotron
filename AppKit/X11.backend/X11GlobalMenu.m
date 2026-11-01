@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <objc/runtime.h>
 
 static const char *orbitText(const char *text) { return text ? text : "(none)"; }
 
@@ -175,6 +176,20 @@ static void orbitToggleTimeout(DBusTimeout *timeout, void *data) {
         NSLog(@"Orbit global menu: cannot schedule D-Bus timeout");
 }
 
+// Report the window's own menu strip after a presentation change, so a log shows
+// whether the local menu actually left the window rather than only the decision.
+static void orbitMenuViewDiagnostic(NSWindow *window) {
+    // Same opt-in test as orbitDiagnostic, made first so the reflection is skipped when off.
+    const char *option = getenv("DARLING_ORBIT_MENU_DIAGNOSTICS");
+    if (!option || !*option || strcmp(option, "0") == 0)
+        return;
+    Ivar ivar = class_getInstanceVariable([NSWindow class], "_menuView");
+    NSView *menuView = ivar ? object_getIvar(window, ivar) : nil;
+    orbitDiagnostic("menu-view", "window=%p present=%d hidden=%d menu-height=%g window-height=%g",
+        window, menuView != nil, [menuView isHidden], menuView ? [menuView frame].size.height : 0.0,
+        [window frame].size.height);
+}
+
 static void dbusSocketCallback(CFSocketRef s, CFSocketCallBackType type,
                                CFDataRef address, const void *data, void *info) {
     X11GlobalMenu *self = (X11GlobalMenu *)info;
@@ -316,6 +331,7 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
                 [window _hideMenuViewIfNeeded];
             else if (window != [NSApp modalWindow])
                 [window _showMenuViewIfNeeded];
+            orbitMenuViewDiagnostic(window);
         }
     }
     [windows release];

@@ -93,6 +93,7 @@ with tempfile.TemporaryDirectory(prefix='orbit-presentation-host-') as directory
                       'event=layout-request', 'reader-is-registrar=0', 'reader-is-registrar=1', 'bus-sender=0', 'qualified=1',
                       'event=layout-reply', 'queued=0', 'queued=1',
                       'delivery=queue-only', 'event=decision hide=1',
+                      'event=menu-view', 'present=1 hidden=1', 'present=1 hidden=0',
                       'reason=progress-failed', 'reason=disconnect']:
             assert token in log, token
         assert all('pid=' in line and 'event=' in line for line in log.splitlines())
