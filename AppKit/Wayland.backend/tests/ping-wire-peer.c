@@ -21,10 +21,11 @@ static struct WaylandLibrary library;
 static WaylandEventPump pump;
 static struct wl_proxy *base;
 static int injected;
-static int native_errno(void) { return injected ? 11 : errno; }
+static bool main_thread_reader;
+static int native_errno(void) { return errno; }
 static int flush_with_backpressure(struct wl_display *display) {
     // Exercise the production POLLOUT/cancel-read retry path.
-    if (injected < 3) { ++injected; return -1; }
+    if (injected < 3) { ++injected; errno = EAGAIN; return -1; }
     return wl_display_flush(display);
 }
 static void wake_main(void *info) { __atomic_add_fetch(&wakes, 1, __ATOMIC_RELAXED); }
@@ -86,6 +87,7 @@ static void global(void *data, struct wl_registry *registry, uint32_t name,
     base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
     wl_proxy_set_queue(base, pump.queue);
     wl_proxy_add_dispatcher(base, WaylandPingDispatch, &library, &pump);
+    if (!main_thread_reader) assert(WaylandPumpStart(&pump));
 }
 static void removed(void *data, struct wl_registry *registry, uint32_t name) {}
 static const struct wl_registry_listener registry_listener = {global, removed};
@@ -96,6 +98,7 @@ static int callback(const void *impl, void *proxy, uint32_t opcode,
 }
 int main(int argc, char **argv) {
     main_thread = pthread_self();
+    main_thread_reader = argc > 1 && !strcmp(argv[1], "--main-thread-reader");
     int sockets[2]; assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0);
     peer_fd = sockets[0]; assert(pipe(peer_stop) == 0);
     pthread_t peer; assert(pthread_create(&peer, NULL, serve, NULL) == 0);
@@ -104,6 +107,7 @@ int main(int argc, char **argv) {
     WAYLAND_CLIENT_FUNCTIONS(ASSIGN)
 #undef ASSIGN
     library.native_errno = native_errno;
+    library.wl_display_flush = flush_with_backpressure;
     pump.library = &library; pump.display = display;
     pump.queue = wl_display_create_queue(display); assert(pump.queue);
     pump.wake = wake_main;
@@ -123,9 +127,7 @@ int main(int argc, char **argv) {
     wl_proxy_wrapper_destroy(factory);
     assert(sync); wl_proxy_add_dispatcher(sync, callback, NULL, NULL);
     assert(wl_display_flush(display) >= 0);
-    bool baseline = argc > 1 && !strcmp(argv[1], "--main-thread-reader");
-    library.wl_display_flush = flush_with_backpressure;
-    if (!baseline) assert(WaylandPumpStart(&pump));
+    bool baseline = main_thread_reader;
     double until = now() + 1000;
     while (now() < until) {} // No main-thread dispatch for one second.
     assert(callbacks == 0);

@@ -334,6 +334,19 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         return nil;
     }
 
+    CFRunLoopSourceContext context = {.version = 0, .info = self,
+                                       .perform = sourceCallback};
+    _wlSource = CFRunLoopSourceCreate(NULL, 0, &context);
+    _eventPump.wake = wakeMain;
+    _eventPump.info = _wlSource;
+    if (_wlSource == NULL) {
+        NSLog(@"Wayland backend: cannot create the compositor run-loop source");
+        [self release];
+        return nil;
+    }
+    CFRunLoopAddSource(CFRunLoopGetMain(), _wlSource, kCFRunLoopCommonModes);
+
+
     union wl_argument args[1] = {{.o = NULL}};
     _registry = WaylandCreateObject((struct wl_proxy *) _wlDisplay,
                                     WP_DISPLAY_GET_REGISTRY,
@@ -348,6 +361,11 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         NSLog(@"Wayland backend: the compositor connection failed during setup "
               @"(error %d), trying the next backend",
               WL.wl_display_get_error(_wlDisplay));
+        [self release];
+        return nil;
+    }
+    if (_wmBase && !_eventPump.started) {
+        NSLog(@"Wayland backend: cannot start the compositor event pump");
         [self release];
         return nil;
     }
@@ -403,17 +421,6 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
             &wp_viewport_interface, viewport, 0, nil);
     }
 
-    CFRunLoopSourceContext context = {.version = 0, .info = self,
-                                       .perform = sourceCallback};
-    _wlSource = CFRunLoopSourceCreate(NULL, 0, &context);
-    _eventPump.wake = wakeMain;
-    _eventPump.info = _wlSource;
-    if (_wlSource == NULL || !WaylandPumpStart(&_eventPump)) {
-        NSLog(@"Wayland backend: cannot start the compositor event pump");
-        [self release];
-        return nil;
-    }
-    CFRunLoopAddSource(CFRunLoopGetMain(), _wlSource, kCFRunLoopCommonModes);
 
     [self runAfterDispatchBlocks];
     [self flush];
@@ -632,6 +639,9 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                             object: nil];
         WL.wl_proxy_set_queue(_wmBase, _eventPump.queue);
         WL.wl_proxy_add_dispatcher(_wmBase, WaylandPingDispatch, &WL, &_eventPump);
+        // Protect setup roundtrips and EGL/cursor initialization as well as
+        // application work after -init returns.
+        WaylandPumpStart(&_eventPump);
     } else if (strcmp(interface, "zxdg_decoration_manager_v1") == 0 &&
                _decorationManager == NULL)
     {
