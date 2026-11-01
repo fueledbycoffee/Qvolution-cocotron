@@ -81,7 +81,7 @@ int main(void){setbuf(stdout,NULL);
    assert(spans==spanHash);
    assert(!memcmp(sa.pixels,sb.pixels,64*48*sizeof(O2argb32f)));
    if(a._clipSamples)assert(!memcmp(a._clipSamples,b._clipSamples,64*48*8*sizeof(uint32_t)));
-   for(int i=0;i<64*256+1;i++)assert(a._winding[i]==0&&b._winding[i]==0);
+   for(int i=0;i<64*256+1;i++)assert(a._winding[i]==0&&b._winding[i]==0&&a._rowIncrease[i]==0);
    for(int i=0;i<64;i++)assert(a._increase[i]==INT_MAX&&b._increase[i]==INT_MAX);
    cases++;
   }

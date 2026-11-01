@@ -48,7 +48,7 @@ typedef struct {O2argb32f color;} O2Paint;
 typedef O2Surface O2Image;
 typedef struct O2Context_builtin {
  int _vpx,_vpy,_vpwidth,_vpheight,_edgeCount,_edgeCapacity;
- Edge **_edges,**_sortCache;int *_winding,*_increase;
+ Edge **_edges,**_sortCache;int *_winding,*_increase,*_rowIncrease;
  int sampleSizeShift,numSamples,samplesWeight;O2Float *samplesX,samplesInitialY,samplesDeltaY;int alias;
  void (*_writeCoverageFunction)(O2Surface *,O2Surface *,O2Paint *,int,int,int,int,void *);
  void *_blendFunction;struct O2Context_builtin *_clipContext;O2Surface *_surface;uint32_t *_clipSamples;BOOL _clipIsSoftPhase;
@@ -87,8 +87,8 @@ static O2Context_builtin *createClipContext(size_t w,size_t h){O2Context_builtin
 f=function('static O2Surface *createClipMaskImage(').replace('O2Image *image','O2MaskInput *image').replace('[image directData]','image').replace('[data bytes]','data->bytes').replace('[data length]','data->length').replace('[context->_surface retain]','context->_surface').replace('[context release];','free(context);')
 src+=f+'\n'
 src+=r'''
-static void init(O2Context_builtin *c,O2Surface *s,int w,int h){memset(c,0,sizeof(*c));s->width=w;s->height=h;s->pixels=calloc(w*h,sizeof(O2argb32f));c->_surface=s;c->_edgeCapacity=256;c->_edges=calloc(256,sizeof(Edge *));c->_sortCache=calloc(129,sizeof(Edge *));c->_winding=calloc(w*256+1,sizeof(int));c->_increase=malloc(w*sizeof(int));for(int x=0;x<w;x++)c->_increase[x]=INT_MAX;c->samplesX=calloc(256,sizeof(O2Float));c->_writeCoverageFunction=writeCoverage;O2RasterizerSetViewport(c,0,0,w,h);O2RasterizerSetShouldAntialias(c,YES,64);}
-static void dispose(O2Context_builtin *c){O2RasterizerClear(c);free(c->_edges);free(c->_sortCache);free(c->_winding);free(c->_increase);free(c->samplesX);free(c->_clipSamples);free(c->_surface->pixels);}
+static void init(O2Context_builtin *c,O2Surface *s,int w,int h){memset(c,0,sizeof(*c));s->width=w;s->height=h;s->pixels=calloc(w*h,sizeof(O2argb32f));c->_surface=s;c->_edgeCapacity=256;c->_edges=calloc(256,sizeof(Edge *));c->_sortCache=calloc(129,sizeof(Edge *));c->_winding=calloc(w*256+1,sizeof(int));c->_rowIncrease=calloc(w*256+1,sizeof(int));c->_increase=malloc(w*sizeof(int));for(int x=0;x<w;x++)c->_increase[x]=INT_MAX;c->samplesX=calloc(256,sizeof(O2Float));c->_writeCoverageFunction=writeCoverage;O2RasterizerSetViewport(c,0,0,w,h);O2RasterizerSetShouldAntialias(c,YES,64);}
+static void dispose(O2Context_builtin *c){O2RasterizerClear(c);free(c->_edges);free(c->_sortCache);free(c->_winding);free(c->_rowIncrease);free(c->_increase);free(c->samplesX);free(c->_clipSamples);free(c->_surface->pixels);}
 static void triangle(O2Context_builtin *c){O2DContextAddEdge(c,(O2Point){2,2},(O2Point){14,2});O2DContextAddEdge(c,(O2Point){14,2},(O2Point){2,14});O2DContextAddEdge(c,(O2Point){2,14},(O2Point){2,2});}
 static void rect(O2Context_builtin *c,int x,int y,int w,int h){O2DContextAddEdge(c,(O2Point){x,y},(O2Point){x+w,y});O2DContextAddEdge(c,(O2Point){x+w,y},(O2Point){x+w,y+h});O2DContextAddEdge(c,(O2Point){x+w,y+h},(O2Point){x,y+h});O2DContextAddEdge(c,(O2Point){x,y+h},(O2Point){x,y});}
 static int cut(O2Point *out,const O2Point *p,int n,double nx,double ny,double d){int count=0;for(int i=0;i<n;i++){O2Point a=p[i],b=p[(i+1)%n];double da=nx*a.x+ny*a.y-d,db=nx*b.x+ny*b.y-d;if(da<=0)out[count++]=a;if((da<0&&db>0)||(da>0&&db<0)){double t=da/(da-db);out[count++]=(O2Point){a.x+t*(b.x-a.x),a.y+t*(b.y-a.y)};}}return count;}

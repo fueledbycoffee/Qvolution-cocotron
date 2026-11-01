@@ -99,6 +99,9 @@ void O2ContextWriteGlyphCoverageSpanFloat(O2Context_builtin *self,
 
     int *_winding;
     int *_increase;
+    // Per-pixel, per-sample-row winding carried to every later pixel of the
+    // scanline, for edges that end inside the row (see FillEdgesOnSurface).
+    int *_rowIncrease;
 
     int sampleSizeShift;
     int numSamples;
