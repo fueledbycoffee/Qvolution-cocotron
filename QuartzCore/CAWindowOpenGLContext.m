@@ -175,14 +175,50 @@ static BOOL clampDamage(CGRect rect, size_t width, size_t height, size_t box[4])
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         _presentWidth = width; _presentHeight = height;
     }
-    // Texture row 0 is the surface's top row, as in the CPU storage.
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)(stride / 4));
-    glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
     CGRect all = CGRectMake(0, 0, width, height);
     const CGRect *rects = whole ? &all : damage;
     unsigned rectCount = whole ? 1 : count, uploaded = 0;
+    // Copy the damaged rows into a mapped staging buffer laid out like the
+    // surface; the texture update then reads it asynchronously. Uploading from
+    // client memory instead makes the driver copy synchronously inside
+    // glTexSubImage2D (about 7 ms for 1932x1144 on an RTX 4070).
+    size_t needed = stride * height;
+    const uint8_t *base = source;
+    if (!_uploadBuffers[0])
+        glGenBuffers(3, _uploadBuffers);
+    if (_uploadBufferSize != needed) {
+        for (unsigned i = 0; i < 3; ++i) {
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, _uploadBuffers[i]);
+            glBufferData(GL_PIXEL_UNPACK_BUFFER, (GLsizeiptr)needed, NULL, GL_STREAM_DRAW);
+        }
+        _uploadBufferSize = needed;
+    }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, _uploadBuffers[_uploadNext]);
+    _uploadNext = (_uploadNext + 1) % 3;
+    uint8_t *staging = glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, (GLsizeiptr)needed,
+                                        GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+    if (staging) {
+        for (unsigned i = 0; i < rectCount; ++i) {
+            size_t box[4];
+            if (!clampDamage(rects[i], width, height, box))
+                continue;
+            size_t offset = box[1] * stride + box[0] * 4, rowBytes = box[2] * 4;
+            if (rowBytes == stride)
+                memcpy(staging + offset, source + offset, rowBytes * box[3]);
+            else
+                for (size_t y = 0; y < box[3]; ++y)
+                    memcpy(staging + offset + y * stride, source + offset + y * stride, rowBytes);
+        }
+        // GL_FALSE means the store was lost while mapped; upload from the surface instead.
+        if (glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER))
+            base = NULL;
+    }
+    if (base)
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    // Texture row 0 is the surface's top row, as in the CPU storage.
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)(stride / 4));
+    glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
     uint64_t bytes = 0;
     for (unsigned i = 0; i < rectCount; ++i) {
         size_t box[4];
@@ -191,9 +227,10 @@ static BOOL clampDamage(CGRect rect, size_t width, size_t height, size_t box[4])
         glPixelStorei(GL_UNPACK_SKIP_PIXELS, (GLint)box[0]);
         glPixelStorei(GL_UNPACK_SKIP_ROWS, (GLint)box[1]);
         glTexSubImage2D(GL_TEXTURE_2D, 0, (GLint)box[0], (GLint)box[1], (GLsizei)box[2], (GLsizei)box[3],
-                        GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, source);
+                        GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, base);
         bytes += (uint64_t)box[2] * box[3] * 4; ++uploaded;
     }
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
     glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);

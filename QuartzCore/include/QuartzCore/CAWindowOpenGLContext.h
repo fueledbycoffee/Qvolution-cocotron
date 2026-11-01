@@ -8,6 +8,11 @@
     size_t _presentWidth, _presentHeight;
     uint64_t _lastUploadBytes;
     unsigned _lastUploadRects;
+    // Staging ring for uploads: the CPU copies into one while the GPU may still
+    // be reading the others, so glTexSubImage2D does not wait on the copy.
+    GLuint _uploadBuffers[3];
+    size_t _uploadBufferSize;
+    unsigned _uploadNext;
 }
 
 - initWithCGLContext: (CGLContextObj) cglContext;
