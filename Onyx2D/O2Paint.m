@@ -47,3 +47,62 @@ void O2PaintRelease(O2PaintRef self) {
 }
 
 @end
+
+@interface O2Paint_alpha : O2Paint {
+  @public
+    O2Paint *_paint;
+    O2Float _alpha;
+}
+- initWithPaint: (O2Paint *) paint alpha: (O2Float) alpha;
+@end
+
+@implementation O2Paint_alpha
+
+static int alpha_argb8u_PRE(O2Paint *paint, int x, int y,
+                           O2argb8u *span, int length) {
+    O2Paint_alpha *self = (O2Paint_alpha *)paint;
+    int chunk = O2PaintReadSpan_argb8u_PRE(self->_paint, x, y, span, length);
+    for (int i = 0; i < chunk; i++) {
+        span[i].r = O2ByteFromFloat(span[i].r / 255.0 * self->_alpha);
+        span[i].g = O2ByteFromFloat(span[i].g / 255.0 * self->_alpha);
+        span[i].b = O2ByteFromFloat(span[i].b / 255.0 * self->_alpha);
+        span[i].a = O2ByteFromFloat(span[i].a / 255.0 * self->_alpha);
+    }
+    return chunk;
+}
+
+static int alpha_largb32f_PRE(O2Paint *paint, int x, int y,
+                             O2argb32f *span, int length) {
+    O2Paint_alpha *self = (O2Paint_alpha *)paint;
+    int chunk = O2PaintReadSpan_largb32f_PRE(self->_paint, x, y, span, length);
+    for (int i = 0; i < chunk; i++)
+        span[i] = O2argb32fMultiplyByFloat(span[i], self->_alpha);
+    return chunk;
+}
+
+- initWithPaint: (O2Paint *) paint alpha: (O2Float) alpha {
+    O2PaintInitWithTransform(self, O2AffineTransformIdentity);
+    _paint = O2PaintRetain(paint);
+    _alpha = alpha;
+    _paint_largb8u_PRE = paint->_paint_largb8u_PRE != NULL ? alpha_argb8u_PRE : NULL;
+    _paint_largb32f_PRE = alpha_largb32f_PRE;
+    return self;
+}
+
+- (void) dealloc {
+    O2PaintRelease(_paint);
+    [super dealloc];
+}
+
+@end
+
+O2PaintRef O2PaintCreateWithAlpha(O2PaintRef paint, O2Float alpha) {
+    // Same range rule as O2GStateSetAlpha: clamp to [0, 1], NaN is 0.
+    if (!(alpha > 0))
+        alpha = 0;
+    else if (alpha > 1)
+        alpha = 1;
+    if (alpha == 1)
+        return O2PaintRetain(paint);
+    return [[O2Paint_alpha alloc] initWithPaint: paint alpha: alpha];
+}

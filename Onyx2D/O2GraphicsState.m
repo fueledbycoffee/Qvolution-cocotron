@@ -468,6 +468,12 @@ O2Float O2GStateAlpha(O2GState *self) {
 }
 
 void O2GStateSetAlpha(O2GState *self, O2Float alpha) {
+    // The public contract is [0, 1]; out of range is a GUESS (clamp), and NaN
+    // draws nothing (a negated comparison is true for NaN).
+    if (!(alpha > 0))
+        alpha = 0;
+    else if (alpha > 1)
+        alpha = 1;
     self->_alpha = alpha;
 }
 
