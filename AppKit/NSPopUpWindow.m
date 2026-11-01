@@ -17,6 +17,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSPopUpView.h>
+#import <AppKit/NSColor.h>
 #import <AppKit/NSPopUpWindow.h>
 #import <CoreGraphics/CGWindowPrivate.h>
 
@@ -28,6 +29,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
                       backing: NSBackingStoreBuffered
                         defer: NO];
     [self setLevel: NSPopUpMenuWindowLevel];
+    // The pop-up view draws a rounded menu; the window around it is clear.
+    [self setOpaque: NO];
+    [self setBackgroundColor: [NSColor clearColor]];
     _releaseWhenClosed = YES;
 
     _view = [[NSPopUpView alloc]

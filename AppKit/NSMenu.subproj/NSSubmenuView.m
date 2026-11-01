@@ -167,7 +167,7 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
     unsigned i, count = [items count];
     NSPoint origin = itemArea.origin;
 
-    [[self graphicsStyle] drawMenuWindowBackgroundInRect: rect];
+    [[self graphicsStyle] drawMenuWindowBackgroundInRect: bounds];
 
     for (i = 0; i < count; i++) {
         NSMenuItem *item = [items objectAtIndex: i];

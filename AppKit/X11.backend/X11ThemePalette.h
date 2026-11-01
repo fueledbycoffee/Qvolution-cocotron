@@ -44,6 +44,7 @@ static inline bool QVThemeLookup(const char *name, bool dark, bool highContrast,
     ROLE("windowFrameColor", QVWhite(0,highContrast?1:.15), highContrast?QVRGB(0xEBEBEB):QVWhite(0,.6))
     ROLE("controlShadowColor", QVWhite(0,.2), QVWhite(0,.5))
     ROLE("menuBackgroundColor", QVRGB(0xF2F2F2), QVRGB(0x2A2A2A))
+    ROLE("menu.border", QVWhite(0,highContrast?1:.12), QVWhite(1,highContrast?1:.12))
     ROLE("mainMenuBarColor", QVRGB(0xF2F2F2), QVRGB(0x2A2A2A))
     ROLE("selectedMenuItemColor", a, a)
     ROLE("selectedMenuItemTextColor", QVOnAccent(a), QVOnAccent(a))

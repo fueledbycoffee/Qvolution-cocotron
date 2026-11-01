@@ -34,7 +34,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 static NSDictionary *sNormalMenuTextAttributes = nil;
 static NSDictionary *sSelectedMenuTextAttributes = nil;
 static NSDictionary *sDimmedMenuTextAttributes = nil;
-static NSDictionary *sDimmedMenuTextShadowAttributes = nil;
 static NSDictionary *sScrollerButtonAttributes = nil;
 
 + (void) initialize {
@@ -53,13 +52,7 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 
         sDimmedMenuTextAttributes = [[NSDictionary
                 dictionaryWithObjectsAndKeys: menuFont, NSFontAttributeName,
-                                              [NSColor grayColor],
-                                              NSForegroundColorAttributeName,
-                                              nil] retain];
-
-        sDimmedMenuTextShadowAttributes = [[NSDictionary
-                dictionaryWithObjectsAndKeys: menuFont, NSFontAttributeName,
-                                              [NSColor whiteColor],
+                                              [NSColor disabledControlTextColor],
                                               NSForegroundColorAttributeName,
                                               nil] retain];
 
@@ -91,6 +84,19 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 #define BRANCH_ARROW_LEFT_MARGIN 2
 #define BRANCH_ARROW_RIGHT_MARGIN 2
 
+// Menu geometry from the visual theme spec (section 5). The views inset
+// their rows 3 px from the window edge; these are measured from the edge.
+#define MENU_CORNER_RADIUS 6
+#define MENU_ROW_HEIGHT 22
+#define MENU_SEPARATOR_HEIGHT 11
+#define MENU_SEPARATOR_INSET 10
+#define MENU_SELECTION_INSET 5
+#define MENU_SELECTION_RADIUS 4
+#define MENU_GUTTER_SIDE_MARGIN 6
+#define MENU_CHEVRON_WIDTH 4
+#define MENU_CHEVRON_HEIGHT 8
+#define MENU_CHEVRON_END_INSET 11
+
 - (NSInterfacePartAttributedString *) branchArrow {
     static NSInterfacePartAttributedString *sBranchArrow = nil;
 
@@ -101,7 +107,7 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 }
 
 - (NSSize) menuItemSeparatorSize {
-    return NSMakeSize(0, 9);
+    return NSMakeSize(0, MENU_SEPARATOR_HEIGHT);
 }
 
 - (Margins) menuItemBranchArrowMargins {
@@ -113,8 +119,10 @@ static NSDictionary *sScrollerButtonAttributes = nil;
     return result;
 }
 
+// Room for the chevron and the side padding after it.
 - (NSSize) menuItemBranchArrowSize {
-    return NSMakeSize(5, 9);
+    return NSMakeSize(MENU_CHEVRON_WIDTH + MENU_CHEVRON_END_INSET - 1,
+                      MENU_CHEVRON_HEIGHT);
 }
 
 - (NSSize) menuItemCheckMarkSize {
@@ -125,8 +133,8 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 - (Margins) menuItemGutterMargins {
     Margins result;
 
-    result.left = 0;
-    result.right = 0;
+    result.left = MENU_GUTTER_SIDE_MARGIN;
+    result.right = MENU_GUTTER_SIDE_MARGIN;
     result.top = TITLE_TOP_MARGIN;
     result.bottom = TITLE_BOTTOM_MARGIN;
 
@@ -141,6 +149,8 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 
     result.height += (margins.top + margins.bottom);
     result.width += (margins.left + margins.right);
+    // The gutter sets the minimum row height.
+    result.height = MAX(result.height, MENU_ROW_HEIGHT);
 
     return result;
 }
@@ -197,14 +207,18 @@ static NSDictionary *sScrollerButtonAttributes = nil;
     return 0;
 }
 
+// A 1 px separatorColor line across the middle of the separator row, inset
+// from both edges of the menu.
 - (void) drawMenuSeparatorInRect: (NSRect) rect {
-    NSPoint point = NSMakePoint(rect.origin.x + 1, rect.origin.y + 3);
-    CGFloat width = rect.size.width - 2;
+    NSRect bounds = [_view bounds];
+    NSRect line = NSMakeRect(NSMinX(bounds) + MENU_SEPARATOR_INSET,
+                             NSMinY(rect) + floor(NSHeight(rect) / 2),
+                             NSWidth(bounds) - 2 * MENU_SEPARATOR_INSET, 1);
 
-    [[NSColor grayColor] setFill];
-    NSRectFill(NSMakeRect(point.x, point.y, width, 1));
-    [[NSColor whiteColor] setFill];
-    NSRectFill(NSMakeRect(point.x, point.y + 1, width, 1));
+    if (NSWidth(line) <= 0)
+        return;
+    [[NSColor separatorColor] setFill];
+    NSRectFillUsingOperation(line, NSCompositeSourceOver);
 }
 
 - (void) drawMenuGutterInRect: (NSRect) rect {
@@ -235,13 +249,6 @@ static NSDictionary *sScrollerButtonAttributes = nil;
             [string drawInRect: rect withAttributes: sNormalMenuTextAttributes];
         }
     } else {
-        if (!selected) {
-            NSRect offsetRect = rect;
-            offsetRect.origin.x += 1;
-            offsetRect.origin.y += 1;
-            [string drawInRect: offsetRect
-                    withAttributes: sDimmedMenuTextShadowAttributes];
-        }
         [string drawInRect: rect withAttributes: sDimmedMenuTextAttributes];
     }
 }
@@ -278,18 +285,12 @@ static NSDictionary *sScrollerButtonAttributes = nil;
         }
         [mutableString drawInRect: rect];
     } else {
-        if (!selected) {
-            [mutableString
-                    addAttributes:
-                            [NSDictionary
-                                    dictionaryWithObject: [NSColor grayColor]
-                                                  forKey: NSForegroundColorAttributeName]
-                            range: range];
-            NSRect offsetRect = rect;
-            offsetRect.origin.x += 1;
-            offsetRect.origin.y += 1;
-            [mutableString drawInRect: offsetRect];
-        }
+        [mutableString
+                addAttributes:
+                        [NSDictionary
+                                dictionaryWithObject: [NSColor disabledControlTextColor]
+                                              forKey: NSForegroundColorAttributeName]
+                        range: range];
         [mutableString drawInRect: rect];
     }
 }
@@ -309,7 +310,7 @@ static NSDictionary *sScrollerButtonAttributes = nil;
     NSBezierPath *path = [NSBezierPath bezierPath];
     NSColor *color = enabled ? (selected ? [NSColor selectedMenuItemTextColor]
                                          : [NSColor menuItemTextColor])
-                             : [NSColor grayColor];
+                             : [NSColor disabledControlTextColor];
     [color set];
     [path setLineWidth: MAX(1.0, size * 0.13)];
     [path setLineCapStyle: NSRoundLineCapStyle];
@@ -339,48 +340,70 @@ static NSDictionary *sScrollerButtonAttributes = nil;
     [self drawMenuStateMarkInRect: rect mixed: YES enabled: enabled selected: selected];
 }
 
+// A stroked chevron, right-aligned so its tip keeps the menu's side padding
+// inside the selection.
 - (void) drawMenuBranchArrowInRect: (NSRect) rect
                            enabled: (BOOL) enabled
                           selected: (BOOL) selected
 {
-    CGContextRef context = [[NSGraphicsContext currentContext] graphicsPort];
     NSColor *color;
-    Margins margins = [self menuItemBranchArrowMargins];
-    NSRect themeRect = rect;
+    NSBezierPath *path = [NSBezierPath bezierPath];
+    CGFloat right = NSMaxX([_view bounds]) - MENU_CHEVRON_END_INSET;
+    CGFloat left = right - MENU_CHEVRON_WIDTH;
+    CGFloat mid = NSMidY(rect);
 
     if (enabled)
-        color = selected ? [NSColor selectedControlTextColor]
+        color = selected ? [NSColor selectedMenuItemTextColor]
                          : [NSColor menuItemTextColor];
     else
         color = [NSColor disabledControlTextColor];
 
-    [color set];
-
-    themeRect.origin.x += margins.left;
-    themeRect.origin.y += margins.top;
-    themeRect.size.width -= (margins.left + margins.right);
-    themeRect.size.height -= (margins.top + margins.bottom);
-
-    CGContextBeginPath(context);
-    CGContextMoveToPoint(context, NSMinX(themeRect), NSMaxY(themeRect));
-    CGContextAddLineToPoint(context, NSMaxX(themeRect), NSMidY(themeRect));
-    CGContextAddLineToPoint(context, NSMinX(themeRect), NSMinY(themeRect));
-    CGContextClosePath(context);
-    CGContextFillPath(context);
+    [color setStroke];
+    [path setLineWidth: 1.5];
+    [path setLineCapStyle: NSRoundLineCapStyle];
+    [path setLineJoinStyle: NSRoundLineJoinStyle];
+    [path moveToPoint: NSMakePoint(left, mid - MENU_CHEVRON_HEIGHT / 2)];
+    [path lineToPoint: NSMakePoint(right, mid)];
+    [path lineToPoint: NSMakePoint(left, mid + MENU_CHEVRON_HEIGHT / 2)];
+    [path stroke];
 }
 
+static NSBezierPath *menuRoundedPath(NSRect rect, CGFloat radius) {
+    radius = MAX(0, MIN(radius, MIN(NSWidth(rect), NSHeight(rect)) / 2));
+    return [NSBezierPath bezierPathWithRoundedRect: rect
+                                           xRadius: radius
+                                           yRadius: radius];
+}
+
+// A rounded accent fill inset from the menu's sides; rows keep full height.
 - (void) drawMenuSelectionInRect: (NSRect) rect enabled: (BOOL) enabled {
-    if (enabled) {
-        [[NSColor selectedMenuItemColor] setFill];
-        NSRectFill(rect);
-    }
+    NSRect bounds = [_view bounds];
+
+    if (!enabled)
+        return;
+    rect.origin.x = NSMinX(bounds) + MENU_SELECTION_INSET;
+    rect.size.width = NSWidth(bounds) - 2 * MENU_SELECTION_INSET;
+    if (NSIsEmptyRect(rect))
+        return;
+    [[NSColor selectedMenuItemColor] setFill];
+    [menuRoundedPath(rect, MENU_SELECTION_RADIUS) fill];
 }
 
+// Menus are rounded, so the window is transparent outside this shape. The
+// rectangle is first cleared: menu windows are not opaque, and a partial
+// redraw must not composite the antialiased edge over its previous self.
 - (void) drawMenuWindowBackgroundInRect: (NSRect) rect {
+    NSBezierPath *border = menuRoundedPath(rect, MENU_CORNER_RADIUS);
+
+    [[NSColor clearColor] setFill];
+    NSRectFillUsingOperation(rect, NSCompositeCopy);
     [[NSColor menuBackgroundColor] setFill];
-    NSRectFill(rect);
-    [[NSColor windowFrameColor] set];
-    NSFrameRect(rect);
+    [border fill];
+    [border appendBezierPath: menuRoundedPath(NSInsetRect(rect, 1, 1),
+                                              MENU_CORNER_RADIUS - 1)];
+    [border setWindingRule: NSEvenOddWindingRule];
+    [[NSColor colorWithCatalogName: @"System" colorName: @"menu.border"] setFill];
+    [border fill];
 }
 
 - (void) drawMenuBarItemBorderInRect: (NSRect) rect
