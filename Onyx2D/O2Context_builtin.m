@@ -345,8 +345,54 @@ static void intersectClipContext(O2Context_builtin *self,
     self->_clipContext = [phase retain];
 }
 
+// Check device-space corners, including vertical-first and implicitly closed paths.
+static BOOL integralRectBounds(O2Path *path, double *x0, double *y0,
+        double *x1, double *y1) {
+    size_t elements = O2PathNumberOfElements(path);
+    const unsigned char *types = O2PathElements(path);
+    if (O2PathNumberOfPoints(path) != 4 || (elements != 4 && elements != 5) ||
+            types[0] != kO2PathElementMoveToPoint ||
+            types[1] != kO2PathElementAddLineToPoint ||
+            types[2] != kO2PathElementAddLineToPoint ||
+            types[3] != kO2PathElementAddLineToPoint ||
+            (elements == 5 && types[4] != kO2PathElementCloseSubpath))
+        return NO;
+    const O2Point *p = O2PathPoints(path);
+    if (!((p[0].y == p[1].y && p[1].x == p[2].x &&
+                    p[2].y == p[3].y && p[3].x == p[0].x) ||
+            (p[0].x == p[1].x && p[1].y == p[2].y &&
+                    p[2].x == p[3].x && p[3].y == p[0].y)))
+        return NO;
+    *x0 = p[0].x; *y0 = p[0].y;
+    *x1 = p[2].x; *y1 = p[2].y;
+    return isfinite(*x0) && isfinite(*y0) && isfinite(*x1) && isfinite(*y1) &&
+            floor(*x0) == *x0 && floor(*y0) == *y0 &&
+            floor(*x1) == *x1 && floor(*y1) == *y1;
+}
+
+static BOOL clipToIntegralRect(O2Context_builtin *self, O2Path *path) {
+    double x0, y0, x1, y1;
+    if (!integralRectBounds(path, &x0, &y0, &x1, &y1))
+        return NO;
+    // Clamp before converting; huge finite corners need not fit an integer.
+    int x = MIN((double)self->_vpx + self->_vpwidth,
+            MAX(self->_vpx, MIN(x0, x1)));
+    int y = MIN((double)self->_vpy + self->_vpheight,
+            MAX(self->_vpy, MIN(y0, y1)));
+    int endX = MAX((double)self->_vpx,
+            MIN((double)self->_vpx + self->_vpwidth, MAX(x0, x1)));
+    int endY = MAX((double)self->_vpy,
+            MIN((double)self->_vpy + self->_vpheight, MAX(y0, y1)));
+    O2RasterizerSetViewport(self, x, y, MAX(0, endX - x), MAX(0, endY - y));
+    return YES;
+}
+
 static void clipToPath(O2Context_builtin *self, O2Path *path, int fillRule,
         BOOL antialias) {
+    // Binary coverage commutes with path samples and soft masks, including
+    // inherited layer domains. Keep their normalization and draw sampling intact.
+    if (clipToIntegralRect(self, path))
+        return;
     O2Context_builtin *phase = createClipContext(O2ImageGetWidth(self->_surface),
             O2ImageGetHeight(self->_surface));
     if (phase != nil && !allocateClipSamples(phase)) {
@@ -547,16 +593,8 @@ static BOOL clipToIntegralRects(O2Context_builtin *self, NSArray *phases) {
         O2ClipPhaseType type = O2ClipPhasePhaseType(phase);
         if (type != O2ClipPhaseNonZeroPath && type != O2ClipPhaseEOPath)
             return NO;
-        O2Path *path = O2ClipPhaseObject(phase);
-        O2Rect rect;
-        if (!O2PathIsRect(path, &rect))
-            return NO;
-        const O2Point *points = O2PathPoints(path);
-        double x0 = points[0].x, y0 = points[0].y;
-        double x1 = points[2].x, y1 = points[2].y;
-        if (!isfinite(x0) || !isfinite(y0) || !isfinite(x1) || !isfinite(y1) ||
-                floor(x0) != x0 || floor(y0) != y0 ||
-                floor(x1) != x1 || floor(y1) != y1)
+        double x0, y0, x1, y1;
+        if (!integralRectBounds(O2ClipPhaseObject(phase), &x0, &y0, &x1, &y1))
             return NO;
         minX = MAX(minX, MIN(x0, x1));
         minY = MAX(minY, MIN(y0, y1));
@@ -572,8 +610,18 @@ static BOOL clipToIntegralRects(O2Context_builtin *self, NSArray *phases) {
 }
 
 static BOOL hasViewportClip(O2Context_builtin *self) {
-    return self->_clipContext == nil &&
-            [[O2GStateClipState(O2ContextCurrentGState(self)) clipPhases] count] != 0;
+    NSArray *phases = [O2GStateClipState(O2ContextCurrentGState(self)) clipPhases];
+    if (self->_clipContext == nil && [phases count] != 0)
+        return YES;
+    // Omitted rectangle samples still require clipped drawing quality, even
+    // beside a scalar mask or after resetting the current clip inside a layer.
+    for (O2ClipPhase *phase in phases)
+        if (O2ClipPhasePhaseType(phase) != O2ClipPhaseMask)
+            return YES;
+    for (O2ClipPhase *phase in [self->_layerClipPhases lastObject])
+        if (O2ClipPhasePhaseType(phase) != O2ClipPhaseMask)
+            return YES;
+    return NO;
 }
 
 - (void) clipToState: (O2ClipState *) clipState {

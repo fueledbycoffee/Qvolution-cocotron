@@ -7,6 +7,7 @@ import re, subprocess, tempfile, sys
 root=Path(__file__).resolve().parents[1]
 s=(Path(sys.argv[1]) if len(sys.argv)>1 else root/'Onyx2D/O2Context_builtin.m').read_text()
 a=s.index('static BOOL clipToIntegralRects(');b=s.index('\nstatic BOOL hasViewportClip',a);helper=s[a:b].replace('for (O2ClipPhase *phase in phases)','for (O2ClipPhase *phase : phases->items)')
+helper=s[s.index('static BOOL integralRectBounds('):s.index('static BOOL clipToIntegralRect(')]+helper
 a=s.index('- (void) clipToState:');b=s.index('    // Layer drawing uses conditional coverage',a);branch=s[a:b]
 branch=branch.replace('- (void) clipToState: (O2ClipState *) clipState {','void clipToState(O2Context_builtin *self, O2ClipState *clipState) {')
 for var in ['_surface','_viewportClipPhases','_viewportClipWidth','_viewportClipHeight','_layerClipPhases','_clipContext','_vpx','_vpy','_vpwidth','_vpheight','_viewportClipX','_viewportClipY','_viewportClipW','_viewportClipH']:
@@ -46,6 +47,11 @@ size_t O2ImageGetWidth(Surface*s){return s->width;}size_t O2ImageGetHeight(Surfa
 O2ClipPhaseType O2ClipPhasePhaseType(O2ClipPhase*p){return p->type;}O2Path*O2ClipPhaseObject(O2ClipPhase*p){return p->path;}
 BOOL O2PathIsRect(O2Path*p,O2Rect*r){return p->rect;}
 const O2Point*O2PathPoints(O2Path*p){return p->points;}
+enum {kO2PathElementMoveToPoint,kO2PathElementAddLineToPoint,kO2PathElementCloseSubpath};
+size_t O2PathNumberOfElements(O2Path*p){return p->rect?5:0;}
+size_t O2PathNumberOfPoints(O2Path*p){return 4;}
+const unsigned char*O2PathElements(O2Path*){static const unsigned char t[]={0,1,1,1,2};return t;}
+
 void O2RasterizerSetViewport(O2Context_builtin*c,int x,int y,int w,int h){c->viewport[0]=x;c->viewport[1]=y;c->viewport[2]=w;c->viewport[3]=h;c->_vpx=x;c->_vpy=y;c->_vpwidth=w;c->_vpheight=h;}
 void O2ContextDeviceClipReset_builtin(O2Context_builtin*c){c->resets++;delete c->_viewportClipPhases;c->_viewportClipPhases=nullptr;c->_clipContext=nullptr;O2RasterizerSetViewport(c,0,0,c->_surface->width,c->_surface->height);}
 '''

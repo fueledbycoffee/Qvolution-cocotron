@@ -7,6 +7,7 @@ import pathlib,subprocess,sys,tempfile
 source=pathlib.Path(sys.argv[1]) if len(sys.argv)>1 else pathlib.Path(__file__).resolve().parents[1]/'Onyx2D/O2Context_builtin.m'
 text=source.read_text();helper=text.split('static BOOL clipToIntegralRects(',1)[1].split('\n- (void) clipToState:',1)[0]
 helper='static BOOL clipToIntegralRects('+helper.split('\nstatic BOOL hasViewportClip',1)[0]
+helper='static BOOL integralRectBounds('+text.split('static BOOL integralRectBounds(',1)[1].split('\nstatic BOOL clipToIntegralRect(',1)[0]+helper
 helper=helper.replace('for (O2ClipPhase *phase in phases)', 'for (O2ClipPhase *phase : *phases)')
 prelude=r'''
 #include <algorithm>
@@ -34,6 +35,11 @@ size_t O2ImageGetWidth(Surface*s){return s->width;}size_t O2ImageGetHeight(Surfa
 O2ClipPhaseType O2ClipPhasePhaseType(O2ClipPhase*p){return p->type;}O2Path*O2ClipPhaseObject(O2ClipPhase*p){return p->path;}
 BOOL O2PathIsRect(O2Path*p,O2Rect*r){r->origin=p->points[0];r->size.width=p->points[2].x-p->points[0].x;r->size.height=p->points[2].y-p->points[0].y;return p->rect;}
 const O2Point*O2PathPoints(O2Path*p){return p->points;}
+enum {kO2PathElementMoveToPoint,kO2PathElementAddLineToPoint,kO2PathElementCloseSubpath};
+size_t O2PathNumberOfElements(O2Path*p){return p->rect?5:0;}
+size_t O2PathNumberOfPoints(O2Path*p){return 4;}
+const unsigned char*O2PathElements(O2Path*){static const unsigned char t[]={0,1,1,1,2};return t;}
+
 void O2RasterizerSetViewport(O2Context_builtin*c,int x,int y,int w,int h){c->viewport[0]=x;c->viewport[1]=y;c->viewport[2]=w;c->viewport[3]=h;}
 '''
 controls=r'''
