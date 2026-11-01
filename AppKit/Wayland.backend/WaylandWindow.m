@@ -46,6 +46,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <limits.h>
+#include <time.h>
 #import "WaylandScale.h"
 #include <math.h>
 #import "../NSWindowFrameTrace.h"
@@ -100,6 +101,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     _damageVerify = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_DAMAGE_VERIFY"] isEqualToString:@"1"];
     if (_eglCorrupt && !_eglVerify)
         [NSException raise:NSInvalidArgumentException format:@"EGL test corruption requires verification"];
+    _presentTiming = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_PRESENT_TIMING"] isEqualToString:@"1"];
     NSString *captureDirectory=[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_CAPTURE_DIR"];
     _captureRequested=captureDirectory!=nil;
     if(captureDirectory) _clientCapture=[[WaylandClientCapture alloc] initWithDirectory:captureDirectory];
@@ -1203,6 +1205,8 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
              @"staleVerifiedPresents": @(_staleVerifiedPresents),
              @"fullUploads": @(_eglFullUploads), @"partialUploads": @(_eglPartialUploads),
              @"lastUploadBytes": @(_eglLastUploadBytes),
+             @"presentsTimed": @(_presentsTimed), @"presentNanoseconds": @(_presentNanoseconds),
+             @"lastPresentNanoseconds": @(_lastPresentNanoseconds), @"maxPresentNanoseconds": @(_maxPresentNanoseconds),
              @"surfaceWidth": @(surface ? O2SurfaceGetWidth(surface) : 0),
              @"surfaceHeight": @(surface ? O2SurfaceGetHeight(surface) : 0),
              @"eglScale120": @(_renderScale120)};
@@ -1441,8 +1445,12 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     if (pixels == NULL || width == 0 || height == 0 || sourceStride < width * 4)
         return;
 
-    if (_eglRequested && _eglFallbackReason == nil && [self presentEGLSurface:surface])
+    struct timespec started;
+    if (_presentTiming) clock_gettime(CLOCK_MONOTONIC, &started);
+    if (_eglRequested && _eglFallbackReason == nil && [self presentEGLSurface:surface]) {
+        [self recordPresentTime:&started];
         return;
+    }
 
     // Onyx2D's premultiplied, little-endian ARGB is wl_shm's ARGB8888.
     uint32_t format = [self presentsOpaque] ? WP_SHM_FORMAT_XRGB8888 : WP_SHM_FORMAT_ARGB8888;
@@ -1529,6 +1537,16 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     _needsPresent = NO;
     _damageAll = NO; _damageCount = 0;
     [_display flush];
+    [self recordPresentTime:&started];
+}
+
+- (void) recordPresentTime: (const struct timespec *) started {
+    if (!_presentTiming) return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    uint64_t elapsed = (uint64_t)(now.tv_sec - started->tv_sec) * 1000000000ull + now.tv_nsec - started->tv_nsec;
+    ++_presentsTimed; _presentNanoseconds += elapsed; _lastPresentNanoseconds = elapsed;
+    if (elapsed > _maxPresentNanoseconds) _maxPresentNanoseconds = elapsed;
 }
 
 #pragma mark - Events

@@ -127,6 +127,9 @@ struct WaylandBuffer {
     CGRect _damage[16];
     unsigned _damageCount;
     BOOL _damageAll;
+    // Opt-in present timing (DARLING_APPKIT_PRESENT_TIMING=1).
+    BOOL _presentTiming;
+    uint64_t _presentsTimed, _presentNanoseconds, _lastPresentNanoseconds, _maxPresentNanoseconds;
 }
 
 - (instancetype) initWithDelegate: (NSWindow *) delegate;
