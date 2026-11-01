@@ -228,3 +228,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSWorkspace.h>
 
 #import <ApplicationServices/ApplicationServices.h>
+
+#import <AppKit/NSImportConstants.h>
+#import <AppKit/NSMenuToolbarItem.h>
+#import <AppKit/NSMenuItemBadge.h>
+#import <AppKit/NSGlassEffectContainerView.h>
+#import <AppKit/NSSplitViewItemAccessoryViewController.h>
+#import <AppKit/NSWritingToolsCoordinator.h>
+#import <AppKit/NSSharingServicePickerToolbarItem.h>
+#import <AppKit/NSTextInsertionIndicator.h>
