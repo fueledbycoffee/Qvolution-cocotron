@@ -162,6 +162,18 @@ int main(int argc,char **argv) {
         [hosting setNeedsDisplayInRect:[hosting bounds]]; [hosting display]; [context render];
         expect([hosted contents]==(id)appImage && hosting->draws==0,"host contents survive resize and invalidation");
         pixel(155,75,scale,255,255,0,255,"host layer retains later-set contents");
+        // Replace after the first texture upload as well as after setLayer:.
+        space=CGColorSpaceCreateDeviceRGB();
+        CGContextRef replacement=CGBitmapContextCreate(NULL,2,2,8,8,space,kCGImageAlphaPremultipliedLast);
+        CGColorSpaceRelease(space);
+        CGContextSetRGBFillColor(replacement,1,0.5,0.25,1);
+        CGContextFillRect(replacement,CGRectMake(0,0,2,2));
+        CGImageRef laterImage=CGBitmapContextCreateImage(replacement); CGContextRelease(replacement);
+        [hosted setContents:(id)laterImage]; [hosting setNeedsDisplay:YES];
+        [hosting display]; [context render];
+        expect([hosted contents]==(id)laterImage && hosting->draws==0,"host replacement remains app-owned");
+        pixel(155,75,scale,255,128,64,255,"host layer uploads replacement contents in RGBA order");
+        CGImageRelease(laterImage);
         pixel(55,200,scale,255,0,0,255,"overflow child inside parent");
         pixel(65,200,scale,0,0,0,0,"default clipping hides child beyond parent");
         pixel(25,157,scale,0,255,0,255,"flipped asymmetric top marker stays at top");
