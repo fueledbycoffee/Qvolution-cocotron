@@ -34,6 +34,7 @@
 #import <Onyx2D/O2Image.h>
 #import <Onyx2D/O2Surface.h>
 #import "O2BitmapFormat.h"
+#import "O2Image_Private.h"
 
 @implementation O2Image
 
@@ -572,6 +573,27 @@ ONYX2D_STATIC_INLINE const void *scanlineAtY(O2Image *self, int y) {
         return bytes + offset;
 
     return NULL;
+}
+
+int O2ImageGetFastPixelFormat(O2Image *image) {
+    if (image->_bitsPerComponent != 8 || image->_bitsPerPixel != 32 ||
+            image->_decode != NULL || image->_decoder != nil ||
+            image->_clampExternalPixels ||
+            image->_read_argb32f != O2ImageRead_ANY_to_argb8u_to_argb32f)
+        return 0;
+    if (image->_bitmapInfo == (kO2ImageAlphaPremultipliedLast | kO2BitmapByteOrder32Big) &&
+            image->_read_argb8u == O2ImageRead_RGBA8888_to_argb8u)
+        return 1;
+    if (image->_bitmapInfo == (kO2ImageAlphaPremultipliedFirst | kO2BitmapByteOrder32Little) &&
+            image->_read_argb8u == O2ImageRead_BGRA8888_to_argb8u)
+        return 2;
+    return 0;
+}
+
+const void *O2ImageGetFastPixelBytes(O2Image *image, size_t *length) {
+    const void *bytes = directBytes(image);
+    *length = image->_directLength;
+    return bytes;
 }
 
 - (NSData *) directData {
