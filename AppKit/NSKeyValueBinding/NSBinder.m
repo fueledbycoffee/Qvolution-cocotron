@@ -266,6 +266,9 @@ static void *NSBinderChangeContext;
     if ([self allowsReverseTransformation]) {
 
         if (context == &NSBinderChangeContext) {
+            // A placeholder is display state, not a writable model object.
+            if (NSIsControllerMarker([self destinationValue]))
+                return;
             [self stopObservingChanges];
 
             NSBindingDebugLog(kNSBindingDebugLogLevel2,
