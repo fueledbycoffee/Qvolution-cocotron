@@ -39,6 +39,8 @@ static void reset(void) {
  projection[0]=projection[5]=.02; projection[10]=-1; projection[12]=projection[13]=-1; projection[15]=1;
 }
 static void expect(int x,int y,int w,int h) {
+ if (!(enabled && box[0]==x && box[1]==y && box[2]==w && box[3]==h))
+   fprintf(stderr,"scissor got %d,%d %dx%d expected %d,%d %dx%d\n",box[0],box[1],box[2],box[3],x,y,w,h);
  assert(enabled && box[0]==x && box[1]==y && box[2]==w && box[3]==h);
 }
 '''

@@ -645,6 +645,9 @@ static void scissorLayerMask(CGRect bounds) {
         }
         double x = viewport[0] + (clip[0] / clip[3] + 1) * viewport[2] / 2;
         double y = viewport[1] + (clip[1] / clip[3] + 1) * viewport[3] / 2;
+        // Projection arithmetic can put an integral edge a few ulps away.
+        if (fabs(x - round(x)) < 1e-7) x = round(x);
+        if (fabs(y - round(y)) < 1e-7) y = round(y);
         x0 = MIN(x0, x); y0 = MIN(y0, y); x1 = MAX(x1, x); y1 = MAX(y1, y);
     }
     if (glIsEnabled(GL_SCISSOR_TEST)) glGetIntegerv(GL_SCISSOR_BOX, parent);
