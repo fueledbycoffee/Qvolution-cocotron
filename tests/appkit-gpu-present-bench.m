@@ -209,7 +209,8 @@ static double percentile(double *v, size_t n, double p) {
     if (!strcmp(mode, "damage") && [s[@"renderer"] isEqualToString:@"egl"] && [s[@"partialUploads"] unsignedLongLongValue] < done - 1)
         fail("damage frames were not partial uploads");
     if (!strcmp(mode, "soak") && frames >= 200) {
-        if (fdLate != fdEarly) fail("descriptor count changed between frame 100 and the end");
+        // A descriptor that was transiently open at frame 100 may be closed by the end.
+        if (fdLate > fdEarly) fail("descriptor count grew between frame 100 and the end");
         // Allow allocator noise; a per-frame leak of one window surface would be ~8.8 MB/frame.
         if (rssEarly < 0 || rssLate - rssEarly > 8192) fail("resident size grew by more than 8 MB");
     }
