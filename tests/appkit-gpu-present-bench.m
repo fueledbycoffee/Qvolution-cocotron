@@ -112,7 +112,7 @@ static double percentile(double *v, size_t n, double p) {
 @public
     NSWindow *window; PaintView *view, *fadeView; NSScrollView *scroller;
     const char *mode; unsigned frames, done, sized, resizes; uint64_t presents;
-    double *present, *frameTimes, start, cpuStart, last;
+    double *present, *frameTimes, *phases[4], start, cpuStart, last;
     int fdEarly; long rssEarly; uint64_t timedEarly;
 }
 @end
@@ -175,6 +175,8 @@ static double percentile(double *v, size_t n, double p) {
         }
     } else {
         present[done] = [s[@"lastPresentNanoseconds"] doubleValue] / 1e6;
+        NSString *keys[4] = {@"lastSetupNanoseconds", @"lastCopyNanoseconds", @"lastUploadNanoseconds", @"lastSwapNanoseconds"};
+        for (int k = 0; k < 4; k++) phases[k][done] = [s[keys[k]] doubleValue] / 1e6;
         frameTimes[done] = (t - last) * 1e3;
         done++;
         if (done == 100) { fdEarly = openDescriptors(); rssEarly = residentKilobytes(); }
@@ -197,6 +199,8 @@ static double percentile(double *v, size_t n, double p) {
         @"fullUploads": s[@"fullUploads"], @"partialUploads": s[@"partialUploads"],
         @"uploadedBytes": s[@"uploadedBytes"], @"lastUploadBytes": s[@"lastUploadBytes"],
         @"failures": s[@"failures"], @"timed": @([s[@"presentsTimed"] unsignedLongLongValue] - timedEarly),
+        @"eglSetupMedianMs": @(percentile(phases[0], done, 0.5)), @"eglCopyMedianMs": @(percentile(phases[1], done, 0.5)),
+        @"eglUploadDrawMedianMs": @(percentile(phases[2], done, 0.5)), @"eglSwapMedianMs": @(percentile(phases[3], done, 0.5)),
         @"fdAt100": @(fdEarly), @"fdAtEnd": @(fdLate), @"rssKbAt100": @(rssEarly), @"rssKbAtEnd": @(rssLate)}];
     printf("RESULT %s\n", [[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:r options:0 error:NULL]
                                                  encoding:NSUTF8StringEncoding] UTF8String]);
@@ -229,6 +233,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 5; i++) known |= !strcmp(b->mode, modes[i]);
         if (!known) fail("unknown MODE");
         b->present = calloc(b->frames, sizeof(double)); b->frameTimes = calloc(b->frames, sizeof(double));
+        for (int k = 0; k < 4; k++) b->phases[k] = calloc(b->frames, sizeof(double));
         NSRect content = NSMakeRect(0, 0, 1932, 1144);
         b->window = [[NSWindow alloc] initWithContentRect:content styleMask:NSBorderlessWindowMask
                                                   backing:NSBackingStoreBuffered defer:NO];
