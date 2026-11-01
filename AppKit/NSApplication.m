@@ -926,6 +926,12 @@ static void _hookXcodeDevTools(void)
 }
 
 - (BOOL) openFiles {
+    return [self _openFilesWithDefaultLaunch: NULL];
+}
+
+// defaultLaunch reports whether the launch named no file to open, which is
+// independent of whether opening a named file then succeeded.
+- (BOOL) _openFilesWithDefaultLaunch: (BOOL *) defaultLaunch {
     BOOL opened = NO;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
@@ -985,6 +991,8 @@ static void _hookXcodeDevTools(void)
         }
     }
 
+    if (defaultLaunch)
+        *defaultLaunch = ([openFiles count] == 0);
     if ([openFiles count] == 0) {
         return NO;
     }
@@ -1018,6 +1026,7 @@ static void _hookXcodeDevTools(void)
     _hookXcodeDevTools();
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
     BOOL needsUntitled = YES;
+    BOOL defaultLaunch = YES;
 
     NS_DURING [[NSNotificationCenter defaultCenter]
             postNotificationName: NSApplicationWillFinishLaunchingNotification
@@ -1051,7 +1060,7 @@ static void _hookXcodeDevTools(void)
     if ([types count] > 0)
         controller = [NSDocumentController sharedDocumentController];
 
-    if ([self openFiles]) {
+    if ([self _openFilesWithDefaultLaunch: &defaultLaunch]) {
         needsUntitled = NO;
     }
 
@@ -1079,7 +1088,11 @@ static void _hookXcodeDevTools(void)
 
     NS_DURING [[NSNotificationCenter defaultCenter]
             postNotificationName: NSApplicationDidFinishLaunchingNotification
-                          object: self];
+                          object: self
+                        userInfo: [NSDictionary
+                                          dictionaryWithObject:
+                                                  [NSNumber numberWithBool: defaultLaunch]
+                                                        forKey: NSApplicationLaunchIsDefaultLaunchKey]];
     NS_HANDLER [self reportException: localException];
     NS_ENDHANDLER
 
