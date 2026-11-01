@@ -48,6 +48,7 @@
 #include <limits.h>
 #import "WaylandScale.h"
 #include <math.h>
+#import "../NSWindowFrameTrace.h"
 
 // NSView replaces the user CTM whenever it locks focus. Keep scaling in the
 // device transform, alongside Onyx2D's bottom-left to top-left conversion.
@@ -671,6 +672,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     frame.size.width = MAX(frame.size.width, 1.0);
     frame.size.height = MAX(frame.size.height, 1.0);
 
+    NSWindowTraceFrame("WaylandWindow.setFrame", _frame, frame);
     BOOL moved = !NSEqualPoints(frame.origin, _frame.origin);
     BOOL sized = !NSEqualSizes(frame.size, _frame.size);
     // Apps with their own chrome drag by setting the origin. Wayland only
@@ -978,6 +980,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 
 - (void) invalidateContextWithNewSize: (NSSize) size {
     if (!NSEqualSizes(_frame.size, size)) {
+        NSRect resized = _frame; resized.size = size;
+        NSWindowTraceFrame("WaylandWindow.invalidateContextWithNewSize", _frame, resized);
         _frame.size = size;
         [_context release];
         _context = nil;
@@ -1617,6 +1621,7 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
         if (_popupParent == nil)
             frame.origin.y += frame.size.height - height;
         frame.size = NSMakeSize(width, height);
+        NSWindowTraceFrame("WaylandWindow.configure", _frame, frame);
         [self invalidateContextWithNewSize: frame.size];
         _frame = frame;
         sized = YES;
