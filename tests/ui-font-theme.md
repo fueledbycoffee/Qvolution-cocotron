@@ -13,7 +13,19 @@ specifies the description grammar; native tests compare extracted families
 against that public Pango API. Fontconfig `<alias>`/`prefer` behavior is its installed public user manual,
 `/usr/share/doc/fontconfig/fontconfig-user.html`. D-Bus fixed-arity iterator API
 comes from public `dbus-message.h`; portal Settings Read comes from the public
-freedesktop Settings contract and the spec. No Apple binary was inspected.
+freedesktop Settings contract and the spec. The installed public portal release
+notes `/usr/share/doc/xdg-desktop-portal/NEWS.md.gz` (1.17.0 and 1.17.1) specify
+that supported deprecated `Read` returns a variant inside a variant, whereas
+`ReadOne` returns a single variant. We retain `Read` for older portal support;
+the bounded decoder accepts both forms. The live fake checks path/destination and exact namespace/key args. It covers
+the specified nested `Read` reply plus a single-variant compatibility reply
+and a malformed value; both shapes also have direct decoder tests.
+A socket-free queue regression runs the actual fake service with real libdbus
+messages and mocked connection I/O: a prequeued NameAcquired signal and Read
+must be popped before a blocking wait. The old wait-before-pop loop could delay
+an already queued request by 1000ms, beyond the unchanged 250ms reader deadline.
+This regression is supplementary; `--portal` still requires a real private bus.
+No Apple binary was inspected.
 
 The policy reads the portal once per process when Fontconfig is initialized.
 It removes Pango-style size/style suffixes, ignores GNOME's point size, selects

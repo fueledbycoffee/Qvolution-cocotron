@@ -38,10 +38,15 @@ static void fakePortal(int ready, const char *text, int nested, int malformed, i
     assert(dbus_bus_request_name(bus, "org.freedesktop.portal.Desktop", 0, &error) == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER);
     assert(write(ready, "x", 1) == 1); close(ready);
     for (;;) {
-        if (!dbus_connection_read_write(bus, 1000)) break;
         DBusMessage *request = dbus_connection_pop_message(bus);
-        if (!request) continue;
+        if (!request) {
+            if (!dbus_connection_read_write(bus, 1000)) break;
+            continue;
+        }
         if (dbus_message_is_method_call(request, "org.freedesktop.portal.Settings", "Read")) {
+            assert(dbus_message_has_path(request, "/org/freedesktop/portal/desktop"));
+            assert(dbus_message_has_destination(request, "org.freedesktop.portal.Desktop"));
+            assert(dbus_message_has_signature(request, "ss"));
             DBusMessageIter args; const char *space, *key;
             assert(dbus_message_iter_init(request, &args));
             dbus_message_iter_get_basic(&args, &space); assert(!strcmp(space,"org.gnome.desktop.interface"));
@@ -179,4 +184,5 @@ int main(int argc, char **argv) {
     }
     FT_Done_Face(face); FT_Done_FreeType(library); FcPatternDestroy(m); FcPatternDestroy(q); free(family); FcConfigDestroy(config);
     puts("PASS production policy: bus guard (no autolaunch, no autostart, bounded silent bus), portal variants/types, exact families, fallback order, aliases, XML, host H cap pixels (native; no AppKit acceptance)");
+    return 0;
 }
