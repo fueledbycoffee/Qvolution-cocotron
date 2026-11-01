@@ -16,6 +16,9 @@
  You should have received a copy of the GNU General Public License
  along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 */
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
 #import "CGSConnectionX11.h"
 #import "CGSWindowX11.h"
 #import <CoreGraphics/CGSKeyboardLayout.h>
@@ -284,6 +287,10 @@ static BOOL isRandREvent(int xrrEventBase, XEvent* event)
 
 	_keyboardLayout = cgsLayout;
 	_keyboardLayoutGroup = state.group;
+}
+
+- (unsigned int) nativeDisplayPlatform {
+    return EGL_PLATFORM_X11_KHR;
 }
 
 -(void*) nativeDisplay

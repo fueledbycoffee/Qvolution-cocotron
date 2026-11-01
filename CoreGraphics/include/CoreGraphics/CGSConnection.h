@@ -56,6 +56,7 @@
 
 // For CGL
 -(void*) nativeDisplay;
+-(unsigned int) nativeDisplayPlatform;
 @end
 
 #endif

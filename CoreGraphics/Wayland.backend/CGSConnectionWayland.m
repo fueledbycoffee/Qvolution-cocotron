@@ -18,6 +18,9 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE. */
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
 #import "CGSConnectionWayland.h"
 #import "CGSWindowWayland.h"
 #import "WaylandLibrary.h"
@@ -402,6 +405,10 @@ static void socketCallback(CFSocketRef socket, CFSocketCallBackType type,
 }
 
 #pragma mark - CGSConnection
+
+- (unsigned int) nativeDisplayPlatform {
+    return EGL_PLATFORM_WAYLAND_KHR;
+}
 
 - (void *) nativeDisplay {
     // EGLNativeDisplayType on Wayland is the wl_display.

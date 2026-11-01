@@ -160,6 +160,11 @@ void* _CGSNativeDisplay(CGSConnectionID connId)
 	return [_CGSConnectionForID(connId) nativeDisplay];
 }
 
+unsigned int _CGSNativeDisplayPlatform(CGSConnectionID connId)
+{
+    return [_CGSConnectionForID(connId) nativeDisplayPlatform];
+}
+
 void* _CGSNativeWindowForID(CGSConnectionID connId, CGSWindowID winId)
 {
 	CGSConnection* conn = _CGSConnectionForID(connId);
