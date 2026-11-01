@@ -80,20 +80,31 @@ size_t PATHRENDER(int kind,void*out){
  size_t bytes=(size_t)664*532*sizeof(*s.pixels);memcpy(out,s.pixels,bytes);
  free(c._viewportClipPhases);dispose(&c);cleanup();return bytes;
 }
-double BENCH(int width,int height,int repeats,int kind,int clipped){
+static double benchSized(int width,int height,int repeats,int kind,int clipped,int side,int pathOnly){
  O2Context_builtin c;O2Surface s;init(&c,&s,width,height);
- O2Path invalid=makePath(17,13,48,48,0),path=makePath(15.25,11.125,52,53,4);
+ O2Path invalid=makePath(17,13,side,side,0),path=makePath(15.25,11.125,side+4,side+5,4);
  O2ClipPhase ip={O2ClipPhaseNonZeroPath,&invalid,YES,0},pp={O2ClipPhaseNonZeroPath,&path,YES,0};
  NSArray stack={clipped?3:1,{&ip,&pp,&pp}};O2ClipState state={&stack};
+ if(pathOnly){stack.count=2;stack.items[0]=stack.items[1]=&pp;}
  forceGeneric=NO;replay(&c,&state);cleanup();c._clipContext=NULL;
- double start=now();
+ pixelReads=allocations=maskBytes=0;double start=now();
  for(int i=0;i<repeats;i++){
   // A save/restore replay, with a changed temporary clip in the masked case.
-  if(clipped){replay(&c,&state);}else O2RasterizerSetViewport(&c,17,13,48,48);
+  if(clipped){replay(&c,&state);}else O2RasterizerSetViewport(&c,17,13,side,side);
   operation(&c,kind);cleanup();c._clipContext=NULL;
  }
  double result=(now()-start)*1e6/repeats;
+ printf("WORK %s %dx%d replay=%d n=%d mask_pixels_read=%zu mask_bytes_allocated=%zu side=%d path_only=%d\n",LABEL,width,height,clipped,repeats,pixelReads,maskBytes,side,pathOnly);
+#ifdef EXPECT_BOUNDED
+ if(clipped)assert(pixelReads<=(size_t)repeats*(side+(pathOnly?5:0))*(side+(pathOnly?6:0))*2);
+#endif
  free(c._viewportClipPhases);dispose(&c);return result;
+}
+double BENCH(int width,int height,int repeats,int kind,int clipped){
+ return benchSized(width,height,repeats,kind,clipped,48,0);
+}
+double MATRIX(int width,int height,int repeats,int side,int pathOnly){
+ return benchSized(width,height,repeats,0,1,side,pathOnly);
 }
 '''
 main = r'''
@@ -103,6 +114,7 @@ main = r'''
 #include <assert.h>
 size_t candidate_render(unsigned,int,int,void*);size_t reference_render(unsigned,int,int,void*);
 double candidate_bench(int,int,int,int,int);double reference_bench(int,int,int,int,int);
+double candidate_matrix(int,int,int,int,int);double reference_matrix(int,int,int,int,int);
 size_t candidate_path_render(int,void*);size_t reference_path_render(int,void*);
 int main(int argc,char**argv){setbuf(stdout,NULL);
  int pathonly=argc>1&&!strcmp(argv[1],"path-only");
@@ -117,6 +129,17 @@ int main(int argc,char**argv){setbuf(stdout,NULL);
   if(pathonly)return 0;
  }
 
+ if(argc>1&&!strcmp(argv[1],"matrix")){
+  int old=argc>2&&!strcmp(argv[2],"reference"),repeats=argc>3?atoi(argv[3]):10;
+  for(int surface=0;surface<4;surface++)for(int pathOnly=0;pathOnly<2;pathOnly++){
+   int width=(int[]){96,664,1932,3864}[surface],height=(int[]){80,532,1144,2288}[surface];
+   for(int scale=0;scale<(surface==1?4:1);scale++){
+    int side=surface==1?(int[]){16,48,96,192}[scale]:48;
+    double us=(old?reference_matrix:candidate_matrix)(width,height,repeats,side,pathOnly);
+    printf("MATRIX %s %dx%d side=%d path_only=%d n=%d us_per_op=%.3f\n",old?"reference":"candidate",width,height,side,pathOnly,repeats,us);
+   }
+  }return 0;
+ }
  if(argc>1){int repeats=argc>2?atoi(argv[2]):30;int old=strcmp(argv[1],"reference")==0;
   for(int size=0;size<3;size++)for(int clip=0;clip<2;clip++)for(int kind=0;kind<3;kind++){
    int width=(int[]){96,1932,3864}[size],height=(int[]){80,1144,2288}[size];
@@ -144,18 +167,22 @@ for scalar in ['float', 'double']:
     for label, selected in [('candidate', a.source or root / 'Onyx2D/O2Context_builtin.m'), ('reference', a.reference)]:
         ns = {'__file__': str(generator_path), 'selected': str(selected.resolve())}
         exec(compile(generator, str(generator_path), 'exec'), ns)
-        src = ns['src'].split('int main(int argc,char**argv)', 1)[0] + extra
+        src = ns['src'].split('int main(int argc,char**argv)', 1)[0]
+        signature = 'static void O2Image_read_argb32f(O2Surface *s,int x,int y,O2argb32f *out,int n){'
+        assert signature in src
+        src = src.replace(signature, 'static size_t pixelReads;\n'+signature+'pixelReads+=n;') + extra
         # The two translation units retain separate private adapter state.
         names = ['O2RasterizerSetViewport', 'O2RasterizerClear', 'O2DContextAddEdge',
                  'O2RasterizerSetShouldAntialias', 'O2DContextFillEdgesOnSurface',
                  'original_fixture_main', 'O2PathIsRect', 'O2PointApplyAffineTransform']
         defines = ''.join('#define '+name+' '+label+'_'+name+'\n' for name in names)
         src = defines + src.replace('typedef double O2Float;', 'typedef '+scalar+' O2Float;')
+        src = '#define MATRIX '+label+'_matrix\n' + src
         src = '#define PATHRENDER '+label+'_path_render\n' + ('#define EXPECT_PATH_BOUNDED\n' if label == 'candidate' else '') + src
         path = a.out / (label+'-'+scalar+'.c')
         path.write_text(src)
         obj = path.with_suffix('.o')
-        subprocess.run(['cc', *flags, '-DRENDER='+label+'_render', '-DBENCH='+label+'_bench', '-c', str(path), '-o', str(obj)], check=True)
+        subprocess.run(['cc', *flags, '-DLABEL=\"'+label+'\"', *(['-DEXPECT_BOUNDED'] if label == 'candidate' else []), '-DRENDER='+label+'_render', '-DBENCH='+label+'_bench', '-c', str(path), '-o', str(obj)], check=True)
         objects.append(str(obj))
     path = a.out / ('main-'+scalar+'.c')
     path.write_text(main)
