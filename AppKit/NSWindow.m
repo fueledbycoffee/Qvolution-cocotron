@@ -287,6 +287,9 @@ static BOOL _allowsAutomaticWindowTabbing;
         if ([_backgroundView appearance] == nil)
             [_backgroundView _appearanceDidChangeFrom:previous];
         [self setViewsNeedDisplay:YES];
+        // Client-side title bars read the window's effective appearance too.
+        if ([_platformWindow respondsToSelector:@selector(desktopSettingsDidChange)])
+            [(id)_platformWindow desktopSettingsDidChange];
     } @finally { [self release]; }
 }
 
