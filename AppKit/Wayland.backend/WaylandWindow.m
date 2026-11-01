@@ -1216,11 +1216,6 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
              @"captureError": @(_captureRequested&&!_clientCapture?1:[_clientCapture errorCode]),
              @"clientPresents": @(_clientPresents), @"captured": @([_clientCapture writtenCount]),
              @"checks": @(_eglChecks), @"uploadedBytes": @(_eglBytes), @"failures": @(_eglFailures),
-             @"width": @(_eglWidth), @"height": @(_eglHeight), @"scale120": @(_renderScale120),
-             @"damageRects": @(_damageRects), @"damagePixels": @(_damagePixels),
-             @"copiedPixels": @(_copiedPixels), @"wholeDamagePresents": @(_wholeDamagePresents),
-             @"damageVerify": @(_damageVerify), @"verifiedPresents": @(_verifiedPresents),
-             @"staleVerifiedPresents": @(_staleVerifiedPresents),
              @"fullUploads": @(_eglFullUploads), @"partialUploads": @(_eglPartialUploads),
              @"lastUploadBytes": @(_eglLastUploadBytes),
              @"presentsTimed": @(_presentsTimed), @"presentNanoseconds": @(_presentNanoseconds),
@@ -1229,14 +1224,24 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
              @"lastUploadNanoseconds": @(_lastUploadNanoseconds), @"lastSwapNanoseconds": @(_lastSwapNanoseconds),
              @"surfaceWidth": @(surface ? O2SurfaceGetWidth(surface) : 0),
              @"surfaceHeight": @(surface ? O2SurfaceGetHeight(surface) : 0),
-             @"eglScale120": @(_renderScale120)};
+             @"width": @(_eglWidth), @"height": @(_eglHeight), @"scale120": @(_renderScale120),
+             @"damageRects": @(_damageRects), @"damagePixels": @(_damagePixels),
+             @"copiedPixels": @(_copiedPixels), @"wholeDamagePresents": @(_wholeDamagePresents),
+             @"damageVerify": @(_damageVerify), @"verifiedPresents": @(_verifiedPresents + _eglChecks),
+             @"staleVerifiedPresents": @(_staleVerifiedPresents + _eglFailures)};
 }
 
 - (void) addDamageRect: (CGRect) rect {
-    if (_damageCount == sizeof(_damage) / sizeof(_damage[0]))
-        _damageAll = YES;
-    else
-        _damage[_damageCount++] = rect;
+    if (!isfinite(rect.origin.x) || !isfinite(rect.origin.y) ||
+        !isfinite(rect.size.width) || !isfinite(rect.size.height))
+        [NSException raise:NSInvalidArgumentException format:@"Non-finite window damage"];
+    O2Surface *surface = [_context surface];
+    if (surface && !CGRectIsEmpty(rect)) {
+        CGRect r = CGRectIntegral(CGRectIntersection(rect, CGRectMake(0, 0,
+            O2SurfaceGetWidth(surface), O2SurfaceGetHeight(surface))));
+        if (!CGRectIsNull(r) && !CGRectIsEmpty(r))
+            O2SurfaceAddDamage(surface, r.origin.x, r.origin.y, r.size.width, r.size.height);
+    }
 }
 
 - (void) destroyEGLPresenter {
@@ -1374,8 +1379,11 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
                 ++_eglSwaps;
                 _eglLastUploadBytes = [_eglPresenter lastUploadBytes];
                 _eglBytes += _eglLastUploadBytes;
-                if (whole) ++_eglFullUploads; else ++_eglPartialUploads;
-                _damageAll = NO; _damageCount = 0;
+                BOOL uploadedWhole = whole || _eglLastUploadBytes == (uint64_t)width * height * 4;
+                if (uploadedWhole) ++_eglFullUploads; else ++_eglPartialUploads;
+                _damageRects += uploadedWhole ? 1 : damage.count;
+                _damagePixels += uploadedWhole ? (uint64_t)width * height : O2SurfaceDamagePixelCount(&damage);
+                _damageAll = NO;
                 _needsPresent = NO;
                 if (_eglVerify && (_eglChecks == 1 || _eglChecks % 100 == 0))
                     NSLog(@"AppKit EGL: verified frame %llu of window %p (%zux%zu) against the CPU surface",
