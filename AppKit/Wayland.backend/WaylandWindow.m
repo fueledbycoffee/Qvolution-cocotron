@@ -938,25 +938,39 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     };
 }
 
-// Shortens the middle of a title that does not fit, at character boundaries.
+// The title keeping `keep` characters around a middle ellipsis, cut at
+// character boundaries; nil when the boundaries overlap.
+static NSString *titleKeeping(NSString *title, NSUInteger keep) {
+    NSUInteger length = [title length];
+    NSUInteger headEnd = (keep + 1) / 2, tailStart = length - keep / 2;
+    if (headEnd > 0)
+        headEnd = NSMaxRange([title rangeOfComposedCharacterSequenceAtIndex: headEnd - 1]);
+    if (tailStart < length)
+        tailStart = [title rangeOfComposedCharacterSequenceAtIndex: tailStart].location;
+    if (headEnd > tailStart)
+        return nil;
+    return [NSString stringWithFormat: @"%@\u2026%@",
+            [title substringToIndex: headEnd], [title substringFromIndex: tailStart]];
+}
+
+// Shortens the middle of a title that does not fit. Keeping more characters
+// never makes the title narrower, so the longest fitting cut is found by
+// bisection: O(log n) measurements per redraw instead of O(n).
 static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CGFloat width) {
     if ([title sizeWithAttributes: attributes].width <= width)
         return title;
-    NSUInteger length = [title length];
-    for (NSUInteger keep = length; keep-- > 0;) {
-        NSUInteger headEnd = (keep + 1) / 2, tailStart = length - keep / 2;
-        if (headEnd > 0)
-            headEnd = NSMaxRange([title rangeOfComposedCharacterSequenceAtIndex: headEnd - 1]);
-        if (tailStart < length)
-            tailStart = [title rangeOfComposedCharacterSequenceAtIndex: tailStart].location;
-        if (headEnd > tailStart)
-            continue;
-        NSString *candidate = [NSString stringWithFormat: @"%@\u2026%@",
-                [title substringToIndex: headEnd], [title substringFromIndex: tailStart]];
-        if ([candidate sizeWithAttributes: attributes].width <= width)
-            return candidate;
+    NSString *best = @"";
+    NSUInteger low = 0, high = [title length];
+    while (low < high) {
+        NSUInteger keep = low + (high - low) / 2;
+        NSString *candidate = titleKeeping(title, keep);
+        if (candidate != nil && [candidate sizeWithAttributes: attributes].width <= width) {
+            best = candidate;
+            low = keep + 1;
+        } else
+            high = keep;
     }
-    return @"";
+    return best;
 }
 
 - (void) drawTitle {
