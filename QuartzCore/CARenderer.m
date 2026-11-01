@@ -319,9 +319,11 @@ void CATexImage2DCGImage(CGImageRef image) {
         break;
 
     case kCGImageAlphaPremultipliedLast:
-        if (byteOrder == kO2BitmapByteOrder32Big) {
+        // Default-order alpha-last bitmaps have R,G,B,A bytes too. In
+        // particular app-supplied contents need not use our BGRA backing format.
+        if (byteOrder == kCGBitmapByteOrderDefault || byteOrder == kO2BitmapByteOrder32Big) {
             glFormat = GL_RGBA;
-            glType = GL_UNSIGNED_INT_8_8_8_8_REV;
+            glType = GL_UNSIGNED_BYTE;
         }
         break;
 
