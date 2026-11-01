@@ -136,6 +136,7 @@ static void WaylandCopyOutputText(NSString **destination, const char *text) {
 - (void) attachLogicalOutput: (WaylandOutput *) output;
 - (void) processPendingEvents;
 - (void) observeRunLoop: (CFRunLoopActivity) activity;
+- (void) logEventCheck: (const char *) reason requestedMode: (CFStringRef) requested;
 - (void) handleEvent: (uint32_t) opcode
                 kind: (WaylandObjectKind) kind
                proxy: (struct wl_proxy *) proxy
@@ -345,7 +346,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         return nil;
     }
     CFRunLoopAddSource(CFRunLoopGetMain(), _wlSource, kCFRunLoopCommonModes);
-
+    [self logEventCheck: "source_registered" requestedMode: kCFRunLoopCommonModes];
 
     union wl_argument args[1] = {{.o = NULL}};
     _registry = WaylandCreateObject((struct wl_proxy *) _wlDisplay,
@@ -424,6 +425,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
     [self runAfterDispatchBlocks];
     [self flush];
+    [self logEventCheck: "setup_complete" requestedMode: NULL];
 
     NSLog(@"Wayland backend: connected, %lu output(s), seat %s, decorations %s",
           (unsigned long) [_outputs count], _seat ? "present" : "missing",
@@ -499,7 +501,22 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
 #pragma mark - Connection and event loop
 
+- (void) logEventCheck: (const char *) reason requestedMode: (CFStringRef) requested {
+    if (!_eventPump.boundaries) return;
+    CFRunLoopRef current = CFRunLoopGetCurrent();
+    CFStringRef currentMode = CFRunLoopCopyCurrentMode(current);
+    char mode[256] = "none", wanted[256] = "none";
+    if (currentMode) CFStringGetCString(currentMode, mode, sizeof(mode), kCFStringEncodingUTF8);
+    if (requested) CFStringGetCString(requested, wanted, sizeof(wanted), kCFStringEncodingUTF8);
+    dprintf(_eventPump.boundaryFD,
+            "QV_WAYLAND check pid=%d display=%p queue=default reason=%s check=%lu mode=%s requested=%s current_loop=%p main_loop=%p source_loop=%p fd=%d\n",
+            getpid(), _wlDisplay, reason, ++_mainChecks, mode, wanted,
+            current, CFRunLoopGetMain(), CFRunLoopGetMain(), WL.wl_display_get_fd(_wlDisplay));
+    if (currentMode) CFRelease(currentMode);
+}
+
 - (void) observeRunLoop: (CFRunLoopActivity) activity {
+    [self logEventCheck: "observer" requestedMode: NULL];
     double now = WaylandBoundaryMilliseconds();
     double elapsed = now - _lastBoundaryTime;
     // A sleeping run loop is responsive idle time, not main-thread work.
@@ -552,7 +569,14 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     if (__atomic_load_n(&_eventPump.error, __ATOMIC_ACQUIRE))
         [self connectionFailed];
 
-    if (WL.wl_display_dispatch_pending(_wlDisplay) < 0)
+    [self logEventCheck: "dispatch_pending" requestedMode: NULL];
+    int count = WL.wl_display_dispatch_pending(_wlDisplay);
+    if (count > 0) _mainEvents += count;
+    if (_eventPump.boundaries)
+        dprintf(_eventPump.boundaryFD,
+                "QV_WAYLAND dispatch pid=%d display=%p queue=default queue_id=default count=%d total=%lu error=%d\n",
+                getpid(), _wlDisplay, count, _mainEvents, WL.wl_display_get_error(_wlDisplay));
+    if (count < 0)
         [self connectionFailed];
 
     [self runAfterDispatchBlocks];
@@ -564,6 +588,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                              inMode: (NSRunLoopMode) mode
                             dequeue: (BOOL) dequeue
 {
+    [self logEventCheck: "next_event" requestedMode: (CFStringRef) mode];
     [self processPendingEvents];
 
     // NSDisplay's queue handling, without X11Display's X event processing.

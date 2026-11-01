@@ -21,6 +21,7 @@ typedef struct {
     bool started, boundaries;
     int boundaryFD;
     unsigned pendingPongs;
+    unsigned long reads, pingEvents, wakes;
     double oldestPing;
     void (*wake)(void *);
     void *info;
@@ -79,12 +80,23 @@ static int WaylandPumpFlush(WaylandEventPump *pump) {
     return wl->native_errno() == 11 ? 1 : -1;
 }
 
+static int WaylandPumpDispatch(WaylandEventPump *pump) {
+    int count = pump->library->wl_display_dispatch_queue_pending(pump->display, pump->queue);
+    if (count > 0) pump->pingEvents += count;
+    if (pump->boundaries)
+        dprintf(pump->boundaryFD,
+                "QV_WAYLAND dispatch pid=%d display=%p queue=ping queue_id=%p mode=worker count=%d total=%lu error=%d\n",
+                getpid(), pump->display, pump->queue, count, pump->pingEvents,
+                pump->library->wl_display_get_error(pump->display));
+    return count;
+}
+
 static void *WaylandPumpRun(void *data) {
     WaylandEventPump *pump = data;
     struct WaylandLibrary *wl = pump->library;
     for (;;) {
         while (wl->wl_display_prepare_read_queue(pump->display, pump->queue) != 0) {
-            if (wl->wl_display_dispatch_queue_pending(pump->display, pump->queue) < 0)
+            if (WaylandPumpDispatch(pump) < 0)
                 goto failed;
         }
         int flush = WaylandPumpFlush(pump);
@@ -98,6 +110,11 @@ static void *WaylandPumpRun(void *data) {
             {.fd = pump->stop[0], .events = POLLIN}
         };
         int result = poll(fds, 2, -1);
+        if (pump->boundaries)
+            dprintf(pump->boundaryFD,
+                    "QV_WAYLAND fd_ready pid=%d display=%p queue=ping mode=worker fd=%d result=%d revents=%d stop=%d\n",
+                    getpid(), pump->display, fds[0].fd, result,
+                    fds[0].revents, fds[1].revents);
         if (result < 0 || fds[1].revents || !(fds[0].revents & POLLIN)) {
             wl->wl_display_cancel_read(pump->display);
             if (fds[1].revents) return NULL;
@@ -106,12 +123,22 @@ static void *WaylandPumpRun(void *data) {
             continue;
         }
         if (wl->wl_display_read_events(pump->display) < 0) goto failed;
-        if (wl->wl_display_dispatch_queue_pending(pump->display, pump->queue) < 0)
+        ++pump->reads;
+        if (WaylandPumpDispatch(pump) < 0)
             goto failed;
         // The default queue may now contain input even though the fd is empty.
+        ++pump->wakes;
+        if (pump->boundaries)
+            dprintf(pump->boundaryFD,
+                    "QV_WAYLAND read_events pid=%d display=%p queue=all mode=worker reads=%lu wakes=%lu\n",
+                    getpid(), pump->display, pump->reads, pump->wakes);
         pump->wake(pump->info);
     }
 failed:
+    if (pump->boundaries)
+        dprintf(pump->boundaryFD,
+                "QV_WAYLAND pump_failed pid=%d display=%p queue=ping mode=worker error=%d native_errno=%d\n",
+                getpid(), pump->display, wl->wl_display_get_error(pump->display), wl->native_errno());
     __atomic_store_n(&pump->error, 1, __ATOMIC_RELEASE);
     pump->wake(pump->info);
     return NULL;

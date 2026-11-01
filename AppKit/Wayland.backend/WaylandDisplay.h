@@ -130,6 +130,7 @@ struct wl_proxy *WaylandCreateObject(struct wl_proxy *proxy, uint32_t opcode,
     double _lastBoundaryTime;
     CFRunLoopActivity _lastBoundaryActivity;
     CFStringRef _lastBoundaryMode;
+    unsigned long _mainEvents, _mainChecks;
     NSMutableArray *_outputs;
     NSArray *_screens;
     // WaylandWindows, not retained, most recently activated first.
