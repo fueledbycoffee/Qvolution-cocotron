@@ -154,14 +154,33 @@ O2AffineTransform O2GStateUserSpaceTransform(O2GState *self) {
             size, O2AffineTransformInvert(_deviceSpaceTransform));
 }
 
+static O2Rect O2RectApplyAffineTransform(O2Rect rect, O2AffineTransform transform) {
+    O2Point corners[] = {
+            rect.origin,
+            O2PointMake(O2RectGetMaxX(rect), O2RectGetMinY(rect)),
+            O2PointMake(O2RectGetMinX(rect), O2RectGetMaxY(rect)),
+            O2PointMake(O2RectGetMaxX(rect), O2RectGetMaxY(rect))};
+    O2Point point = O2PointApplyAffineTransform(corners[0], transform);
+    O2Float minX = point.x, maxX = point.x;
+    O2Float minY = point.y, maxY = point.y;
+
+    for (int i = 1; i < 4; i++) {
+        point = O2PointApplyAffineTransform(corners[i], transform);
+        minX = fmin(minX, point.x);
+        maxX = fmax(maxX, point.x);
+        minY = fmin(minY, point.y);
+        maxY = fmax(maxY, point.y);
+    }
+    return O2RectMake(minX, minY, maxX - minX, maxY - minY);
+}
+
 - (O2Rect) convertRectToDeviceSpace: (O2Rect) rect {
-    O2UnimplementedMethod();
-    return O2RectZero;
+    return O2RectApplyAffineTransform(rect, _deviceSpaceTransform);
 }
 
 - (O2Rect) convertRectToUserSpace: (O2Rect) rect {
-    O2UnimplementedMethod();
-    return O2RectZero;
+    return O2RectApplyAffineTransform(
+            rect, O2AffineTransformInvert(_deviceSpaceTransform));
 }
 
 void O2GStateSetDeviceSpaceCTM(O2GState *self, O2AffineTransform transform) {
