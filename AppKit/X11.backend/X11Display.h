@@ -39,7 +39,7 @@
     CFSocketRef _cfSocket;
     CFRunLoopSourceRef _source;
     // Set when CGL accepted this display for EGL; otherwise windows draw on the CPU.
-    BOOL _eglAvailable;
+    BOOL _x11EGLAvailable;
 #endif
     NSMutableDictionary *_windowsByID;
 

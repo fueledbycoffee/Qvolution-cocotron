@@ -145,8 +145,8 @@ static void socketCallback(CFSocketRef s, CFSocketCallBackType type,
         // EGL is an optional accelerator, as in the Wayland backend: without it
         // windows keep drawing on the CPU. Report why instead of failing launch.
         CGLError glError = CGLRegisterNativeDisplay(_display);
-        _eglAvailable = glError == kCGLNoError;
-        if (!_eglAvailable)
+        _x11EGLAvailable = glError == kCGLNoError;
+        if (!_x11EGLAvailable)
             NSLog(@"X11 backend: EGL unavailable (CGL error %d); CPU drawing remains enabled", glError);
 #endif
 
