@@ -57,6 +57,7 @@ void O2ContextDefaultShowText(O2ContextRef self, const char *text,
 - initWithGraphicsState: (O2GState *) state {
     _userToDeviceTransform = state->_deviceSpaceTransform;
     _layerStack = [NSMutableArray new];
+    _transparencyLayerStates = [NSMutableArray new];
     _stateStack = [NSMutableArray new];
     [_stateStack addObject: state];
     _currentState = state;
@@ -77,6 +78,7 @@ void O2ContextDefaultShowText(O2ContextRef self, const char *text,
 
 - (void) dealloc {
     [_layerStack release];
+    [_transparencyLayerStates release];
     [_stateStack release];
     [_path release];
     [super dealloc];
@@ -91,9 +93,15 @@ void O2ContextDefaultShowText(O2ContextRef self, const char *text,
 }
 
 - (void) beginTransparencyLayerWithInfo: (NSDictionary *) unused {
+    [_transparencyLayerStates addObject: [NSNumber numberWithBool: NO]];
+    O2ContextSaveGState(self);
 }
 
 - (void) endTransparencyLayer {
+    if ([_transparencyLayerStates count] == 0)
+        return;
+    [_transparencyLayerStates removeLastObject];
+    O2ContextRestoreGState(self);
 }
 
 O2ColorRef O2ContextStrokeColor(O2ContextRef self) {
