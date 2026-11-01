@@ -67,4 +67,5 @@ COREGRAPHICS_EXPORT CGImageRef CGWindowListCreateImage(CGRect screenBounds,
 
 CF_IMPLICIT_BRIDGING_DISABLED
 
+COREGRAPHICS_EXPORT CFArrayRef CGWindowListCopyWindowInfo(CGWindowListOption options, CGWindowID relative);
 #endif

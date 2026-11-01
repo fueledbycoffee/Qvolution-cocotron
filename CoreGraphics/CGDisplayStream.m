@@ -20,3 +20,24 @@
 #import <CoreGraphics/CGDisplayStream.h>
 
 const CFStringRef kCGDisplayStreamShowCursor = CFSTR("kCGDisplayStreamShowCursor");
+
+// GUESS: opaque key bytes are undocumented; match the existing ShowCursor
+// token convention. Stream creation fails, so no backend interprets these keys.
+const CFStringRef kCGDisplayStreamColorSpace = CFSTR("kCGDisplayStreamColorSpace");
+const CFStringRef kCGDisplayStreamDestinationRect = CFSTR("kCGDisplayStreamDestinationRect");
+const CFStringRef kCGDisplayStreamMinimumFrameTime = CFSTR("kCGDisplayStreamMinimumFrameTime");
+const CFStringRef kCGDisplayStreamPreserveAspectRatio = CFSTR("kCGDisplayStreamPreserveAspectRatio");
+CGDisplayStreamRef CGDisplayStreamCreate(CGDirectDisplayID display, size_t width,
+    size_t height, int32_t pixelFormat, CFDictionaryRef properties,
+    CGDisplayStreamFrameAvailableHandler handler) { return NULL; }
+CFRunLoopSourceRef CGDisplayStreamGetRunLoopSource(CGDisplayStreamRef stream) { return NULL; }
+CGError CGDisplayStreamStart(CGDisplayStreamRef stream)
+{ return stream ? kCGErrorNotImplemented : kCGErrorIllegalArgument; }
+CGError CGDisplayStreamStop(CGDisplayStreamRef stream)
+{ return stream ? kCGErrorNotImplemented : kCGErrorIllegalArgument; }
+const CGRect *CGDisplayStreamUpdateGetRects(CGDisplayStreamUpdateRef update,
+    CGDisplayStreamUpdateRectType type, size_t *count)
+{
+    if (count) *count = 0;
+    return NULL;
+}

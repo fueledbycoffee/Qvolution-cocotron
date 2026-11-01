@@ -156,3 +156,20 @@ bool CGColorSpaceUsesExtendedRange(CGColorSpaceRef space) {
     const CGColorSpaceRangeForms *forms = rangeFormsForSpace(space);
     return forms != NULL && forms->name == forms->extended;
 }
+
+// GUESS: public APIs specify opaque names, not string bytes. Project-owned
+// tokens match the existing color-space naming convention; no profile is faked.
+const CFStringRef kCGColorSpaceDisplayP3_HLG = CFSTR("kCGColorSpaceDisplayP3_HLG");
+const CFStringRef kCGColorSpaceDisplayP3_PQ = CFSTR("kCGColorSpaceDisplayP3_PQ");
+const CFStringRef kCGColorSpaceExtendedLinearITUR_2020 = CFSTR("kCGColorSpaceExtendedLinearITUR_2020");
+
+CFDataRef CGColorSpaceCopyICCData(CGColorSpaceRef space) { return NULL; }
+CFPropertyListRef CGColorSpaceCopyPropertyList(CGColorSpaceRef space) { return NULL; }
+CGColorSpaceRef CGColorSpaceCreateWithICCData(CFDataRef data) { return NULL; }
+CGColorSpaceRef CGColorSpaceCreateICCBased(size_t nComponents, const CGFloat *range,
+    struct O2DataProvider *profile, CGColorSpaceRef alternate)
+{
+    // Onyx2D has no ICC parser. Substituting a device space would silently
+    // change the interpretation of color components, including their count.
+    return NULL;
+}

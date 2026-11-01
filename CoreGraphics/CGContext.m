@@ -760,3 +760,12 @@ uint32_t CGContextGetFontSmoothingStyle(CGContextRef context) {
 void CGContextSetFontSmoothingStyle(CGContextRef context, uint32_t style) {
     O2ContextSetFontSmoothingStyle((O2ContextRef)context, style);
 }
+
+void CGContextBeginTransparencyLayerWithRect(CGContextRef context,
+    CGRect rect, CFDictionaryRef info)
+{
+    // Begin first: EndTransparencyLayer restores the saved clip, so the bounds
+    // do not leak into subsequent drawing on the parent context.
+    CGContextBeginTransparencyLayer(context, info);
+    CGContextClipToRect(context, rect);
+}

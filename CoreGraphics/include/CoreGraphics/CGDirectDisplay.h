@@ -99,4 +99,11 @@ COREGRAPHICS_EXPORT int32_t CGDisplayRotation(CGDirectDisplayID display);
 COREGRAPHICS_EXPORT CGColorSpaceRef CGDisplayCopyColorSpace(CGDirectDisplayID display);
 
 
+#include <CoreGraphics/CGImage.h>
+COREGRAPHICS_EXPORT CGImageRef CGDisplayCreateImage(CGDirectDisplayID display);
+COREGRAPHICS_EXPORT CGImageRef CGDisplayCreateImageForRect(CGDirectDisplayID display, CGRect rect);
+COREGRAPHICS_EXPORT void *CGDirectDisplayCopyCurrentMetalDevice(CGDirectDisplayID display);
+COREGRAPHICS_EXPORT bool CGPreflightScreenCaptureAccess(void);
+COREGRAPHICS_EXPORT bool CGRequestScreenCaptureAccess(void);
+
 #endif /* CGDIRECTDISPLAY_H */

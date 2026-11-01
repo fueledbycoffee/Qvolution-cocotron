@@ -23,7 +23,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <CoreGraphics/CGGeometry.h>
 #import <CoreGraphics/CoreGraphicsExport.h>
 
-typedef struct {
+typedef struct CGAffineTransform {
     CGFloat a;
     CGFloat b;
     CGFloat c;
