@@ -37,7 +37,7 @@ typedef struct { uint32_t highLongOfPSN, lowLongOfPSN; } ProcessSerialNumber;
 typedef struct { uint32_t highLongOfPSN, lowLongOfPSN; } CPSProcessSerNum;
 enum { noErr = 0, paramErr = -50, unimpErr = -4 };
 OSErr GetCurrentProcess(ProcessSerialNumber *);
-static void *native_dlopen(const char *path, int flags) {
+static __attribute__((unused)) void *native_dlopen(const char *path, int flags) {
     if (strcmp(path, "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices")) abort();
     return dlopen(getenv("CGS_TEST_HISERVICES"), flags);
 }

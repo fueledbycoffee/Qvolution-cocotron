@@ -244,11 +244,6 @@ endfunction(add_backend)
 add_subdirectory(X11.backend)
 add_subdirectory(Wayland.backend)
 
-# HIServices already depends on CoreGraphics. Resolve this one public sibling
-# dynamically from ApplicationServices' loaded HIServices image rather than
-# introducing a circular build dependency. SPEC.md Round 3 supplies its ABI.
-set_property(TARGET CoreGraphics APPEND_STRING PROPERTY
-    LINK_FLAGS " -Wl,-U,_GetCurrentProcess ")
 if(ENABLE_TESTS)
     add_darling_executable(imp_graphics_layer_test ../tests/graphics-imports/layer-clip.m)
     target_link_libraries(imp_graphics_layer_test CoreGraphics Onyx2D Foundation)

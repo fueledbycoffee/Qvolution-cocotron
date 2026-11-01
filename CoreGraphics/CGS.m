@@ -27,6 +27,7 @@
 #include <pthread.h>
 #include <HIServices/Processes.h>
 #include <CarbonCore/MacErrors.h>
+#include <dlfcn.h>
 
 static NSMutableDictionary<NSNumber*, CGSConnection*>* g_connections = nil;
 static Boolean g_denyConnections = FALSE;
@@ -517,8 +518,22 @@ OSErr CPSGetCurrentProcess(CPSProcessSerNum *psn)
     if (psn == NULL)
         return paramErr;
 
+    // HIServices depends on CoreGraphics: load the public sibling only when
+    // requested, without a circular link or a flat-namespace undefined bind.
+    void *services = dlopen("/System/Library/Frameworks/ApplicationServices.framework/Frameworks/HIServices.framework/HIServices",
+                            RTLD_LAZY | RTLD_LOCAL);
+    if (services == NULL)
+        return unimpErr;
+    OSErr (*getCurrentProcess)(ProcessSerialNumber *) =
+        (OSErr (*)(ProcessSerialNumber *))dlsym(services, "GetCurrentProcess");
+    if (getCurrentProcess == NULL) {
+        dlclose(services);
+        return unimpErr;
+    }
+
     ProcessSerialNumber current;
-    OSErr result = GetCurrentProcess(&current);
+    OSErr result = getCurrentProcess(&current);
+    dlclose(services);
     if (result != noErr)
         return result;
 
