@@ -40,6 +40,10 @@ for name in ['updateWaylandMenuPresentation', 'scheduleDBusWrite', 'deferDBusPro
     marker = '- (void) ' + name + ' {'
     implementation.append(block(global_menu, marker) if marker in global_menu else marker + '}')
 implementation.append(block(global_menu, '- (void) registerWaylandApplicationMenu:'))
+if '- (BOOL) orbitRegistrationAccepted {' in global_menu:
+    implementation.append(block(global_menu, '- (BOOL) orbitRegistrationAccepted {'))
+else:
+    implementation.append('- (BOOL) orbitRegistrationAccepted { return YES; }')
 handler = global_menu[global_menu.index('- (DBusHandlerResult) handleDBusMessage: (DBusMessage *) message\n'):]
 handler = handler[:handler.index('    if (strcmp(member, "Introspect")')]
 layout = block(global_menu, '    if (strcmp(member, "GetLayout") == 0)')

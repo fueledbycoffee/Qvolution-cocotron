@@ -26,6 +26,7 @@ typedef struct DBusConnection DBusConnection;
     BOOL _orbitMenuRead;
     NSString *_orbitOwner;
     NSString *_orbitShellOwner;
+    NSString *_orbitRegisteredOwner;
     unsigned int _orbitShellGeneration;
     unsigned int _orbitOwnerGeneration;
     unsigned int _orbitOwnerWatchRetries;

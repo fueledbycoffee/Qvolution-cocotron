@@ -195,12 +195,12 @@ static NSApplication *NSApp;
 @interface X11GlobalMenu : NSObject { @public
     DBusConnection *_connection; CFSocketRef _cfSocket; id _itemsByID; unsigned int _revision; BOOL _available, _globalMenuEngaged, _waylandApplicationMenu, _orbitOwnerMatchAdded;
     BOOL _orbitProgressFailed, _orbitOwnerWatchReady, _orbitStateWatchReady;
-    BOOL _orbitExtensionActive, _orbitMenuRead; NSString *_orbitOwner, *_orbitShellOwner;
+    BOOL _orbitExtensionActive, _orbitMenuRead; NSString *_orbitOwner, *_orbitShellOwner, *_orbitRegisteredOwner;
     unsigned int _orbitShellGeneration, _orbitOwnerGeneration, _orbitOwnerWatchRetries, _orbitStateWatchRetries; NSMenu *_currentMenu;
 }
 - (void)deferDBusProgressFailure; - (void)processPendingDBusEvents; - (void)scheduleDBusWrite; - (void)handleDBusDisconnect;
 - (void)appendMenu:(NSMenu *)menu asNode:(int32_t)node toIter:(DBusMessageIter *)iter depth:(int32_t)depth;
-- (void)updateWaylandMenuPresentation; - (void)queryOrbitIntegration:(int)kind;
+- (void)updateWaylandMenuPresentation; - (void)queryOrbitIntegration:(int)kind; - (BOOL)orbitRegistrationAccepted;
 - (void)receiveOrbitReply:(DBusMessage *)reply kind:(int)kind generation:(unsigned int)generation;
 - (void)registerWaylandApplicationMenu:(NSMenu *)menu; - (void)updateMenu:(NSMenu *)menu;
 - (DBusHandlerResult)handleDBusMessage:(DBusMessage *)message onConnection:(DBusConnection *)connection;
@@ -221,7 +221,8 @@ static NSApplication *NSApp;
 static int failures;
 #define CHECK(ok, msg) do { if (!(ok)) { fprintf(stderr,"FAIL: %s\n",msg); failures++; } } while (0)
 static DBusConnection *receiver;
-static BOOL answerQueries = YES;
+static BOOL answerQueries = YES, rejectRegistration;
+static int registrations;
 static double extensionState = 1;
 static int writeOnlyProgress, layoutReplies, bulkReceived;
 static void appendState(DBusMessage *reply, double state) {
@@ -245,6 +246,12 @@ static void pump(X11GlobalMenu *exporter) {
             if (answerQueries && dbus_message_is_method_call(request,"org.gnome.Shell.Extensions","GetExtensionInfo")) {
                 DBusMessage *reply=dbus_message_new_method_return(request); appendState(reply,extensionState);
                 dbus_connection_send(receiver,reply,NULL); dbus_message_unref(reply); dbus_connection_flush(receiver);
+            }
+            if (answerQueries && dbus_message_is_method_call(request,"space.unmade.GlobalMenu","RegisterWaylandMenu")) {
+                // Fake Orbit registrar: accept, or reject as Orbit does for a peer it cannot verify.
+                DBusMessage *reply=rejectRegistration ? dbus_message_new_error(request,"space.unmade.GlobalMenu.InvalidMenuPeer","rejected")
+                    : dbus_message_new_method_return(request);
+                dbus_connection_send(receiver,reply,NULL); dbus_message_unref(reply); dbus_connection_flush(receiver); registrations++;
             }
             if (dbus_message_get_type(request)==DBUS_MESSAGE_TYPE_METHOD_RETURN && dbus_message_has_signature(request,"u(ia{sv}av)")) layoutReplies++;
             if (dbus_message_is_signal(request,"org.example.Fixture","Bulk")) bulkReceived++;
@@ -351,6 +358,18 @@ int main(void) {
     stateSignal(exporter,"global-menu@unmade.space",2,sender); CHECK(!menu->hidden,"distinct-reader engagement still follows the authenticated extension state");
     stateSignal(exporter,"global-menu@unmade.space",1,sender); CHECK(!menu->hidden,"reactivation waits for a fresh distinct-reader read");
     readLayoutFrom(exporter,reader,0); CHECK(menu->hidden,"fresh distinct-reader read engages again");
+    CHECK(registrations>0 && [exporter orbitRegistrationAccepted],"reads count only after Orbit accepted RegisterWaylandMenu");
+    rejectRegistration=YES; [exporter registerWaylandApplicationMenu:exporter->_currentMenu]; pump(exporter);
+    CHECK(!menu->hidden && ![exporter orbitRegistrationAccepted],"Orbit rejecting our registration restores the local menu");
+    readLayoutFrom(exporter,reader,0); CHECK(!menu->hidden && !exporter->_orbitMenuRead,"stray root read after a rejected registration leaves the local menu visible");
+    rejectRegistration=NO; [exporter registerWaylandApplicationMenu:exporter->_currentMenu]; pump(exporter);
+    CHECK(!menu->hidden && [exporter orbitRegistrationAccepted],"accepted re-registration still waits for a read");
+    readLayoutFrom(exporter,reader,0); CHECK(menu->hidden,"read after accepted re-registration engages");
+    // A registration accepted by a previous owner of the name does not carry over.
+    [exporter->_orbitRegisteredOwner release]; exporter->_orbitRegisteredOwner=[[NSString alloc] initWithUTF8String:":99.99"];
+    [exporter updateWaylandMenuPresentation]; CHECK(!menu->hidden,"registration by another unique name does not satisfy the gate");
+    readLayoutFrom(exporter,reader,0); CHECK(!menu->hidden,"read under a foreign registration does not count");
+    [exporter registerWaylandApplicationMenu:exporter->_currentMenu]; pump(exporter); readLayoutFrom(exporter,reader,0); CHECK(menu->hidden,"current owner registration restores engagement");
     failLayoutSend=YES; readLayout(exporter,sender); CHECK(!menu->hidden,"failed initial layout send retains local fallback"); failLayoutSend=NO;
     resizeObserver=mutateWindows;
     readLayout(exporter,sender); CHECK(menu->hidden,"active GNOME Orbit reader hides duplicate local menu");
@@ -424,6 +443,7 @@ int main(void) {
     failureExporter->_available=YES; failureExporter->_orbitOwnerWatchReady=YES; failureExporter->_orbitStateWatchReady=YES;
     failureExporter->_orbitExtensionActive=YES; failureExporter->_orbitMenuRead=YES;
     failureExporter->_orbitOwner=[[NSString alloc] initWithUTF8String:sender]; failureExporter->_orbitShellOwner=[[NSString alloc] initWithUTF8String:sender];
+    failureExporter->_orbitRegisteredOwner=[[NSString alloc] initWithUTF8String:sender];
     [failureExporter updateWaylandMenuPresentation]; CHECK(menu->hidden,"query-setup failure control begins engaged");
     queryAllocationSize=sizeof(OrbitQuery); failQueryAllocation=YES; [failureExporter queryOrbitIntegration:OrbitExtensionQuery];
     CHECK(failureExporter->_orbitProgressFailed && !menu->hidden,"unobserved pending-query allocation failure permanently restores fallback");

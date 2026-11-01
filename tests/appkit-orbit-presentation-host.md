@@ -20,6 +20,8 @@ Checks include both zero and 30-point titlebar policies; content geometry,
 toolbar placement, frame conversion and repeated hide/restore without drift; no
 Shell, no reader, submenu and unstamped requests, a separate reader peer whose
 unique name differs from the registrar owner (as Orbit's reader process does),
+reads counting only after the fake registrar accepted RegisterWaylandMenu from
+the current owner, a rejected registration followed by a stray root read,
 authenticated ACTIVE state and current Orbit reads; forged/irrelevant state and
 query senders; stale state/owner query replies; disable/error and owner/query
 failure; initial and previously engaged reply-send failures; allocation failure;

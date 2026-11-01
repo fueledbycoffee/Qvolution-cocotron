@@ -13,16 +13,18 @@ queue progress, and every presentation decision with all gate values.
 No menu content, guest internals or proprietary implementation is recorded.
 
 Query kinds: 0 Orbit owner, 1 Shell owner, 2 extension info, 3 owner watch, 4
-extension-state watch. Each failed watch is retried up to twice on its own
-budget (`watch-retry`) before it waits for the next window registration. A
+extension-state watch, 5 RegisterWaylandMenu (its authentication line names the
+unique name that accepted it). Each failed watch is retried up to twice on its
+own budget (`watch-retry`) before it waits for the next window registration. A
 query's `error` is the D-Bus error name, including access-denied, unknown-name
 and timeout errors. A stale reply is logged before being rejected. Owner changes
 and layout requests identify both generations.
 
 A GetLayout qualifies when it is a root read delivered by the bus
-(`bus-sender=1`) while the authenticated gates hold. `reader-is-registrar` is
-informational: Orbit reads from a sibling process whose unique name differs
-from the `registrar` owner.
+(`bus-sender=1`) while the authenticated gates hold and Orbit accepted our
+RegisterWaylandMenu from the current owner of space.unmade.GlobalMenu
+(`registered=1`). `reader-is-registrar` is informational: Orbit reads from a
+sibling process whose unique name differs from the `registrar` owner.
 
 `layout-reply queued=1` is the existing successful `dbus_connection_send`
 criterion. `transport-progress pending-write=0` means the local connection's
