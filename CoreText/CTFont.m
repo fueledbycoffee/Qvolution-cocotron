@@ -932,3 +932,7 @@ uint32_t CTGetCoreTextVersion(void)
 {
     return 0x000C0000;
 }
+
+// GUESS: private Spotify import supplies only the name. The current font
+// backend does not expose variation axes; NULL reports no available axes.
+CFArrayRef CTFontCopyVariationAxesInternal(CTFontRef font) { return NULL; }

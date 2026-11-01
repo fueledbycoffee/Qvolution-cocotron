@@ -1,4 +1,5 @@
 #import <CoreText/CTFontManager.h>
+#import <CoreFoundation/CFArray.h>
 #import <CoreText/CTFontDescriptor.h>
 #import <Foundation/NSArray.h>
 #import <Foundation/NSData.h>
@@ -69,4 +70,14 @@ bool CTFontManagerRegisterFontsForURL(CFURLRef fontURL, CTFontManagerScope scope
 {
     printf("STUB %s\n", __PRETTY_FUNCTION__);
     return false;
+}
+
+CTFontDescriptorRef CTFontManagerCreateFontDescriptorFromData(CFDataRef data)
+{
+    CFArrayRef descriptors = CTFontManagerCreateFontDescriptorsFromData(data);
+    CTFontDescriptorRef result = NULL;
+    if (descriptors && CFArrayGetCount(descriptors) > 0)
+        result = (CTFontDescriptorRef)CFRetain(CFArrayGetValueAtIndex(descriptors, 0));
+    if (descriptors) CFRelease(descriptors);
+    return result;
 }
