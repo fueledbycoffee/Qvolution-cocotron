@@ -159,6 +159,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
 
 - (void) setAnchorPoint: (CGPoint) value {
     _anchorPoint = value;
+    [_context startTimerIfNeeded];
 }
 
 - (CGPoint) position {
@@ -177,6 +178,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
     }
 
     _position = value;
+    [_context startTimerIfNeeded];
 }
 
 - (CGRect) bounds {
@@ -196,6 +198,8 @@ static char swiftUIViewTestPropertiesAssociationKey;
 
     BOOL sizeChanged = !CGSizeEqualToSize(_bounds.size, value.size);
     _bounds = value;
+    // A bounds origin change (a CAScrollLayer scrolling) moves the sublayers.
+    [_context startTimerIfNeeded];
     if (sizeChanged)
         [self setNeedsLayout];
     if (sizeChanged && _needsDisplayOnBoundsChange)
@@ -244,6 +248,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
     }
 
     _opacity = value;
+    [_context startTimerIfNeeded];
 }
 
 - (BOOL) isOpaque {
@@ -262,6 +267,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
     value = [value retain];
     [_contents release];
     _contents = value;
+    [_context startTimerIfNeeded];
 }
 
 - (CGFloat) contentsScale {
