@@ -36,6 +36,9 @@
 #import <Onyx2D/O2Shading.h>
 #import <Onyx2D/O2Surface.h>
 #import <Onyx2D/VGPath.h>
+#import "O2PixelFastPaths.h"
+#import "O2Image_Private.h"
+#import <Onyx2D/O2ColorSpace.h>
 
 #define MAX_SAMPLES COVERAGE_MULTIPLIER
 
@@ -770,6 +773,92 @@ ONYX2D_STATIC O2Paint *paintFromColor(O2Context_builtin *self, O2ColorRef color,
     return result;
 }
 
+// The fixed backing-store Y orientation is permitted; the user CTM must be
+// an integer translation. Keep these guards at the draw entry points, outside
+// the edge/sweep implementation shared with the theme-latency work.
+static BOOL fastPixelTransform(O2GState *state) {
+    O2AffineTransform u = state->_userSpaceTransform;
+    O2AffineTransform d = state->_deviceSpaceTransform;
+    return u.a == 1 && u.b == 0 && u.c == 0 && u.d == 1 &&
+            O2FastPixelCoordinate(u.tx) && O2FastPixelCoordinate(u.ty) &&
+            d.a == 1 && d.b == 0 && d.c == 0 && (d.d == 1 || d.d == -1) &&
+            O2FastPixelCoordinate(d.tx) && O2FastPixelCoordinate(d.ty);
+}
+
+static BOOL fastPixelContext(O2Context_builtin *self, O2GState *state,
+        O2FastPixelBuffer *dst, O2FastPixelRect *clip) {
+    if (self->_clipContext != nil || self->_clipSamples != NULL ||
+            [self->_layerStack count] != 0 || self->_edgeCount != 0 ||
+            state->_alpha != 1 || !fastPixelTransform(state) ||
+            (state->_blendMode != kO2BlendModeNormal && state->_blendMode != kO2BlendModeCopy))
+        return NO;
+    O2Surface *surface = self->_surface;
+    if (O2ColorSpaceGetModel(O2ImageGetColorSpace(surface)) != kO2ColorSpaceModelRGB)
+        return NO;
+    int format = O2ImageGetFastPixelFormat(surface);
+    *dst = (O2FastPixelBuffer){O2SurfaceGetPixelBytes(surface), O2ImageGetWidth(surface),
+            O2ImageGetHeight(surface), O2ImageGetBytesPerRow(surface), format};
+    *clip = (O2FastPixelRect){self->_vpx, self->_vpy, self->_vpwidth, self->_vpheight};
+    return O2FastPixelBufferIsValid(*dst) && O2FastPixelClipIsValid(*dst, *clip);
+}
+
+static BOOL tryFastSolidRect(O2Context_builtin *self, O2Paint *paint) {
+    O2GState *state = O2ContextCurrentGState(self);
+    O2FastPixelBuffer dst;
+    O2FastPixelRect clip;
+    double x0, y0, x1, y1;
+    O2argb32f color;
+    if (!fastPixelContext(self, state, &dst, &clip) ||
+            !integralRectBounds(self->_path, &x0, &y0, &x1, &y1) ||
+            !O2PaintGetConstantColor(paint, &color) ||
+            (color.a != 1 && !(state->_blendMode == kO2BlendModeCopy &&
+                    color.a == 0 && color.r == 0 && color.g == 0 && color.b == 0)))
+        return NO;
+    O2AffineTransform baseToSurface = O2AffineTransformConcat(
+            O2AffineTransformInvert(state->_userSpaceTransform), state->_deviceSpaceTransform);
+    O2Point p0 = O2PointApplyAffineTransform(O2PointMake(x0, y0), baseToSurface);
+    O2Point p1 = O2PointApplyAffineTransform(O2PointMake(x1, y1), baseToSurface);
+    // Use exactly the old paint/writer rounding, once per rectangle.
+    O2argb8u rgba = O2argb8uFromO2argb32f(color);
+    uint8_t pixel[4] = {dst.format == 1 ? rgba.r : rgba.b, rgba.g,
+            dst.format == 1 ? rgba.b : rgba.r, rgba.a};
+    O2FastPixelRect written;
+    if (!O2FastFillPixels(dst, clip, p0.x, p0.y, p1.x, p1.y, pixel, &written))
+        return NO;
+    O2SurfaceAddDamage(self->_surface, written.x, written.y, written.width, written.height);
+    return YES;
+}
+
+static BOOL tryFastImage(O2Context_builtin *self, O2Image *image,
+        O2AffineTransform imageToSurface) {
+    O2GState *state = O2ContextCurrentGState(self);
+    O2FastPixelBuffer dst;
+    O2FastPixelRect clip;
+    if (!fastPixelContext(self, state, &dst, &clip) || O2ImageGetMask(image) != nil ||
+            O2ImageIsMask(image) || imageToSurface.a != 1 || imageToSurface.b != 0 ||
+            imageToSurface.c != 0 || (imageToSurface.d != 1 && imageToSurface.d != -1))
+        return NO;
+    int format = O2ImageGetFastPixelFormat(image);
+    if (format != dst.format)
+        return NO;
+    size_t length;
+    const uint8_t *bytes = O2ImageGetFastPixelBytes(image, &length);
+    O2FastPixelBuffer src = {(uint8_t *)bytes, O2ImageGetWidth(image),
+            O2ImageGetHeight(image), O2ImageGetBytesPerRow(image), format};
+    if (!O2FastPixelBufferIsValid(src) || length < src.height * src.stride ||
+            src.height * src.stride > INT_MAX)
+        return NO;
+    double top = imageToSurface.ty;
+    if (imageToSurface.d == -1) top -= src.height;
+    O2FastPixelRect written;
+    if (!O2FastBlitPixels(dst, src, clip, imageToSurface.tx, top,
+            imageToSurface.d == -1, state->_blendMode == kO2BlendModeNormal,
+            hasViewportClip(self), &written))
+        return NO;
+    O2SurfaceAddDamage(self->_surface, written.x, written.y, written.width, written.height);
+    return YES;
+}
+
 - (void) drawPath: (O2PathDrawingMode) drawingMode {
     O2GState *gState = O2ContextCurrentGState(self);
 
@@ -785,6 +874,12 @@ ONYX2D_STATIC O2Paint *paintFromColor(O2Context_builtin *self, O2ColorRef color,
     @try {
         if (usesFill) fillPaint = paintFromColor(self, gState->_fillColor, paintMatrix);
         if (usesStroke) strokePaint = paintFromColor(self, gState->_strokeColor, paintMatrix);
+
+        if ((drawingMode == kO2PathFill || drawingMode == kO2PathEOFill) &&
+                tryFastSolidRect(self, fillPaint)) {
+            O2PathReset(_path);
+            return;
+        }
 
         O2RasterizerSetShouldAntialias(self, gState->_shouldAntialias,
                                        gState->_antialiasingQuality);
@@ -919,6 +1014,10 @@ createImageToSurfaceTransform(O2ImageRef image, O2Rect rect,
 
     O2AffineTransform imageToSurface = createImageToSurfaceTransform(
             image, rect, gState->_deviceSpaceTransform);
+    if (tryFastImage(self, image, imageToSurface)) {
+        O2ContextSetPaint(self, nil);
+        return;
+    }
     O2AffineTransform maskToSurface;
 
     if (softMask == NULL)
