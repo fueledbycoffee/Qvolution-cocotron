@@ -94,6 +94,9 @@ void O2ContextWriteGlyphCoverageSpanFloat(O2Context_builtin *self,
 
     int _edgeCount;
     int _edgeCapacity;
+    // Edges allocated so far: _edges[_edgeCount, _edgeAllocated) are spare
+    // and reused by the next path.
+    int _edgeAllocated;
     Edge **_edges;
     Edge **_sortCache;
 

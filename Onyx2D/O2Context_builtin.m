@@ -117,7 +117,7 @@ static inline O2AffineTransform createImageToSurfaceTransform(O2ImageRef image,
 
     if (_edges != NULL) {
         int i;
-        for (i = 0; i < _edgeCount; i++)
+        for (i = 0; i < _edgeAllocated; i++)
             NSZoneFree(NULL, _edges[i]);
 
         NSZoneFree(NULL, _edges);
@@ -940,9 +940,15 @@ void O2RasterizerSetViewport(O2Context_builtin *self, int x, int y, int width,
 }
 
 void O2RasterizerClear(O2Context_builtin *self) {
+    // Spare edges kept for the next path; a rounded control face is ~3,000.
+    // (Inside the function: the native harnesses copy only its body.)
+    enum { maxSpareEdges = 65536 };
+    // Sorting permutes only _edges[0, _edgeCount), so every allocated edge is
+    // still listed once in _edges[0, _edgeAllocated).
     int i;
-    for (i = 0; i < self->_edgeCount; i++)
+    for (i = maxSpareEdges; i < self->_edgeAllocated; i++)
         NSZoneFree(NULL, self->_edges[i]);
+    self->_edgeAllocated = MIN(self->_edgeAllocated, maxSpareEdges);
 
     self->_edgeCount = 0;
 }
@@ -963,7 +969,6 @@ void O2DContextAddEdge(O2Context_builtin *self, const O2Point v0,
     if (v0.y >= MaxY && v1.y >= MaxY) // ignore above maxy
         return;
 
-    Edge *edge = NSZoneMalloc(NULL, sizeof(Edge));
     if (self->_edgeCount + 1 >= self->_edgeCapacity) {
         self->_edgeCapacity *= 2;
         self->_edges = NSZoneRealloc(NULL, self->_edges,
@@ -972,7 +977,11 @@ void O2DContextAddEdge(O2Context_builtin *self, const O2Point v0,
                 NSZoneRealloc(NULL, self->_sortCache,
                               (self->_edgeCapacity / 2 + 1) * sizeof(Edge *));
     }
-    self->_edges[self->_edgeCount] = edge;
+    // A path's curves become thousands of edges; reuse the previous path's
+    // instead of a malloc and free for each.
+    if (self->_edgeCount == self->_edgeAllocated)
+        self->_edges[self->_edgeAllocated++] = NSZoneMalloc(NULL, sizeof(Edge));
+    Edge *edge = self->_edges[self->_edgeCount];
     self->_edgeCount++;
 
     if (v0.y < v1.y) { // edge is going upward
