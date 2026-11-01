@@ -628,7 +628,12 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
 }
 
 - (void) setOpaque: (BOOL) value {
+    if (value == _isOpaque)
+        return;
     _isOpaque = value;
+    // The opaque region is resent only when the visible rectangle changes;
+    // forget the last one so the next commit carries the new region.
+    _sentGeometry = O2RectZero;
 }
 
 - (void) setAlphaValue: (CGFloat) value {
