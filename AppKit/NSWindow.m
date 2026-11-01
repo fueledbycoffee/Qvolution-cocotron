@@ -1406,6 +1406,10 @@ static BOOL _allowsAutomaticWindowTabbing;
     _resizeIncrements.height = value.height / value.width;
 }
 
+- (void) _setContentHasShadow: (BOOL) value {
+    [self setHasShadow: value];
+}
+
 - (void) setHasShadow: (BOOL) value {
     _hasShadow = value;
     [_platformWindow setHasShadow: value];
