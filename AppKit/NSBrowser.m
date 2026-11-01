@@ -382,6 +382,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 - (void) setCellClass: (Class) class {
     _cellClass = class;
+    for (NSMatrix *matrix in _matrices)
+        [matrix setCellClass: class];
 }
 
 - (void) setMaxVisibleColumns: (NSInteger) count {

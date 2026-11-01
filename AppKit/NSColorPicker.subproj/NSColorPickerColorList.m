@@ -24,6 +24,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 @implementation NSColorPickerColorList
 
+- (void) setColorBrowser: (NSBrowser *) browser {
+    colorBrowser = browser;
+    [colorBrowser setCellClass: [NSBrowserCellColorList class]];
+}
+
 - initWithPickerMask: (NSUInteger) mask
           colorPanel: (NSColorPanel *) colorPanel
 {
