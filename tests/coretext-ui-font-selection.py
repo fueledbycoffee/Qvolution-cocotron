@@ -51,6 +51,21 @@ int main(void){
   FT_Face exact=createUserInterfaceFace(mono,bold,NULL);assert(exact);
   assert(!strcmp(exact->family_name,mono?"DejaVu Sans Mono":"DejaVu Sans"));FT_Done_Face(exact);
  }
+ // The exact-family filter keeps fontconfig's fallbacks: a language the
+ // family lacks comes from a family that has it, and a missing real bold
+ // comes from another family rather than failing.
+ assert(FcConfigAppFontAddFile(config,(const FcChar8*)"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"));
+ uiFontFamily="DejaVu Sans";
+ FT_Face japanese=createUserInterfaceFace(0,0,"ja");assert(japanese);
+ fprintf(stderr,"ja family=%s\n",japanese->family_name);
+ assert(!strcmp(japanese->family_name,"Droid Sans Fallback"));FT_Done_Face(japanese);
+ FT_Face latin=createUserInterfaceFace(0,0,"fr");assert(latin&&!strcmp(latin->family_name,"DejaVu Sans"));FT_Done_Face(latin);
+ uiFontFamily="Droid Sans Fallback";
+ FT_Face bold=createUserInterfaceFace(0,1,NULL);assert(bold);FT_Long boldStyle;
+ assert(O2FontGetFaceStyleFlags(bold,&boldStyle)&&(boldStyle&FT_STYLE_FLAG_BOLD));
+ fprintf(stderr,"bold family=%s\n",bold->family_name);FT_Done_Face(bold);
+ FT_Face regular=createUserInterfaceFace(0,0,NULL);assert(regular&&!strcmp(regular->family_name,"Droid Sans Fallback"));FT_Done_Face(regular);
+ uiFontFamily="DejaVu Sans";
  // The common actual loader also receives the unchanged coverage caller's typed charset.
  FcPattern *pattern=FcPatternCreate();FcCharSet *set=FcCharSetCreate();assert(pattern&&set);
  assert(FcCharSetAddChar(set,'A')&&FcCharSetAddChar(set,0x03a9)&&FcPatternAddCharSet(pattern,FC_CHARSET,set));
@@ -59,7 +74,7 @@ int main(void){
  FcConfigDestroy(config);config=FcConfigCreate();assert(config);
  assert(!createUserInterfaceFace(0,0,NULL)&&!createUserInterfaceFace(1,1,"en"));
  FcConfigDestroy(config);FT_Done_FreeType(library);
- puts("PASS actual UI-selection/shared-loader source with real Fontconfig/FT traits, languages and glyphs; no CTFont or app qualification");
+ puts("PASS actual UI-selection/shared-loader source with real Fontconfig/FT traits, languages, family fallbacks and glyphs; no CTFont or app qualification");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='qv-ui-face-') as d:

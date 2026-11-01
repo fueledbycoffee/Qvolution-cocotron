@@ -313,21 +313,37 @@ static FT_Face createUserInterfaceFace(BOOL fixedPitch, BOOL emphasized,
         return NULL;
     const char *family = fixedPitch ? fixedFontFamily : uiFontFamily;
     BOOL exactFamily = strcmp(family, "sans-serif") != 0 && strcmp(family, "monospace") != 0;
+    // Prefer, in order: the configured family covering the language; another
+    // family covering it (fontconfig's language-aware fallback); the
+    // configured family without it; any face. Every tier needs the real
+    // traits. Faces are opened only for candidates that would improve on the
+    // best so far, in fontconfig's sort order.
     FT_Face face = NULL;
-    for (int index = 0; index < candidates->nfont; ++index) {
-        if (exactFamily && !O2UIFontPatternHasFamily(candidates->fonts[index], family))
+    int best = 4;
+    for (int index = 0; index < candidates->nfont && best > 0; ++index) {
+        FcPattern *candidate = candidates->fonts[index];
+        BOOL inFamily = !exactFamily || O2UIFontPatternHasFamily(candidate, family);
+        FcLangSet *coverage = NULL;
+        BOOL covers = language == NULL ||
+                (FcPatternGetLangSet(candidate, FC_LANG, 0, &coverage) == FcResultMatch &&
+                 FcLangSetHasLang(coverage, (const FcChar8 *)language) != FcLangDifferentLang);
+        int tier = covers ? (inFamily ? 0 : 1) : (inFamily ? 2 : 3);
+        if (tier >= best)
             continue;
-        face = createFaceForMatch(candidates->fonts[index], YES);
-        if (face == NULL)
+        FT_Face candidateFace = createFaceForMatch(candidate, YES);
+        if (candidateFace == NULL)
             continue;
         FT_Long styleFlags;
-        if (O2FontGetFaceStyleFlags(face, &styleFlags) &&
-                face->units_per_EM > 0 && face->num_glyphs > 0 &&
-                (!fixedPitch || FT_IS_FIXED_WIDTH(face)) &&
-                (!emphasized || (styleFlags & FT_STYLE_FLAG_BOLD)))
-            break;
-        FT_Done_Face(face);
-        face = NULL;
+        if (O2FontGetFaceStyleFlags(candidateFace, &styleFlags) &&
+                candidateFace->units_per_EM > 0 && candidateFace->num_glyphs > 0 &&
+                (!fixedPitch || FT_IS_FIXED_WIDTH(candidateFace)) &&
+                (!emphasized || (styleFlags & FT_STYLE_FLAG_BOLD))) {
+            if (face != NULL)
+                FT_Done_Face(face);
+            face = candidateFace;
+            best = tier;
+        } else
+            FT_Done_Face(candidateFace);
     }
     FcFontSetSortDestroy(candidates);
     return face;
