@@ -14,7 +14,8 @@ import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output', type=Path, required=True)
-parser.add_argument('--arch', choices=['i386', 'x86_64'], required=True)
+parser.add_argument('--arch', choices=['i386', 'x86_64'], default='x86_64')
+parser.add_argument('--build-only', action='store_true', help='compile all fixtures without launching them')
 args = parser.parse_args()
 out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
@@ -112,6 +113,12 @@ for name in ['sibling', 'empty']:
 run(flags + ['-shared', '-fPIC', str(out / 'imports.c'), '-L' + str(out), '-lbridge',
              '-Wl,-rpath,$ORIGIN', '-Wl,--no-undefined', '-o', str(out / 'libimports.so')])
 run(flags + [str(out / 'loader.c'), '-ldl', '-o', str(out / 'loader')])
+run(flags + [str(root / 'tests/coregraphics-load-control.c'), '-ldl', '-o', str(out / 'control')])
+print(f'PASS {args.arch}: compiled strict-link bridge, sibling, loader and trivial control', flush=True)
+if args.build_only:
+    raise SystemExit(0)
+print(f'RUN {args.arch}: trivial native launch control before bridge tests', flush=True)
+run([str(out / 'control'), '--trivial'])
 cases = 0
 for image in ['libbridge.so', 'libimports.so']:
     for sibling, status, expected in [('libsibling.so', s, s) for s in [0, -4, -50, 1, -32768, 32767]] + [
