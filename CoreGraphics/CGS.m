@@ -25,7 +25,8 @@
 #import <CoreGraphics/CGWindowPrivate.h>
 #import <CoreGraphics/CGSSurface.h>
 #include <pthread.h>
-#include <unistd.h>
+#include <HIServices/Processes.h>
+#include <CarbonCore/MacErrors.h>
 
 static NSMutableDictionary<NSNumber*, CGSConnection*>* g_connections = nil;
 static Boolean g_denyConnections = FALSE;
@@ -190,7 +191,9 @@ CGSConnectionID _CGSDefaultConnection(void)
 
 CGSConnectionID CGSDefaultConnectionForThread(void)
 {
-	return CGSMainConnectionID();
+	// SPEC.md Round 3: borrowed process default, unavailable maps to zero.
+	CGSConnectionID connection = _CGSDefaultConnection();
+	return connection > 0 ? connection : 0;
 }
 
 CGSConnectionID CGSMainConnectionID(void)
@@ -486,35 +489,50 @@ CGError CGSRemoveNotifyProc(CGSNotifyProcPtr proc, CGSNotificationType notificat
 	return kCGSErrorSuccess;
 }
 
-// Neither a background blur nor secure event input exists without a window
-// server, so these succeed without an effect.
+// SPEC.md Round 3: unsupported-operation policies are GUESS, rung 6.
+// The radius-only and integer-style ABIs are also explicit rung-6 guesses.
+CGError CGSSetWindowBackgroundBlurRadius(CGSConnectionID cid, CGSWindowID wid, int radius)
+{
+    return kCGErrorNotImplemented;
+}
+
 CGError CGSSetWindowBackgroundBlurRadiusWithOpacityHint(CGSConnectionID cid, CGSWindowID wid, int radius, float opacityHint)
 {
-	return kCGSErrorSuccess;
+    return kCGErrorNotImplemented;
+}
+
+CGError CGSSetWindowBackgroundBlurRadiusStyle(CGSConnectionID cid, CGSWindowID wid, int radius, int style)
+{
+    return kCGErrorNotImplemented;
 }
 
 CGError CGSSetSecureEventInput(CGSConnectionID cid, bool enable)
 {
-	return kCGSErrorSuccess;
+    return kCGErrorNotImplemented;
 }
 
-// Same PSN as HIServices' GetCurrentProcess().
+// H1/H5 declarations (rung 2); public identity bridge is GUESS, rung 6.
 OSErr CPSGetCurrentProcess(CPSProcessSerNum *psn)
 {
-	if (!psn)
-		return paramErr;
-	psn->highLongOfPSN = 0;
-	psn->lowLongOfPSN = getpid();
-	return noErr;
+    if (psn == NULL)
+        return paramErr;
+
+    ProcessSerialNumber current;
+    OSErr result = GetCurrentProcess(&current);
+    if (result != noErr)
+        return result;
+
+    psn->highLongOfPSN = current.highLongOfPSN;
+    psn->lowLongOfPSN = current.lowLongOfPSN;
+    return noErr;
 }
 
-// No-ops: key focus is handled by AppKit's X11 windows.
 OSErr CPSStealKeyFocus(CPSProcessSerNum *psn, uint32_t options)
 {
-	return noErr;
+    return psn == NULL ? paramErr : unimpErr;
 }
 
 OSErr CPSReleaseKeyFocus(CPSProcessSerNum *psn)
 {
-	return noErr;
+    return psn == NULL ? paramErr : unimpErr;
 }

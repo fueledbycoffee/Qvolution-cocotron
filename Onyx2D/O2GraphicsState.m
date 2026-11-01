@@ -49,7 +49,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     _miterLimit = 10;
     _blendMode = kO2BlendModeNormal;
     _interpolationQuality = kO2InterpolationDefault;
+    // SPEC.md Round 3: requested graphics-state defaults (GUESS, rung 6).
     _shouldAntialias = YES;
+    _shouldSmoothFonts = YES;
+    _fontSmoothingStyle = 0;
     _antialiasingQuality = 64;
     _alpha = 1.;
     return self;
@@ -401,18 +404,6 @@ void O2GStateSetTextHorizontalScaling(O2GState *self, O2Float value) {
 - (void) setShouldSmoothFonts: (BOOL) yesOrNo {
     _shouldSmoothFonts = yesOrNo;
     _fontIsDirty = YES;
-}
-
-- (BOOL) shouldSmoothFonts {
-    return _shouldSmoothFonts;
-}
-
-- (uint32_t) fontSmoothingStyle {
-    return _fontSmoothingStyle;
-}
-
-- (void) setFontSmoothingStyle: (uint32_t) style {
-    _fontSmoothingStyle = style;
 }
 
 void O2GStateSetLineWidth(O2GState *self, O2Float width) {

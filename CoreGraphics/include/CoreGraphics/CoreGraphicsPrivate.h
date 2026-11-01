@@ -133,26 +133,6 @@ typedef void(*CGSNotifyProcPtr)(CGSNotificationType type, void* data, unsigned l
 extern CGError CGSRegisterNotifyProc(CGSNotifyProcPtr proc, CGSNotificationType notificationType, void* client);
 extern CGError CGSRemoveNotifyProc(CGSNotifyProcPtr proc, CGSNotificationType notificationType);
 
-extern CGError CGSSetWindowBackgroundBlurRadiusWithOpacityHint(CGSConnectionID cid, CGSWindowID wid, int radius, float opacityHint);
-extern CGError CGSSetSecureEventInput(CGSConnectionID cid, bool enable);
-
-// Process key focus. The layout matches ProcessSerialNumber.
-typedef struct CPSProcessSerNum
-{
-	uint32_t highLongOfPSN;
-	uint32_t lowLongOfPSN;
-} CPSProcessSerNum;
-extern OSErr CPSGetCurrentProcess(CPSProcessSerNum *psn);
-extern OSErr CPSStealKeyFocus(CPSProcessSerNum *psn, uint32_t options);
-extern OSErr CPSReleaseKeyFocus(CPSProcessSerNum *psn);
-
-// Context state getters and font smoothing style (a gstate value)
-extern bool CGContextGetAllowsAntialiasing(CGContextRef context);
-extern bool CGContextGetAllowsFontSmoothing(CGContextRef context);
-extern bool CGContextGetShouldSmoothFonts(CGContextRef context);
-extern uint32_t CGContextGetFontSmoothingStyle(CGContextRef context);
-extern void CGContextSetFontSmoothingStyle(CGContextRef context, uint32_t style);
-
 // Darling extras, e.g. for CGL
 void* _CGSNativeDisplay(CGSConnectionID connId);
 void* _CGSNativeWindowForID(CGSConnectionID connId, CGSWindowID winId);
@@ -171,6 +151,28 @@ COREGRAPHICS_EXPORT bool CGImageGetHeadroom(CGImageRef image, float *headroom);
 CGSConnection* _CGSConnectionForID(CGSConnectionID connId);
 CGSConnection* _CGSConnectionFromEventRecord(const CGSEventRecordPtr record);
 #endif
+
+// SPEC.md Round 3, H1/H3/H5: vendored declarations (rung 2).
+typedef struct {
+    uint32_t highLongOfPSN;
+    uint32_t lowLongOfPSN;
+} CPSProcessSerNum;
+
+extern OSErr CPSGetCurrentProcess(CPSProcessSerNum *psn);
+extern OSErr CPSStealKeyFocus(CPSProcessSerNum *psn, uint32_t options);
+extern OSErr CPSReleaseKeyFocus(CPSProcessSerNum *psn);
+extern CGError CGSSetSecureEventInput(CGSConnectionID cid, bool enable);
+extern CGError CGSSetWindowBackgroundBlurRadiusWithOpacityHint(CGSConnectionID cid, CGSWindowID wid, int radius, float opacityHint);
+extern bool CGContextGetAllowsAntialiasing(CGContextRef context);
+extern bool CGContextGetShouldAntialias(CGContextRef context);
+extern bool CGContextGetAllowsFontSmoothing(CGContextRef context);
+extern bool CGContextGetShouldSmoothFonts(CGContextRef context);
+extern uint32_t CGContextGetFontSmoothingStyle(CGContextRef context);
+extern void CGContextSetFontSmoothingStyle(CGContextRef context, uint32_t style);
+
+// GUESS ABIs, rung 6, selected explicitly in SPEC.md Round 3.
+extern CGError CGSSetWindowBackgroundBlurRadius(CGSConnectionID cid, CGSWindowID wid, int radius);
+extern CGError CGSSetWindowBackgroundBlurRadiusStyle(CGSConnectionID cid, CGSWindowID wid, int radius, int style);
 
 __END_DECLS
 

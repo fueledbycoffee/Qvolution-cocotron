@@ -61,6 +61,7 @@ void O2ContextDefaultShowText(O2ContextRef self, const char *text,
     [_stateStack addObject: state];
     _currentState = state;
     _path = [[O2MutablePath alloc] init];
+    // SPEC.md Round 3: requested permission defaults (GUESS, rung 6).
     _allowsAntialiasing = YES;
     _allowsFontSmoothing = YES;
     _textMatrix = O2AffineTransformIdentity;
@@ -278,13 +279,6 @@ void O2ContextSetAllowsAntialiasing(O2ContextRef self, BOOL yesOrNo) {
         return;
 
     self->_allowsAntialiasing = yesOrNo;
-}
-
-BOOL O2ContextGetAllowsAntialiasing(O2ContextRef self) {
-    if (self == nil)
-        return NO;
-
-    return self->_allowsAntialiasing;
 }
 
 // layers
@@ -514,6 +508,10 @@ void O2ContextRestoreGState(O2ContextRef self) {
     if (self == nil) {
         return;
     }
+
+    // Keep the initial state when there is no matching save (SPEC.md Round 3).
+    if ([self->_stateStack count] <= 1)
+        return;
 
     [self->_stateStack removeLastObject];
     self->_currentState = [self->_stateStack lastObject];
@@ -985,27 +983,6 @@ void O2ContextSetShouldSmoothFonts(O2ContextRef self, BOOL yesOrNo) {
         return;
 
     [O2ContextCurrentGState(self) setShouldSmoothFonts: yesOrNo];
-}
-
-BOOL O2ContextGetShouldSmoothFonts(O2ContextRef self) {
-    if (self == nil)
-        return NO;
-
-    return [O2ContextCurrentGState(self) shouldSmoothFonts];
-}
-
-void O2ContextSetFontSmoothingStyle(O2ContextRef self, uint32_t style) {
-    if (self == nil)
-        return;
-
-    [O2ContextCurrentGState(self) setFontSmoothingStyle: style];
-}
-
-uint32_t O2ContextGetFontSmoothingStyle(O2ContextRef self) {
-    if (self == nil)
-        return 0;
-
-    return [O2ContextCurrentGState(self) fontSmoothingStyle];
 }
 
 void O2ContextSetLineWidth(O2ContextRef self, O2Float width) {
@@ -1542,14 +1519,10 @@ bool O2ContextIsBitmapContext(O2ContextRef self) {
 void O2ContextSetAllowsFontSmoothing(O2ContextRef self,
                                      BOOL allowsFontSmoothing)
 {
-    self->_allowsFontSmoothing = allowsFontSmoothing;
-}
-
-BOOL O2ContextGetAllowsFontSmoothing(O2ContextRef self) {
     if (self == nil)
-        return NO;
+        return;
 
-    return self->_allowsFontSmoothing;
+    self->_allowsFontSmoothing = allowsFontSmoothing;
 }
 
 void O2ContextSetAllowsFontSubpixelQuantization(
@@ -1574,6 +1547,32 @@ void O2ContextSetShouldSubpixelPositionFonts(O2ContextRef self,
                                              BOOL shouldSubpixelPositionFonts)
 {
     O2ContextCurrentGState(self)->_shouldSubpixelPositionFonts = shouldSubpixelPositionFonts;
+}
+
+// Requested-state queries: SPEC.md Round 3, GUESS policies (rung 6).
+BOOL O2ContextGetAllowsAntialiasing(O2ContextRef self) {
+    return self != nil ? self->_allowsAntialiasing : NO;
+}
+
+BOOL O2ContextGetShouldAntialias(O2ContextRef self) {
+    return self != nil ? O2ContextCurrentGState(self)->_shouldAntialias : NO;
+}
+
+BOOL O2ContextGetAllowsFontSmoothing(O2ContextRef self) {
+    return self != nil ? self->_allowsFontSmoothing : NO;
+}
+
+BOOL O2ContextGetShouldSmoothFonts(O2ContextRef self) {
+    return self != nil ? O2ContextCurrentGState(self)->_shouldSmoothFonts : NO;
+}
+
+uint32_t O2ContextGetFontSmoothingStyle(O2ContextRef self) {
+    return self != nil ? O2ContextCurrentGState(self)->_fontSmoothingStyle : 0;
+}
+
+void O2ContextSetFontSmoothingStyle(O2ContextRef self, uint32_t style) {
+    if (self != nil)
+        O2ContextCurrentGState(self)->_fontSmoothingStyle = style;
 }
 
 @end

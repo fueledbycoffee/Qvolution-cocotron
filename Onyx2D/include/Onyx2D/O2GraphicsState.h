@@ -18,6 +18,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <Foundation/NSObject.h>
+#include <stdint.h>
 #import <Onyx2D/O2Font.h>
 #import <Onyx2D/O2Geometry.h>
 
@@ -54,6 +55,7 @@ extern "C" {
     O2Size _patternPhase;
     int _textDrawingMode;
     BOOL _shouldSmoothFonts;
+    uint32_t _fontSmoothingStyle;
     BOOL _shouldSubpixelQuantizeFonts;
     BOOL _shouldSubpixelPositionFonts;
     O2Float _lineWidth;
@@ -75,7 +77,6 @@ extern "C" {
     BOOL _shouldAntialias;
 
     int _antialiasingQuality;
-    uint32_t _fontSmoothingStyle;
 }
 
 - initWithDeviceTransform: (O2AffineTransform) deviceTransform;
@@ -155,9 +156,6 @@ void O2GStateSetTextRise(O2GState *self, O2Float value);
 void O2GStateSetTextHorizontalScaling(O2GState *self, O2Float value);
 
 - (void) setShouldSmoothFonts: (BOOL) yesOrNo;
-- (BOOL) shouldSmoothFonts;
-- (uint32_t) fontSmoothingStyle;
-- (void) setFontSmoothingStyle: (uint32_t) style;
 
 void O2GStateSetLineWidth(O2GState *self, O2Float width);
 void O2GStateSetLineCap(O2GState *self, int lineCap);

@@ -25,7 +25,6 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <CoreGraphics/CGFunction.h>
 #import <CoreGraphics/CGGradient.h>
 #import <CoreGraphics/CGShading.h>
-#import <CoreGraphics/CoreGraphicsPrivate.h>
 #import <Onyx2D/O2Context.h>
 #import <Onyx2D/O2MutablePath.h>
 #include <stdint.h>
@@ -41,10 +40,6 @@ void CGContextRelease(CGContextRef context) {
 
 void CGContextSetAllowsAntialiasing(CGContextRef context, bool yesOrNo) {
     O2ContextSetAllowsAntialiasing((O2ContextRef)context, yesOrNo);
-}
-
-bool CGContextGetAllowsAntialiasing(CGContextRef context) {
-    return O2ContextGetAllowsAntialiasing((O2ContextRef)context);
 }
 
 void CGContextBeginTransparencyLayer(CGContextRef context,
@@ -377,10 +372,6 @@ void CGContextSetShouldSmoothFonts(CGContextRef context, bool yesOrNo) {
     O2ContextSetShouldSmoothFonts((O2ContextRef)context, yesOrNo);
 }
 
-bool CGContextGetShouldSmoothFonts(CGContextRef context) {
-    return O2ContextGetShouldSmoothFonts((O2ContextRef)context);
-}
-
 void CGContextSetLineWidth(CGContextRef context, CGFloat width) {
     O2ContextSetLineWidth((O2ContextRef)context, width);
 }
@@ -583,18 +574,6 @@ void CGContextSetAllowsFontSmoothing(CGContextRef context,
                                     allowsFontSmoothing);
 }
 
-bool CGContextGetAllowsFontSmoothing(CGContextRef context) {
-    return O2ContextGetAllowsFontSmoothing((O2ContextRef) context);
-}
-
-void CGContextSetFontSmoothingStyle(CGContextRef context, uint32_t style) {
-    O2ContextSetFontSmoothingStyle((O2ContextRef) context, style);
-}
-
-uint32_t CGContextGetFontSmoothingStyle(CGContextRef context) {
-    return O2ContextGetFontSmoothingStyle((O2ContextRef) context);
-}
-
 void CGContextSetAllowsFontSubpixelQuantization(
         CGContextRef context, bool allowsFontSubpixelQuantization)
 {
@@ -752,4 +731,29 @@ void CGContextShowGlyphsAtPositions(CGContextRef context,
     CGContextShowGlyphsWithAdvances(context, glyphs, advances,
                                     (unsigned) count);
     free(advances);
+}
+
+// Declarations: SPEC.md Round 3, H1/H3 (rung 2).
+bool CGContextGetAllowsAntialiasing(CGContextRef context) {
+    return O2ContextGetAllowsAntialiasing((O2ContextRef)context);
+}
+
+bool CGContextGetShouldAntialias(CGContextRef context) {
+    return O2ContextGetShouldAntialias((O2ContextRef)context);
+}
+
+bool CGContextGetAllowsFontSmoothing(CGContextRef context) {
+    return O2ContextGetAllowsFontSmoothing((O2ContextRef)context);
+}
+
+bool CGContextGetShouldSmoothFonts(CGContextRef context) {
+    return O2ContextGetShouldSmoothFonts((O2ContextRef)context);
+}
+
+uint32_t CGContextGetFontSmoothingStyle(CGContextRef context) {
+    return O2ContextGetFontSmoothingStyle((O2ContextRef)context);
+}
+
+void CGContextSetFontSmoothingStyle(CGContextRef context, uint32_t style) {
+    O2ContextSetFontSmoothingStyle((O2ContextRef)context, style);
 }
