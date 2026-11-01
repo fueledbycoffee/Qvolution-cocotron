@@ -276,8 +276,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
 }
 
 - (void) setContentsScale: (CGFloat) value {
-    if (!isfinite(value) || value <= 0)
-        [NSException raise:NSInvalidArgumentException format:@"contentsScale must be finite and positive"];
+    if (!isfinite(value) || value <= 0) value = 1.0;
     if (_contentsScale != value) {
         _contentsScale = value;
         [self setNeedsDisplay];

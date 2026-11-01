@@ -145,7 +145,11 @@ int main(int argc, char **argv) {
         [d->window setReleasedWhenClosed:NO];
         d->host = [[NSView alloc] initWithFrame:NSMakeRect(20, 20, 600, 440)];
         d->root = [CALayer layer];
-        d->a = [CALayer layer]; [d->a setName:@"A"]; [d->a setBounds:CGRectMake(0, 0, 100, 80)];
+        d->a = [CALayer layer];
+        [d->a setContentsScale:NAN]; expectThat([d->a contentsScale]==1,"NaN contentsScale clamps to one");
+        [d->a setContentsScale:0]; expectThat([d->a contentsScale]==1,"zero contentsScale clamps to one");
+        [d->a setContentsScale:-2]; expectThat([d->a contentsScale]==1,"negative contentsScale clamps to one");
+        [d->a setName:@"A"]; [d->a setBounds:CGRectMake(0, 0, 100, 80)];
         [d->a setContentsScale:2];
         [d->a setDelegate:(id)d->drawer]; [d->a setNeedsDisplay];
         d->s = [CAScrollLayer layer]; [d->s setFrame:CGRectMake(380, 40, 200, 100)];
