@@ -22,6 +22,7 @@ include_directories(
 )
 
 set(QuartzCore_sources
+	CAEDRMetadata.m
 	CAAnimationGroup.m
 	CAAnimation.m
 	CADisplayLink.m
