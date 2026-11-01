@@ -1455,7 +1455,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 - (void) _setSelectedIndex: (NSInteger) index {
     if (_selectedIndex != index) {
-        if (index < [_cells count]) {
+        if (index >= 0 && index < [_cells count]) {
             NSCell *cell = [_cells objectAtIndex: index];
             [self selectCell: cell];
         }

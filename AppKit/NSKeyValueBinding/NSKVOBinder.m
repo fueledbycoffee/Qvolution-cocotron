@@ -42,6 +42,9 @@ static BOOL NSKVOBinderKeyIsScalar(id object, NSString *key) {
     Method method = class_getInstanceMethod(object_getClass(object),
                                             NSSelectorFromString(setter));
     if (method == NULL)
+        method = class_getInstanceMethod(object_getClass(object),
+                NSSelectorFromString([@"_" stringByAppendingString: setter]));
+    if (method == NULL)
         return NO;
     char type[16];
     method_getArgumentType(method, 2, type, sizeof(type));
@@ -273,7 +276,8 @@ NSString *NSFormatDisplayPattern(NSString *pattern, id *values,
                                          // fake path from non-main peers
     // Like Cocoa, nil bound to a scalar property such as hidden or enabled
     // means NO (0); -setNilValueForKey: would raise.
-    if (value == nil && NSKVOBinderKeyIsScalar(_source, bindingPath))
+    if ((value == nil || value == [NSNull null]) &&
+        NSKVOBinderKeyIsScalar(_source, bindingPath))
         value = [NSNumber numberWithBool: NO];
 
     @try {

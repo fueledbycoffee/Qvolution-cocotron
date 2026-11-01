@@ -377,7 +377,10 @@ static NSString *const NSPopUpButtonBindingObservationContext =
 }
 
 - (void) _setSelectedIndex: (NSUInteger) idx {
-    [self selectItemAtIndex: idx];
+    if (idx == NSNotFound)
+        [self selectItem: nil];
+    else if (idx < [self numberOfItems])
+        [self selectItemAtIndex: idx];
 }
 
 - (id) _selectedValue {

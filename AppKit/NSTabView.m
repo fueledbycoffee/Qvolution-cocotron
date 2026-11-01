@@ -443,6 +443,7 @@ id _NSTabViewFloatingCell = nil;
                                                        willSelectTabViewItem:)])
                 [_delegate tabView: self willSelectTabViewItem: item];
 
+            [self willChangeValueForKey: @"selectedIndex"];
             [[_selectedItem view] removeFromSuperview];
             if ([item view] != nil) {
                 [self addSubview: [item view]];
@@ -450,6 +451,7 @@ id _NSTabViewFloatingCell = nil;
             }
             [self setNeedsDisplay: YES];
             _selectedItem = item;
+            [self didChangeValueForKey: @"selectedIndex"];
 
             if ([item initialFirstResponder])
                 [[self window]
@@ -603,7 +605,8 @@ id _NSTabViewFloatingCell = nil;
     return [self indexOfTabViewItem: _selectedItem];
 }
 - (void) _setSelectedIndex: (NSInteger) selectedIndex {
-    [self selectTabViewItemAtIndex: selectedIndex];
+    if (selectedIndex >= 0 && selectedIndex < [self numberOfTabViewItems])
+        [self selectTabViewItemAtIndex: selectedIndex];
 }
 
 @end
