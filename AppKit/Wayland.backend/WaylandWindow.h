@@ -130,6 +130,8 @@ struct WaylandBuffer {
     // Opt-in present timing (DARLING_APPKIT_PRESENT_TIMING=1).
     BOOL _presentTiming;
     uint64_t _presentsTimed, _presentNanoseconds, _lastPresentNanoseconds, _maxPresentNanoseconds;
+    // Last EGL present split into context setup, staging copy, upload and draw, swap.
+    uint64_t _lastSetupNanoseconds, _lastCopyNanoseconds, _lastUploadNanoseconds, _lastSwapNanoseconds;
 }
 
 - (instancetype) initWithDelegate: (NSWindow *) delegate;

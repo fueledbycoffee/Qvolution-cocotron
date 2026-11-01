@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #import <OpenGL/OpenGL.h>
 #import <QuartzCore/CAWindowOpenGLContext.h>
@@ -188,6 +189,20 @@ static BOOL hasBufferStorage(void) {
     return _uploadMaps[i];
 }
 
+static uint64_t monotonicNanoseconds(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000000ull + t.tv_nsec;
+}
+
+- (void) setTimed: (BOOL) timed {
+    _timed = timed;
+}
+
+- (uint64_t) lastCopyNanoseconds {
+    return _lastCopyNanoseconds;
+}
+
 - (uint64_t) lastUploadBytes {
     return _lastUploadBytes;
 }
@@ -246,6 +261,7 @@ static BOOL hasBufferStorage(void) {
     // Uploading from client memory makes the driver copy synchronously inside
     // glTexSubImage2D (about 7 ms for 1932x1144 on an RTX 4070).
     const uint8_t *base = source;
+    uint64_t copyStarted = _timed ? monotonicNanoseconds() : 0;
     uint8_t *staging = [self stagingBufferForSize:stride * height];
     if (staging) {
         for (unsigned i = 0; i < rectCount; ++i) {
@@ -261,6 +277,7 @@ static BOOL hasBufferStorage(void) {
         }
         base = NULL; // offsets into the bound GL_PIXEL_UNPACK_BUFFER
     }
+    if (_timed) _lastCopyNanoseconds = monotonicNanoseconds() - copyStarted;
     // Texture row 0 is the surface's top row, as in the CPU storage.
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, (GLint)(stride / 4));

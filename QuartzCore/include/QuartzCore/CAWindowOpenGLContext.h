@@ -16,6 +16,8 @@
     size_t _uploadBufferSize;
     unsigned _uploadNext;
     int _uploadStaging; // 0 unknown, 1 available, -1 unavailable
+    BOOL _timed;
+    uint64_t _lastCopyNanoseconds;
 }
 
 - initWithCGLContext: (CGLContextObj) cglContext;
@@ -33,5 +35,8 @@
 // Bytes and rectangles uploaded by the last successful present.
 - (uint64_t) lastUploadBytes;
 - (unsigned) lastUploadRects;
+// Opt-in: time the CPU copy into the staging buffer of each present.
+- (void) setTimed: (BOOL) timed;
+- (uint64_t) lastCopyNanoseconds;
 
 @end

@@ -88,6 +88,10 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     WaylandMarshal(proxy, opcode, NULL, flags, args);
 }
 
+static uint64_t elapsedNanoseconds(const struct timespec *from, const struct timespec *to) {
+    return (uint64_t)(to->tv_sec - from->tv_sec) * 1000000000ull + to->tv_nsec - from->tv_nsec;
+}
+
 - (instancetype) initWithDelegate: (NSWindow *) delegate {
     if ((self = [super init]) == nil)
         return nil;
@@ -1207,6 +1211,8 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
              @"lastUploadBytes": @(_eglLastUploadBytes),
              @"presentsTimed": @(_presentsTimed), @"presentNanoseconds": @(_presentNanoseconds),
              @"lastPresentNanoseconds": @(_lastPresentNanoseconds), @"maxPresentNanoseconds": @(_maxPresentNanoseconds),
+             @"lastSetupNanoseconds": @(_lastSetupNanoseconds), @"lastCopyNanoseconds": @(_lastCopyNanoseconds),
+             @"lastUploadNanoseconds": @(_lastUploadNanoseconds), @"lastSwapNanoseconds": @(_lastSwapNanoseconds),
              @"surfaceWidth": @(surface ? O2SurfaceGetWidth(surface) : 0),
              @"surfaceHeight": @(surface ? O2SurfaceGetHeight(surface) : 0),
              @"eglScale120": @(_renderScale120)};
@@ -1305,11 +1311,17 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     CGLContextObj previous = CGLGetCurrentContext();
     NSString *failure = nil;
     BOOL whole = _damageAll || _damageCount == 0;
+    struct timespec marks[4];
+    if (_presentTiming) clock_gettime(CLOCK_MONOTONIC, &marks[0]);
     @try {
         if (width > INT32_MAX || height > INT32_MAX)
             failure = @"surface too large for EGL";
         else
             failure = [self ensureEGLPresenterWidth:(int32_t)width height:(int32_t)height];
+        if (_presentTiming) {
+            clock_gettime(CLOCK_MONOTONIC, &marks[1]);
+            [_eglPresenter setTimed:YES];
+        }
         if (failure)
             ;
         else if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque]
@@ -1317,6 +1329,7 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
                                          verify:_eglVerify corrupt:_eglCorrupt])
             failure = @"texture upload, GPU output or CPU reference verification failed";
         else {
+            if (_presentTiming) clock_gettime(CLOCK_MONOTONIC, &marks[2]);
             if (_eglVerify) ++_eglChecks;
             if (_display->_compositorVersion >= 3) {
                 union wl_argument scale[] = {{.i = _fractionalScale ? 1 : _bufferScale}};
@@ -1335,6 +1348,13 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
             if (!_frameCallback || CGLFlushDrawable(_eglContext) != kCGLNoError)
                 failure = @"native EGL swap failed";
             else {
+                if (_presentTiming) {
+                    clock_gettime(CLOCK_MONOTONIC, &marks[3]);
+                    _lastSetupNanoseconds = elapsedNanoseconds(&marks[0], &marks[1]);
+                    _lastCopyNanoseconds = [_eglPresenter lastCopyNanoseconds];
+                    _lastUploadNanoseconds = elapsedNanoseconds(&marks[1], &marks[2]) - _lastCopyNanoseconds;
+                    _lastSwapNanoseconds = elapsedNanoseconds(&marks[2], &marks[3]);
+                }
                 ++_clientPresents;
                 [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
                 ++_eglSwaps;
@@ -1544,7 +1564,7 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     if (!_presentTiming) return;
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    uint64_t elapsed = (uint64_t)(now.tv_sec - started->tv_sec) * 1000000000ull + now.tv_nsec - started->tv_nsec;
+    uint64_t elapsed = elapsedNanoseconds(started, &now);
     ++_presentsTimed; _presentNanoseconds += elapsed; _lastPresentNanoseconds = elapsed;
     if (elapsed > _maxPresentNanoseconds) _maxPresentNanoseconds = elapsed;
 }
