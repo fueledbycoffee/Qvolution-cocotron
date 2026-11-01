@@ -8,7 +8,7 @@ wayland-scanner private-code /usr/share/wayland-protocols/stable/xdg-shell/xdg-s
 cat > "$out/build.ninja" <<NINJA
 rule cc
   command = cc -std=gnu11 -g -O1 -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -I$src -I$out $(pkg-config --cflags wayland-client wayland-server xkbcommon) \$in -o \$out $(pkg-config --libs wayland-client wayland-server)
-build $out/ping-pump: cc $src/tests/ping-pump.c $out/xdg-shell-protocol.c | $src/WaylandEventPump.h $src/WaylandLibrary.h
+build $out/ping-pump: cc $src/tests/ping-wire-peer.c $out/xdg-shell-protocol.c | $src/WaylandEventPump.h $src/WaylandLibrary.h
 NINJA
 ninja -C "$out" -j6
 ninja -C "$out" -n
