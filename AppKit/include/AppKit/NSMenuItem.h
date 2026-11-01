@@ -22,7 +22,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <Foundation/NSObject.h>
 #import <AppKit/NSUserInterfaceItemIdentification.h>
 
-@class NSMenu, NSImage, NSAttributedString, NSView;
+@class NSMenu, NSImage, NSAttributedString, NSView, NSMenuItemBadge;
 
 @interface NSMenuItem : NSObject <NSCopying, NSValidatedUserInterfaceItem, NSUserInterfaceItemIdentification> {
     NSMenu *_menu;
@@ -52,8 +52,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     BOOL _isSectionHeader;
     NSString *_toolTip;
     NSView *_view;
+    NSMenuItemBadge *_badge;
 }
 
+// Stored presentation metadata; the menu renderer does not draw badges yet.
+@property(copy) NSMenuItemBadge *badge;
 @property(retain) NSView *view;
 @property(copy) NSString *toolTip;
 

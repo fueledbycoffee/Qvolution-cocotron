@@ -82,6 +82,9 @@ include_directories(
 set(AppKit_sources
 	X11.backend/X11DesktopSettings.m
 	X11.backend/X11DesktopSettingsCore.m
+	NSImportConstants.m
+	NSImportClasses.m
+	NSTextInsertionIndicator.m
 	NSComboBox.m
 	NSComboBoxCell.m
 	NSWindowScripting.m
@@ -778,3 +781,10 @@ endif ()
 
 set_source_files_properties(DarlingLayout.mm PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-std=c++14 -fexceptions")
 set_source_files_properties(NSApplication.m PROPERTIES COMPILE_FLAGS "-fobjc-exceptions")
+
+if (ENABLE_TESTS)
+    set_source_files_properties(tests/import-exports.c PROPERTIES COMPILE_FLAGS "-x objective-c")
+    add_darling_executable(appkit_import_exports tests/import-exports.c)
+    add_darling_executable(appkit_import_behavior tests/import-behavior.m)
+    target_link_libraries(appkit_import_behavior Foundation objc)
+endif()

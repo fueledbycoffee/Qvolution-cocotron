@@ -22,6 +22,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSImage.h>
 #import <AppKit/NSMenu.h>
 #import <AppKit/NSMenuItem.h>
+#import <AppKit/NSMenuItemBadge.h>
 #import <AppKit/NSObject+BindingSupport.h>
 #import <Foundation/NSKeyedArchiver.h>
 #import <AppKit/NSButtonCell.h>
@@ -161,6 +162,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     [_actionImage release];
     [_toolTip release];
     [_view release];
+    [_badge release];
     [super dealloc];
 }
 
@@ -180,7 +182,16 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
     copy->_actionImage = [_actionImage retain];
     copy->_toolTip = [_toolTip copyWithZone: zone];
     copy->_view = [_view retain];
+    copy->_badge = [_badge copyWithZone: zone];
     return copy;
+}
+
+// Public API name/type: rung 3, local AppKit documentation index.
+- (NSMenuItemBadge *) badge { return _badge; }
+- (void) setBadge: (NSMenuItemBadge *) badge {
+    NSMenuItemBadge *copy = [badge copy];
+    [_badge release];
+    _badge = copy;
 }
 
 // Stored only: Darling's menus don't show tooltips.
