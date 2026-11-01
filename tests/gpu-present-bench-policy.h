@@ -12,7 +12,8 @@ static inline uint64_t qvBenchFailures(const char *requested, const char *render
     const char *want = expected && *expected ? expected : requested;
     if (strcmp(want, renderer)) return backendFailures ? backendFailures : 1;
     if (expected && !strcmp(expected, "shm") && !strcmp(requested, "egl") &&
-        !strcmp(renderer, "shm") && reason && *reason &&
+        !strcmp(renderer, "shm") && reason &&
+        !strcmp(reason, "EGL is unavailable on this Wayland display") &&
         backendFailures == 1 && swaps == 0 && checks == 0) return 0;
     return backendFailures;
 }
