@@ -22,7 +22,7 @@
 #endif
 
 static unsigned failures, checks, renders;
-static void check(BOOL ok, const char *what) {
+static void expectThat(BOOL ok, const char *what) {
     checks++;
     if (!ok) { failures++; printf("FAIL %s\n", what); }
 }
@@ -92,23 +92,23 @@ static void countingRender(id self, SEL _cmd) {
     char label[96];
     snprintf(label, sizeof label, "A at (%.0f,%.0f) opacity %.2f is premultiplied red %d (got %d,%d,%d,%d)",
              pa.x, pa.y, [a opacity], expect, px[0], px[1], px[2], px[3]);
-    check(abs(px[0] - expect) <= 2 && px[1] <= 2 && px[2] <= 2 && abs(px[3] - expect) <= 2, label);
+    expectThat(abs(px[0] - expect) <= 2 && px[1] <= 2 && px[2] <= 2 && abs(px[3] - expect) <= 2, label);
     CGPoint origin = [s bounds].origin; CGRect sf = [s frame];
     int band = (int)floor((25 + origin.y) / 50);
     glReadPixels((GLint)((sf.origin.x + 100) * scale), (GLint)((sf.origin.y + 25) * scale), 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
     snprintf(label, sizeof label, "scroll %.0f shows band %d %s (got %d,%d,%d)", origin.y, band,
              band % 2 ? "blue" : "green", px[0], px[1], px[2]);
-    check(band % 2 ? (px[2] > 250 && px[1] < 5) : (px[1] > 250 && px[2] < 5), label);
+    expectThat(band % 2 ? (px[2] > 250 && px[1] < 5) : (px[1] > 250 && px[2] < 5), label);
     [c flush];
 }
 - (void) tick: (NSTimer *) timer {
     if (frame == 0) {
-        check(drawer->solid == 1 && drawer->stripes == 1, "each layer drew its content once before any motion");
+        expectThat(drawer->solid == 1 && drawer->stripes == 1, "each layer drew its content once before any motion");
         t0 = now(); cpu0 = cpuSeconds();
     }
     if (frame == frames) {
         double wall = now() - t0, cpu = cpuSeconds() - cpu0;
-        check(drawer->solid == 1 && drawer->stripes == 1, "moving, fading and scrolling drew no content again");
+        expectThat(drawer->solid == 1 && drawer->stripes == 1, "moving, fading and scrolling drew no content again");
         qsort(renderMs, timed, sizeof(double), compare);
         printf("RESULT quartzcore-layer-gpu-composite failures=%u checks=%u frames=%u composites=%u "
                "content_draws=%u render_median_ms=%.3f cpu_ms_per_frame=%.3f wall_s=%.2f\n",
