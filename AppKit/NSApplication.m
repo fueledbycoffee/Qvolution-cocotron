@@ -33,6 +33,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSKeyValueBinding.h>
 #import <AppKit/NSObject+BindingSupport.h>
 #import <AppKit/NSModalSessionX.h>
+#import <AppKit/NSNib.h>
 #import <AppKit/NSNibLoading.h>
 #import <AppKit/NSPageLayout.h>
 #import <objc/runtime.h>
@@ -2307,10 +2308,14 @@ if (argc > 1) {
     NSStoryboard *storyboard = [NSStoryboard mainStoryboard];
     if (storyboard != nil)
         [storyboard _instantiateAsMainStoryboard];
-    else {
+    else if ([nibFile length] > 0) {
         nibFile = [nibFile stringByDeletingPathExtension];
 
-        if (![NSBundle loadNibNamed: nibFile owner: NSApp])
+        NSDictionary *nameTable = [NSDictionary dictionaryWithObject: NSApp
+                                                            forKey: NSNibOwner];
+        BOOL loaded = [bundle loadNibFile: nibFile externalNameTable: nameTable
+                                withZone: NSDefaultMallocZone()];
+        if (!loaded)
             NSLog(@"Unable to load main nib file %@", nibFile);
     }
 
