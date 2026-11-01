@@ -11,7 +11,9 @@ source=(root/'AppKit/X11.backend/X11DesktopSettings.m').read_text()
 start=source.index('- (void)processPendingEvents {');end=source.index('\n- (NSAppearance *)systemAppearance',start)
 method=source[start:end]
 def production(signature):
- begin=source.index(signature);return source[begin:source.index('\n}\n',begin)+3]
+ begin=source.index(signature);line=source[begin:source.index('\n',begin)+1]
+ # A one-line method ends on its own line; a block method at the closing brace.
+ return line if line.rstrip().endswith('}') else source[begin:source.index('\n}\n',begin)+3]
 method+='\n'+production('- (void)requestState {')+production('- (void)invalidateAppearance {')
 harness=r'''
 #include <dbus/dbus.h>
