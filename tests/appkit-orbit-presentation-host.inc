@@ -8,6 +8,9 @@
 #include <unistd.h>
 #include <time.h>
 #include <poll.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <sys/time.h>
 #define NSLog(...) ((void)0)
 void *_NSConcreteStackBlock[32], *_NSConcreteGlobalBlock[32];
 void _Block_object_assign(void *d, const void *s, int flags) {}
@@ -37,6 +40,8 @@ static CFRunLoopTimerRef CFRunLoopTimerCreate(int a,double next,double interval,
 static void CFRunLoopAddTimer(void *loop,CFRunLoopTimerRef timer,int mode) { timers[timerCount++]=timer; }
 static void CFRunLoopTimerInvalidate(CFRunLoopTimerRef timer) { timer->valid=NO; }
 static void CFRelease(void *object) {} // Keep invalidated shim timers inspectable until fixture exit.
+static void *CFRetain(void *object) { return object; }
+static BOOL CFRunLoopTimerIsValid(CFRunLoopTimerRef timer) { return timer->valid; }
 struct FixtureSocket { int fd; unsigned enabled; };
 typedef struct FixtureSocket *CFSocketRef;
 #define kCFSocketReadCallBack 1
@@ -190,12 +195,12 @@ static NSApplication *NSApp;
 @interface X11GlobalMenu : NSObject { @public
     DBusConnection *_connection; CFSocketRef _cfSocket; id _itemsByID; unsigned int _revision; BOOL _available, _globalMenuEngaged, _waylandApplicationMenu, _orbitOwnerMatchAdded;
     BOOL _orbitProgressFailed, _orbitOwnerWatchReady, _orbitStateWatchReady;
-    BOOL _orbitExtensionActive, _orbitMenuRead; NSString *_orbitOwner, *_orbitShellOwner;
-    unsigned int _orbitShellGeneration, _orbitOwnerGeneration; NSMenu *_currentMenu;
+    BOOL _orbitExtensionActive, _orbitMenuRead; NSString *_orbitOwner, *_orbitShellOwner, *_orbitRegisteredOwner;
+    unsigned int _orbitShellGeneration, _orbitOwnerGeneration, _orbitOwnerWatchRetries, _orbitStateWatchRetries; NSMenu *_currentMenu;
 }
 - (void)deferDBusProgressFailure; - (void)processPendingDBusEvents; - (void)scheduleDBusWrite; - (void)handleDBusDisconnect;
 - (void)appendMenu:(NSMenu *)menu asNode:(int32_t)node toIter:(DBusMessageIter *)iter depth:(int32_t)depth;
-- (void)updateWaylandMenuPresentation; - (void)queryOrbitIntegration:(int)kind;
+- (void)updateWaylandMenuPresentation; - (void)queryOrbitIntegration:(int)kind; - (BOOL)orbitRegistrationAccepted;
 - (void)receiveOrbitReply:(DBusMessage *)reply kind:(int)kind generation:(unsigned int)generation;
 - (void)registerWaylandApplicationMenu:(NSMenu *)menu; - (void)updateMenu:(NSMenu *)menu;
 - (DBusHandlerResult)handleDBusMessage:(DBusMessage *)message onConnection:(DBusConnection *)connection;
@@ -216,9 +221,10 @@ static NSApplication *NSApp;
 static int failures;
 #define CHECK(ok, msg) do { if (!(ok)) { fprintf(stderr,"FAIL: %s\n",msg); failures++; } } while (0)
 static DBusConnection *receiver;
-static BOOL answerQueries = YES;
+static BOOL answerQueries = YES, rejectRegistration;
+static int registrations;
 static double extensionState = 1;
-static int writeOnlyProgress, layoutReplies;
+static int writeOnlyProgress, layoutReplies, bulkReceived;
 static void appendState(DBusMessage *reply, double state) {
     DBusMessageIter out, dict, entry, variant; const char *key="state";
     dbus_message_iter_init_append(reply,&out);
@@ -241,7 +247,14 @@ static void pump(X11GlobalMenu *exporter) {
                 DBusMessage *reply=dbus_message_new_method_return(request); appendState(reply,extensionState);
                 dbus_connection_send(receiver,reply,NULL); dbus_message_unref(reply); dbus_connection_flush(receiver);
             }
+            if (answerQueries && dbus_message_is_method_call(request,"space.unmade.GlobalMenu","RegisterWaylandMenu")) {
+                // Fake Orbit registrar: accept, or reject as Orbit does for a peer it cannot verify.
+                DBusMessage *reply=rejectRegistration ? dbus_message_new_error(request,"space.unmade.GlobalMenu.InvalidMenuPeer","rejected")
+                    : dbus_message_new_method_return(request);
+                dbus_connection_send(receiver,reply,NULL); dbus_message_unref(reply); dbus_connection_flush(receiver); registrations++;
+            }
             if (dbus_message_get_type(request)==DBUS_MESSAGE_TYPE_METHOD_RETURN && dbus_message_has_signature(request,"u(ia{sv}av)")) layoutReplies++;
+            if (dbus_message_is_signal(request,"org.example.Fixture","Bulk")) bulkReceived++;
             dbus_message_unref(request);
         }
         struct pollfd fd={.fd=exporter->_cfSocket->fd,.events=0};
@@ -273,6 +286,15 @@ static void readLayout(X11GlobalMenu *exporter,const char *sender) {
         [exporter handleDBusMessage:message onConnection:exporter->_connection];
         [exporter scheduleDBusWrite]; pump(exporter);
     }
+    dbus_message_unref(message);
+}
+// A separate peer, like Orbit's reader process, whose unique name is not the registrar's.
+static DBusConnection *reader;
+static void readLayoutFrom(X11GlobalMenu *exporter,DBusConnection *connection,int32_t root) {
+    DBusMessage *message=dbus_message_new_method_call(dbus_bus_get_unique_name(exporter->_connection),"/MenuBar","com.canonical.dbusmenu","GetLayout");
+    int32_t depth=-1; appendBasic(message,DBUS_TYPE_INT32,&root); appendBasic(message,DBUS_TYPE_INT32,&depth);
+    DBusMessageIter iter,array; dbus_message_iter_init_append(message,&iter); dbus_message_iter_open_container(&iter,DBUS_TYPE_ARRAY,"s",&array); dbus_message_iter_close_container(&iter,&array);
+    dbus_connection_send(connection,message,NULL); dbus_connection_flush(connection); pump(exporter);
     dbus_message_unref(message);
 }
 static int resizeMutations;
@@ -324,7 +346,30 @@ int main(void) {
     CHECK(!exporter->_orbitShellOwner,"error replies never become owner names"); dbus_message_unref(errorReply);
     dbus_bus_request_name(receiver,"org.gnome.Shell",DBUS_NAME_FLAG_DO_NOT_QUEUE,&error); pump(exporter);
     CHECK(!menu->hidden,"active integration waits for actual Orbit menu read");
-    readLayout(exporter,":99.99"); CHECK(!menu->hidden,"unrelated layout reader cannot hide the menu");
+    reader=dbus_bus_get_private(DBUS_BUS_SESSION,&error);
+    CHECK(reader && strcmp(dbus_bus_get_unique_name(reader),sender)!=0,"fake Orbit reader has a unique name different from the registrar owner");
+    readLayoutFrom(exporter,reader,1); CHECK(!menu->hidden && !exporter->_orbitMenuRead,"submenu read from the reader does not count as top-level presentation");
+    DBusMessage *unstamped=dbus_message_new_method_call(dbus_bus_get_unique_name(exporter->_connection),"/MenuBar","com.canonical.dbusmenu","GetLayout");
+    int32_t unstampedRoot=0,unstampedDepth=-1; appendBasic(unstamped,DBUS_TYPE_INT32,&unstampedRoot); appendBasic(unstamped,DBUS_TYPE_INT32,&unstampedDepth);
+    DBusMessageIter unstampedIter,unstampedArray; dbus_message_iter_init_append(unstamped,&unstampedIter); dbus_message_iter_open_container(&unstampedIter,DBUS_TYPE_ARRAY,"s",&unstampedArray); dbus_message_iter_close_container(&unstampedIter,&unstampedArray);
+    dbus_message_set_serial(unstamped,1); [exporter handleDBusMessage:unstamped onConnection:exporter->_connection]; dbus_message_unref(unstamped);
+    CHECK(!menu->hidden && !exporter->_orbitMenuRead,"request without a bus-stamped sender does not count");
+    readLayoutFrom(exporter,reader,0); CHECK(menu->hidden && exporter->_orbitMenuRead,"root read from a reader whose name differs from the registrar hides the local menu");
+    stateSignal(exporter,"global-menu@unmade.space",2,sender); CHECK(!menu->hidden,"distinct-reader engagement still follows the authenticated extension state");
+    stateSignal(exporter,"global-menu@unmade.space",1,sender); CHECK(!menu->hidden,"reactivation waits for a fresh distinct-reader read");
+    readLayoutFrom(exporter,reader,0); CHECK(menu->hidden,"fresh distinct-reader read engages again");
+    CHECK(registrations>0 && [exporter orbitRegistrationAccepted],"reads count only after Orbit accepted RegisterWaylandMenu");
+    rejectRegistration=YES; [exporter registerWaylandApplicationMenu:exporter->_currentMenu]; pump(exporter);
+    CHECK(!menu->hidden && ![exporter orbitRegistrationAccepted],"Orbit rejecting our registration restores the local menu");
+    readLayoutFrom(exporter,reader,0); CHECK(!menu->hidden && !exporter->_orbitMenuRead,"stray root read after a rejected registration leaves the local menu visible");
+    rejectRegistration=NO; [exporter registerWaylandApplicationMenu:exporter->_currentMenu]; pump(exporter);
+    CHECK(!menu->hidden && [exporter orbitRegistrationAccepted],"accepted re-registration still waits for a read");
+    readLayoutFrom(exporter,reader,0); CHECK(menu->hidden,"read after accepted re-registration engages");
+    // A registration accepted by a previous owner of the name does not carry over.
+    [exporter->_orbitRegisteredOwner release]; exporter->_orbitRegisteredOwner=[[NSString alloc] initWithUTF8String:":99.99"];
+    [exporter updateWaylandMenuPresentation]; CHECK(!menu->hidden,"registration by another unique name does not satisfy the gate");
+    readLayoutFrom(exporter,reader,0); CHECK(!menu->hidden,"read under a foreign registration does not count");
+    [exporter registerWaylandApplicationMenu:exporter->_currentMenu]; pump(exporter); readLayoutFrom(exporter,reader,0); CHECK(menu->hidden,"current owner registration restores engagement");
     failLayoutSend=YES; readLayout(exporter,sender); CHECK(!menu->hidden,"failed initial layout send retains local fallback"); failLayoutSend=NO;
     resizeObserver=mutateWindows;
     readLayout(exporter,sender); CHECK(menu->hidden,"active GNOME Orbit reader hides duplicate local menu");
@@ -336,6 +381,9 @@ int main(void) {
     dbus_message_set_destination(bulk,sender); const char *bytes=blob; appendBasic(bulk,DBUS_TYPE_STRING,&bytes);
     dbus_connection_send(exporter->_connection,bulk,NULL); dbus_message_unref(bulk); free(blob); [exporter scheduleDBusWrite]; pump(exporter);
     CHECK(writeOnlyProgress>0,"queued requests progress on writable readiness without readable input");
+    // Later checks assume a quiescent bus: let the 2 MiB transfer finish instead of racing it.
+    for(int n=0;n<200 && (!bulkReceived || dbus_connection_has_messages_to_send(exporter->_connection));n++) pump(exporter);
+    CHECK(bulkReceived==1 && !dbus_connection_has_messages_to_send(exporter->_connection),"bulk transfer drains before later reader checks");
     failLayoutSend=YES; readLayout(exporter,sender); CHECK(!menu->hidden && !exporter->_orbitMenuRead,"failed send after engagement restores fallback"); failLayoutSend=NO;
     readLayout(exporter,sender); CHECK(menu->hidden,"successful retry can engage after send failure");
     CHECK(FIXTURE_HAS_ALLOCATION_GUARD,"production reply allocation failure has a bounded fallback path");
@@ -395,13 +443,47 @@ int main(void) {
     failureExporter->_available=YES; failureExporter->_orbitOwnerWatchReady=YES; failureExporter->_orbitStateWatchReady=YES;
     failureExporter->_orbitExtensionActive=YES; failureExporter->_orbitMenuRead=YES;
     failureExporter->_orbitOwner=[[NSString alloc] initWithUTF8String:sender]; failureExporter->_orbitShellOwner=[[NSString alloc] initWithUTF8String:sender];
+    failureExporter->_orbitRegisteredOwner=[[NSString alloc] initWithUTF8String:sender];
     [failureExporter updateWaylandMenuPresentation]; CHECK(menu->hidden,"query-setup failure control begins engaged");
     queryAllocationSize=sizeof(OrbitQuery); failQueryAllocation=YES; [failureExporter queryOrbitIntegration:OrbitExtensionQuery];
     CHECK(failureExporter->_orbitProgressFailed && !menu->hidden,"unobserved pending-query allocation failure permanently restores fallback");
     [failureExporter updateWaylandMenuPresentation]; CHECK(!menu->hidden,"progress failure cannot reengage from old ACTIVE/read evidence");
     dbus_connection_close(failureExporter->_connection);
+    // A busy main loop can find a watch deadline due while the bus reply is already readable.
+    X11GlobalMenu *raceExporter=[X11GlobalMenu new];
+    raceExporter->_connection=dbus_bus_get_private(DBUS_BUS_SESSION,&error); dbus_connection_set_exit_on_disconnect(raceExporter->_connection,FALSE);
+    struct FixtureSocket raceSocket={.enabled=kCFSocketReadCallBack}; dbus_connection_get_unix_fd(raceExporter->_connection,&raceSocket.fd); raceExporter->_cfSocket=&raceSocket;
+    dbus_connection_set_timeout_functions(raceExporter->_connection,orbitAddTimeout,orbitRemoveTimeout,orbitToggleTimeout,raceExporter,NULL);
+    raceExporter->_available=YES; raceExporter->_waylandApplicationMenu=YES;
+    pump(raceExporter); // consume NameAcquired so only the watch reply can be readable
+    int raceTimer=timerCount; [raceExporter queryOrbitIntegration:OrbitOwnerWatchQuery]; dbus_connection_flush(raceExporter->_connection);
+    struct pollfd raceReadable={.fd=raceSocket.fd,.events=POLLIN}; poll(&raceReadable,1,5000);
+    CHECK(timerCount==raceTimer+1 && (raceReadable.revents&POLLIN),"owner-watch reply is readable while its deadline timer is pending");
+    if(timerCount==raceTimer+1){ CFRunLoopTimerRef timer=timers[raceTimer]; timer->callback(timer,timer->info); }
+    CHECK(raceExporter->_orbitOwnerWatchReady,"deadline firing before socket dispatch still accepts the already-received owner-watch reply");
+    CHECK(!timers[raceTimer]->valid,"received reply retires its deadline timer");
+    // A watch that genuinely fails is retried rather than left unready until another window maps.
+    raceExporter->_orbitOwnerWatchReady=NO; unsigned int raceGeneration=raceExporter->_orbitOwnerGeneration;
+    DBusMessage *watchError=dbus_message_new(DBUS_MESSAGE_TYPE_ERROR); dbus_message_set_error_name(watchError,DBUS_ERROR_NO_REPLY);
+    [raceExporter receiveOrbitReply:watchError kind:OrbitOwnerWatchQuery generation:raceExporter->_orbitShellGeneration]; dbus_message_unref(watchError);
+    for(int n=0;n<20 && !raceExporter->_orbitOwnerWatchReady;n++) pump(raceExporter);
+    CHECK(raceExporter->_orbitOwnerWatchRetries==1 && raceExporter->_orbitStateWatchRetries==0 && raceExporter->_orbitOwnerWatchReady,"failed owner watch is retried on its own budget and becomes ready");
+    for(int n=0;n<20 && !raceExporter->_orbitOwner;n++) pump(raceExporter);
+    CHECK(raceExporter->_orbitOwnerGeneration==raceGeneration+1 && raceExporter->_orbitOwner && strcmp([raceExporter->_orbitOwner UTF8String],sender)==0,"late owner watch refreshes the owner snapshot it guards");
+    // Each watch has its own budget: exhausting the owner watch leaves the state watch's retries intact.
+    raceExporter->_orbitOwnerWatchRetries=2; raceExporter->_orbitOwnerMatchAdded=YES;
+    watchError=dbus_message_new(DBUS_MESSAGE_TYPE_ERROR); dbus_message_set_error_name(watchError,DBUS_ERROR_NO_REPLY);
+    [raceExporter receiveOrbitReply:watchError kind:OrbitOwnerWatchQuery generation:raceExporter->_orbitShellGeneration]; dbus_message_unref(watchError);
+    CHECK(!raceExporter->_orbitOwnerWatchReady && !raceExporter->_orbitOwnerMatchAdded,"exhausted owner watch waits for the next window registration");
+    raceExporter->_orbitStateWatchReady=NO;
+    watchError=dbus_message_new(DBUS_MESSAGE_TYPE_ERROR); dbus_message_set_error_name(watchError,DBUS_ERROR_NO_REPLY);
+    [raceExporter receiveOrbitReply:watchError kind:OrbitStateWatchQuery generation:raceExporter->_orbitShellGeneration]; dbus_message_unref(watchError);
+    for(int n=0;n<20 && !raceExporter->_orbitStateWatchReady;n++) pump(raceExporter);
+    CHECK(raceExporter->_orbitStateWatchRetries==1 && raceExporter->_orbitStateWatchReady,"state watch retries independently of an exhausted owner watch");
+    dbus_connection_close(raceExporter->_connection);
+    dbus_connection_close(reader);
     dbus_connection_close(receiver);
     if(failures) return 1;
-    puts("PASS: production layout, GNOME/Orbit activation, authenticated readers, state/owner fallback and repeated transitions");
+    puts("PASS: production layout, GNOME/Orbit activation, bus-delivered readers, state/owner fallback and repeated transitions");
     return 0;
 }

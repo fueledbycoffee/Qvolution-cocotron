@@ -9,6 +9,37 @@
 #import <CoreFoundation/CoreFoundation.h>
 #include <dbus/dbus.h>
 #include <X11/Xatom.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <sys/time.h>
+#include <unistd.h>
+#include <objc/runtime.h>
+
+static const char *orbitText(const char *text) { return text ? text : "(none)"; }
+
+static void orbitDiagnostic(const char *event, const char *format, ...) {
+    const char *option = getenv("DARLING_ORBIT_MENU_DIAGNOSTICS");
+    if (!option || !*option || strcmp(option, "0") == 0)
+        return;
+    int savedErrno = errno;
+    const char *path = option[0] == '/' ? option : "/tmp/qvolution-orbit-menu.log";
+    FILE *file = fopen(path, "a");
+    if (file) {
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        fprintf(file, "%ld.%06d pid=%d event=%s ", (long)now.tv_sec, (int)now.tv_usec, getpid(), event);
+        va_list args;
+        va_start(args, format);
+        vfprintf(file, format, args);
+        va_end(args);
+        fputc('\n', file);
+        fclose(file);
+    } else {
+        perror("Orbit menu diagnostics: cannot open log");
+    }
+    errno = savedErrno;
+}
 
 static X11GlobalMenu *g_sharedGlobalMenu = nil;
 
@@ -42,17 +73,22 @@ static BOOL orbitExtensionIsActive(DBusMessageIter *dictionary) {
         dbus_message_iter_get_basic(&entry, &key);
         dbus_message_iter_next(&entry);
         dbus_message_iter_recurse(&entry, &value);
+        if (strcmp(key, "state") == 0)
+            orbitDiagnostic("extension-state-type", "type=%d expected=%d", dbus_message_iter_get_arg_type(&value), DBUS_TYPE_DOUBLE);
         if (strcmp(key, "state") == 0 && dbus_message_iter_get_arg_type(&value) == DBUS_TYPE_DOUBLE) {
             double state = 0;
             dbus_message_iter_get_basic(&value, &state);
+            orbitDiagnostic("extension-state", "state=%g active=%d", state, state == 1);
             return state == 1;
         }
         dbus_message_iter_next(&entries);
     }
+    orbitDiagnostic("extension-state", "active=0 reason=missing-double-state");
     return NO;
 }
 
-enum { OrbitOwnerQuery, OrbitShellOwnerQuery, OrbitExtensionQuery, OrbitOwnerWatchQuery, OrbitStateWatchQuery };
+enum { OrbitOwnerQuery, OrbitShellOwnerQuery, OrbitExtensionQuery, OrbitOwnerWatchQuery, OrbitStateWatchQuery,
+    OrbitRegistrationQuery };
 typedef struct {
     X11GlobalMenu *exporter;
     int kind;
@@ -88,11 +124,21 @@ static void orbitTimeoutFree(void *data) {
     free(context);
 }
 
+// A busy main thread can leave both a reply on the socket and its deadline timer
+// due. Read first, so a reply that already arrived completes its pending call and
+// removes this timeout; only an unanswered call then becomes NoReply. Removal
+// invalidates the timer before freeing the context, so validity is checked on our
+// own timer reference before the context is touched again.
 static void orbitTimeoutFired(CFRunLoopTimerRef timer, void *data) {
     OrbitTimeout *context = data;
     X11GlobalMenu *exporter = [context->exporter retain];
-    dbus_timeout_handle(context->timeout);
+    CFRetain(timer);
     [exporter processPendingDBusEvents];
+    if (CFRunLoopTimerIsValid(timer)) {
+        dbus_timeout_handle(context->timeout);
+        [exporter processPendingDBusEvents];
+    }
+    CFRelease(timer);
     [exporter release];
 }
 
@@ -130,6 +176,20 @@ static void orbitToggleTimeout(DBusTimeout *timeout, void *data) {
         NSLog(@"Orbit global menu: cannot schedule D-Bus timeout");
 }
 
+// Report the window's own menu strip after a presentation change, so a log shows
+// whether the local menu actually left the window rather than only the decision.
+static void orbitMenuViewDiagnostic(NSWindow *window) {
+    // Same opt-in test as orbitDiagnostic, made first so the reflection is skipped when off.
+    const char *option = getenv("DARLING_ORBIT_MENU_DIAGNOSTICS");
+    if (!option || !*option || strcmp(option, "0") == 0)
+        return;
+    Ivar ivar = class_getInstanceVariable([NSWindow class], "_menuView");
+    NSView *menuView = ivar ? object_getIvar(window, ivar) : nil;
+    orbitDiagnostic("menu-view", "window=%p present=%d hidden=%d menu-height=%g window-height=%g",
+        window, menuView != nil, [menuView isHidden], menuView ? [menuView frame].size.height : 0.0,
+        [window frame].size.height);
+}
+
 static void dbusSocketCallback(CFSocketRef s, CFSocketCallBackType type,
                                CFDataRef address, const void *data, void *info) {
     X11GlobalMenu *self = (X11GlobalMenu *)info;
@@ -163,8 +223,12 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
         _available = NO;
 
         const char *dbusAddr = getenv("DBUS_SESSION_BUS_ADDRESS");
+        orbitDiagnostic("init", "backend-requested=%s session-address-present=%d disabled-env=%d",
+            orbitText(getenv("DARLING_APPKIT_BACKEND")), dbusAddr && *dbusAddr,
+            getenv("DARLING_NO_GLOBAL_MENU") != NULL);
         if (!dbusAddr || !*dbusAddr || getenv("DARLING_NO_GLOBAL_MENU") ||
             [[NSUserDefaults standardUserDefaults] boolForKey: @"CocotronNoGlobalMenu"]) {
+            orbitDiagnostic("decision", "hide=0 reason=initialization-disabled-or-no-session-address");
             return self;
         }
 
@@ -172,17 +236,24 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
         dbus_error_init(&error);
         _connection = dbus_bus_get(DBUS_BUS_SESSION, &error);
         if (dbus_error_is_set(&error) || !_connection) {
+            orbitDiagnostic("session-bus", "connected=0 error=%s", orbitText(error.name));
+            orbitDiagnostic("decision", "hide=0 reason=session-bus-unavailable");
             dbus_error_free(&error);
             return self;
         }
+        orbitDiagnostic("session-bus", "connected=1 unique=%s", orbitText(dbus_bus_get_unique_name(_connection)));
 
         dbus_connection_set_exit_on_disconnect(_connection, FALSE);
         if (!dbus_connection_set_timeout_functions(_connection, orbitAddTimeout, orbitRemoveTimeout,
-                                                   orbitToggleTimeout, self, NULL))
+                                                   orbitToggleTimeout, self, NULL)) {
+            orbitDiagnostic("progress", "timeout-functions=0 reason=setup-failed");
+            orbitDiagnostic("decision", "hide=0 reason=timeout-setup-failed");
             return self;
+        }
 
         // Check if registrar exists
         dbus_bool_t hasRegistrar = dbus_bus_name_has_owner(_connection, "com.canonical.AppMenu.Registrar", &error);
+        orbitDiagnostic("registrar", "present=%d error=%s", hasRegistrar, orbitText(error.name));
         if (dbus_error_is_set(&error) || !hasRegistrar) {
             dbus_error_free(&error);
             // Even if registrar isn't explicit, KDE Plasma's gmenudbusmenuproxy accepts X11 window properties!
@@ -210,11 +281,14 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
         static const DBusObjectPathVTable vtable = {
             .message_function = dbusFilterCallback
         };
-        dbus_connection_try_register_object_path(_connection, "/MenuBar", &vtable, (void *)self, &error);
+        BOOL pathRegistered = dbus_connection_try_register_object_path(_connection, "/MenuBar", &vtable, (void *)self, &error);
 
-        dbus_connection_add_filter(_connection, dbusFilterCallback, (void *)self, NULL);
+        BOOL filterAdded = dbus_connection_add_filter(_connection, dbusFilterCallback, (void *)self, NULL);
+        orbitDiagnostic("export-path", "registered=%d filter-added=%d error=%s", pathRegistered, filterAdded, orbitText(error.name));
         _orbitProgressFailed = !_cfSocket || !_runLoopSource;
         _available = YES;
+        orbitDiagnostic("export-ready", "available=%d socket=%d runloop-source=%d progress-failed=%d",
+            _available, _cfSocket != NULL, _runLoopSource != NULL, _orbitProgressFailed);
     }
     return self;
 }
@@ -227,9 +301,26 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
     return _globalMenuEngaged;
 }
 
+// Orbit accepted our RegisterWaylandMenu, and the name that accepted it still owns
+// space.unmade.GlobalMenu. Without this, a read proves nothing is presenting our menu.
+- (BOOL) orbitRegistrationAccepted {
+    return _orbitOwner && _orbitRegisteredOwner &&
+        strcmp([_orbitRegisteredOwner UTF8String], [_orbitOwner UTF8String]) == 0;
+}
+
 - (void) updateWaylandMenuPresentation {
+    BOOL registered = [self orbitRegistrationAccepted];
     BOOL engaged = _available && !_orbitProgressFailed && _orbitOwnerWatchReady && _orbitStateWatchReady &&
-        _orbitExtensionActive && _orbitMenuRead && _orbitOwner != nil && _orbitShellOwner != nil;
+        _orbitExtensionActive && registered && _orbitMenuRead && _orbitOwner != nil && _orbitShellOwner != nil;
+    const char *reason = !_available ? "export-unavailable" : _orbitProgressFailed ? "progress-failed" :
+        !_orbitOwnerWatchReady ? "owner-watch-not-ready" : !_orbitStateWatchReady ? "state-watch-not-ready" :
+        !_orbitExtensionActive ? "extension-not-active" : !registered ? "registration-not-accepted" :
+        !_orbitMenuRead ? "no-qualified-layout-reply" :
+        !_orbitOwner ? "no-orbit-owner" : !_orbitShellOwner ? "no-shell-owner" : "qualified";
+    orbitDiagnostic("decision", "hide=%d previous=%d reason=%s available=%d progress-failed=%d owner-watch=%d state-watch=%d extension-active=%d registered=%d menu-read=%d orbit=%s orbit-generation=%u shell=%s shell-generation=%u",
+        engaged, _globalMenuEngaged, reason, _available, _orbitProgressFailed, _orbitOwnerWatchReady,
+        _orbitStateWatchReady, _orbitExtensionActive, registered, _orbitMenuRead, orbitText([_orbitOwner UTF8String]),
+        _orbitOwnerGeneration, orbitText([_orbitShellOwner UTF8String]), _orbitShellGeneration);
     if (_globalMenuEngaged == engaged)
         return;
     _globalMenuEngaged = engaged;
@@ -240,12 +331,14 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
                 [window _hideMenuViewIfNeeded];
             else if (window != [NSApp modalWindow])
                 [window _showMenuViewIfNeeded];
+            orbitMenuViewDiagnostic(window);
         }
     }
     [windows release];
 }
 
 - (void) deferDBusProgressFailure {
+    orbitDiagnostic("progress", "failed=1 already-failed=%d", _orbitProgressFailed);
     if (_orbitProgressFailed)
         return;
     _orbitProgressFailed = YES;
@@ -261,6 +354,7 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
 }
 
 - (void) handleDBusDisconnect {
+    orbitDiagnostic("session-bus", "connected=0 reason=disconnect");
     _available = NO;
     _orbitExtensionActive = NO;
     _orbitMenuRead = NO;
@@ -270,21 +364,31 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
     _orbitOwner = nil;
     [_orbitShellOwner release];
     _orbitShellOwner = nil;
+    [_orbitRegisteredOwner release];
+    _orbitRegisteredOwner = nil;
     if (_cfSocket)
         CFSocketDisableCallBacks(_cfSocket, kCFSocketReadCallBack | kCFSocketWriteCallBack);
     [self updateWaylandMenuPresentation];
 }
 
 - (void) queryOrbitIntegration: (int) kind {
-    const char *destination = kind == OrbitExtensionQuery ? [_orbitShellOwner UTF8String] : DBUS_SERVICE_DBUS;
+    BOOL registration = kind == OrbitRegistrationQuery;
+    const char *destination = kind == OrbitExtensionQuery ? [_orbitShellOwner UTF8String] :
+        registration ? "space.unmade.GlobalMenu" : DBUS_SERVICE_DBUS;
     if (!destination)
         return;
+    orbitDiagnostic("query-request", "kind=%d destination=%s orbit-generation=%u shell-generation=%u",
+        kind, destination, _orbitOwnerGeneration, _orbitShellGeneration);
     BOOL watch = kind == OrbitOwnerWatchQuery || kind == OrbitStateWatchQuery;
-    DBusMessage *message = dbus_message_new_method_call(destination,
-        kind == OrbitExtensionQuery ? "/org/gnome/Shell" : DBUS_PATH_DBUS,
-        kind == OrbitExtensionQuery ? "org.gnome.Shell.Extensions" : DBUS_INTERFACE_DBUS,
-        watch ? "AddMatch" : (kind == OrbitExtensionQuery ? "GetExtensionInfo" : "GetNameOwner"));
+    DBusMessage *message = registration ?
+        dbus_message_new_method_call(destination, "/space/unmade/GlobalMenu", "space.unmade.GlobalMenu",
+            "RegisterWaylandMenu") :
+        dbus_message_new_method_call(destination,
+            kind == OrbitExtensionQuery ? "/org/gnome/Shell" : DBUS_PATH_DBUS,
+            kind == OrbitExtensionQuery ? "org.gnome.Shell.Extensions" : DBUS_INTERFACE_DBUS,
+            watch ? "AddMatch" : (kind == OrbitExtensionQuery ? "GetExtensionInfo" : "GetNameOwner"));
     if (!message) {
+        orbitDiagnostic("query-setup", "kind=%d observed=0 reason=message-allocation", kind);
         [self deferDBusProgressFailure];
         return;
     }
@@ -296,7 +400,12 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
     else if (kind == OrbitStateWatchQuery)
         argument = "type='signal',sender='org.gnome.Shell',interface='org.gnome.Shell.Extensions',"
             "member='ExtensionStateChanged',path='/org/gnome/Shell',arg0='global-menu@unmade.space'";
-    appendBasic(message, DBUS_TYPE_STRING, &argument);
+    if (registration) {
+        const char *menuPath = "/MenuBar";
+        appendBasic(message, DBUS_TYPE_OBJECT_PATH, &menuPath);
+    } else {
+        appendBasic(message, DBUS_TYPE_STRING, &argument);
+    }
     dbus_message_set_auto_start(message, FALSE);
     DBusPendingCall *pending = NULL;
     BOOL observed = NO;
@@ -305,7 +414,7 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
         if (query) {
             query->exporter = [self retain];
             query->kind = kind;
-            query->generation = kind == OrbitOwnerQuery ? _orbitOwnerGeneration : _orbitShellGeneration;
+            query->generation = kind == OrbitOwnerQuery || registration ? _orbitOwnerGeneration : _orbitShellGeneration;
             observed = dbus_pending_call_set_notify(pending, orbitQueryReply, query, orbitQueryFree);
             if (!observed)
                 orbitQueryFree(query);
@@ -318,26 +427,72 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
     }
     if (pending)
         dbus_pending_call_unref(pending);
+    orbitDiagnostic("query-setup", "kind=%d observed=%d serial=%u", kind, observed, dbus_message_get_serial(message));
     dbus_message_unref(message);
     [self scheduleDBusWrite];
 }
 
 - (void) receiveOrbitReply: (DBusMessage *) reply kind: (int) kind generation: (unsigned int) generation {
-    if ((kind == OrbitOwnerQuery && generation != _orbitOwnerGeneration) ||
-        ((kind == OrbitShellOwnerQuery || kind == OrbitExtensionQuery) && generation != _orbitShellGeneration))
+    orbitDiagnostic("query-reply", "kind=%d generation=%u orbit-generation=%u shell-generation=%u sender=%s expected=%s type=%d signature=%s error=%s reply-serial=%u",
+        kind, generation, _orbitOwnerGeneration, _orbitShellGeneration,
+        orbitText(reply ? dbus_message_get_sender(reply) : NULL),
+        orbitText(kind == OrbitExtensionQuery ? [_orbitShellOwner UTF8String] :
+            kind == OrbitRegistrationQuery ? "(owner of space.unmade.GlobalMenu)" : DBUS_SERVICE_DBUS),
+        reply ? dbus_message_get_type(reply) : 0, orbitText(reply ? dbus_message_get_signature(reply) : NULL),
+        orbitText(reply ? dbus_message_get_error_name(reply) : NULL), reply ? dbus_message_get_reply_serial(reply) : 0);
+    if (((kind == OrbitOwnerQuery || kind == OrbitRegistrationQuery) && generation != _orbitOwnerGeneration) ||
+        ((kind == OrbitShellOwnerQuery || kind == OrbitExtensionQuery) && generation != _orbitShellGeneration)) {
+        orbitDiagnostic("query-rejected", "kind=%d reason=stale-generation", kind);
         return;
+    }
     const char *sender = kind == OrbitExtensionQuery ? [_orbitShellOwner UTF8String] : DBUS_SERVICE_DBUS;
     BOOL validReply = reply && dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_METHOD_RETURN &&
         sender && dbus_message_has_sender(reply, sender);
+    if (kind == OrbitRegistrationQuery) {
+        // Sent to the well-known name; the bus stamps the reply with the unique
+        // name that accepted it, which must still own the name when a read counts.
+        const char *acceptor = reply && dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_METHOD_RETURN &&
+            dbus_message_has_signature(reply, "") ? dbus_message_get_sender(reply) : NULL;
+        [_orbitRegisteredOwner release];
+        _orbitRegisteredOwner = acceptor ? [[NSString alloc] initWithUTF8String: acceptor] : nil;
+        if (!acceptor)
+            _orbitMenuRead = NO;
+        orbitDiagnostic("query-authentication", "kind=%d valid=%d registered-owner=%s current-owner=%s",
+            kind, acceptor != NULL, orbitText(acceptor), orbitText([_orbitOwner UTF8String]));
+        [self updateWaylandMenuPresentation];
+        return;
+    }
+    orbitDiagnostic("query-authentication", "kind=%d valid=%d", kind, validReply);
     if (kind == OrbitOwnerWatchQuery || kind == OrbitStateWatchQuery) {
         BOOL ready = validReply && dbus_message_has_signature(reply, "");
         if (kind == OrbitOwnerWatchQuery)
             _orbitOwnerWatchReady = ready;
         else
             _orbitStateWatchReady = ready;
-        if (!ready) {
+        unsigned int *retries = kind == OrbitOwnerWatchQuery ? &_orbitOwnerWatchRetries : &_orbitStateWatchRetries;
+        if (!ready && *retries < 2) {
+            // The window registration that issued this watch may not recur, so
+            // retry here instead of leaving the local menu up for the session.
+            (*retries)++;
+            orbitDiagnostic("watch-retry", "kind=%d attempt=%u", kind, *retries);
+            [self queryOrbitIntegration: kind];
+        } else if (!ready) {
             _orbitOwnerMatchAdded = NO;
             NSLog(@"Orbit global menu: cannot watch integration changes");
+        } else if (*retries) {
+            // Changes before a late match were not observed: refresh the snapshot it guards.
+            if (kind == OrbitOwnerWatchQuery) {
+                _orbitOwnerGeneration++;
+                _orbitShellGeneration++;
+                [self queryOrbitIntegration: OrbitOwnerQuery];
+                [self queryOrbitIntegration: OrbitShellOwnerQuery];
+                // The new owner generation makes the pending registration reply stale.
+                if (_waylandApplicationMenu)
+                    [self queryOrbitIntegration: OrbitRegistrationQuery];
+            } else if (_orbitShellOwner) {
+                _orbitShellGeneration++;
+                [self queryOrbitIntegration: OrbitExtensionQuery];
+            }
         }
     } else if (kind == OrbitExtensionQuery) {
         DBusMessageIter dictionary;
@@ -366,6 +521,7 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
 - (void) processPendingDBusEvents {
     if (!_connection)
         return;
+    orbitDiagnostic("transport-progress", "phase=begin pending-write=%d", dbus_connection_has_messages_to_send(_connection));
     if (!dbus_connection_read_write(_connection, 0)) {
         [self handleDBusDisconnect];
         return;
@@ -375,6 +531,8 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
     if (_cfSocket)
         CFSocketDisableCallBacks(_cfSocket, kCFSocketWriteCallBack);
     [self scheduleDBusWrite];
+    orbitDiagnostic("transport-progress", "phase=end pending-write=%d delivery=transport-only-no-peer-ack",
+        dbus_connection_has_messages_to_send(_connection));
 }
 
 - (int32_t) idForMenuItem: (NSMenuItem *) item {
@@ -506,6 +664,11 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
 
     if (!member) return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 
+    if (strcmp(member, "NameOwnerChanged") == 0 || strcmp(member, "ExtensionStateChanged") == 0)
+        orbitDiagnostic("integration-signal", "member=%s sender=%s interface=%s path=%s signature=%s orbit-generation=%u shell-generation=%u",
+            member, orbitText(dbus_message_get_sender(message)), orbitText(interface), orbitText(path),
+            dbus_message_get_signature(message), _orbitOwnerGeneration, _orbitShellGeneration);
+
     if (dbus_message_is_signal(message, DBUS_INTERFACE_LOCAL, "Disconnected") &&
         path && strcmp(path, DBUS_PATH_LOCAL) == 0) {
         [self handleDBusDisconnect];
@@ -523,10 +686,14 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
         dbus_message_iter_next(&iter);
         dbus_message_iter_next(&iter);
         dbus_message_iter_get_basic(&iter, &newOwner);
+        if (strcmp(name, "space.unmade.GlobalMenu") == 0 || strcmp(name, "org.gnome.Shell") == 0)
+            orbitDiagnostic("owner-change", "name=%s new-owner=%s authenticated=1", name, orbitText(newOwner));
         if (strcmp(name, "space.unmade.GlobalMenu") == 0) {
             _orbitOwnerGeneration++;
             [_orbitOwner release];
             _orbitOwner = newOwner && *newOwner ? [[NSString alloc] initWithUTF8String: newOwner] : nil;
+            [_orbitRegisteredOwner release];
+            _orbitRegisteredOwner = nil;
             _orbitMenuRead = NO;
             [self updateWaylandMenuPresentation];
             if (_orbitOwner)
@@ -674,12 +841,28 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
             }
         }
 
-        BOOL orbitReadRequest = _waylandApplicationMenu && _orbitOwner && parentId == 0 && recursionDepth != 0 &&
-            dbus_message_is_method_call(message, "com.canonical.dbusmenu", "GetLayout") &&
-            path && strcmp(path, "/MenuBar") == 0 && dbus_message_has_signature(message, "iias") &&
-            dbus_message_has_sender(message, [_orbitOwner UTF8String]);
+        // Orbit owns its registrar name in one process and reads layouts from a sibling
+        // process with its own unique name and no well-known name, so the reader cannot
+        // be matched to the registrar. Matching gave no protection either: dbusmenu
+        // answers every peer and every session-bus peer is this user. A root read
+        // delivered by the bus qualifies while the authenticated owner, Shell and
+        // extension gates hold; those gates, not the reader's name, decide presentation.
+        const char *reader = dbus_message_get_sender(message);
+        BOOL registered = [self orbitRegistrationAccepted];
+        BOOL orbitReadRequest = _waylandApplicationMenu && registered && reader && parentId == 0 &&
+            recursionDepth != 0 && dbus_message_is_method_call(message, "com.canonical.dbusmenu", "GetLayout") &&
+            path && strcmp(path, "/MenuBar") == 0 && dbus_message_has_signature(message, "iias");
+        orbitDiagnostic("layout-request", "serial=%u sender=%s registrar=%s orbit-generation=%u shell-generation=%u wayland=%d owner-present=%d root=%d depth=%d method=%d path=%d signature=%s signature-valid=%d bus-sender=%d registered=%d reader-is-registrar=%d qualified=%d",
+            dbus_message_get_serial(message), orbitText(reader), orbitText([_orbitOwner UTF8String]),
+            _orbitOwnerGeneration, _orbitShellGeneration, _waylandApplicationMenu, _orbitOwner != nil, parentId == 0,
+            recursionDepth, dbus_message_is_method_call(message, "com.canonical.dbusmenu", "GetLayout"),
+            path && strcmp(path, "/MenuBar") == 0, dbus_message_get_signature(message),
+            dbus_message_has_signature(message, "iias"), reader != NULL, registered,
+            _orbitOwner && reader && strcmp(reader, [_orbitOwner UTF8String]) == 0, orbitReadRequest);
         DBusMessage *reply = dbus_message_new_method_return(message);
         if (!reply) {
+            orbitDiagnostic("layout-reply", "request-serial=%u queued=0 reason=allocation-failed qualified-request=%d",
+                dbus_message_get_serial(message), orbitReadRequest);
             if (orbitReadRequest) {
                 _orbitMenuRead = NO;
                 [self updateWaylandMenuPresentation];
@@ -700,6 +883,9 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
         [self appendMenu: targetMenu asNode: parentId toIter: &replyIter depth: recursionDepth];
 
         BOOL sent = dbus_connection_send(connection, reply, NULL);
+        orbitDiagnostic("layout-reply", "request-serial=%u reply-serial=%u queued=%d signature=%s signature-valid=%d qualified-request=%d pending-write=%d delivery=queue-only",
+            dbus_message_get_serial(message), dbus_message_get_serial(reply), sent, dbus_message_get_signature(reply),
+            dbus_message_has_signature(reply, "u(ia{sv}av)"), orbitReadRequest, dbus_connection_has_messages_to_send(connection));
         if (orbitReadRequest) {
             _orbitMenuRead = sent && dbus_message_has_signature(reply, "u(ia{sv}av)");
             [self updateWaylandMenuPresentation];
@@ -763,6 +949,7 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
     [_currentMenu release];
     [_orbitOwner release];
     [_orbitShellOwner release];
+    [_orbitRegisteredOwner release];
     [super dealloc];
 }
 
@@ -789,12 +976,15 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
 
 // Orbit resolves this connection's host PID through the bus daemon. No X11 ID is sent.
 - (void) registerWaylandApplicationMenu: (NSMenu *) menu {
+    orbitDiagnostic("backend-detected", "backend=wayland available=%d connection=%d", _available, _connection != NULL);
     _waylandApplicationMenu = YES;
     if (!_available || !_connection)
         return;
     [self updateMenu: menu];
     if (!_orbitOwnerMatchAdded) {
         _orbitOwnerMatchAdded = YES;
+        _orbitOwnerWatchRetries = 0;
+        _orbitStateWatchRetries = 0;
         _orbitOwnerWatchReady = NO;
         _orbitStateWatchReady = NO;
         [self queryOrbitIntegration: OrbitOwnerWatchQuery];
@@ -802,21 +992,15 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
         [self queryOrbitIntegration: OrbitOwnerQuery];
         [self queryOrbitIntegration: OrbitShellOwnerQuery];
     }
-    DBusMessage *message = dbus_message_new_method_call("space.unmade.GlobalMenu",
-        "/space/unmade/GlobalMenu", "space.unmade.GlobalMenu", "RegisterWaylandMenu");
-    if (message) {
-        const char *path = "/MenuBar";
-        appendBasic(message, DBUS_TYPE_OBJECT_PATH, &path);
-        dbus_message_set_no_reply(message, TRUE);
-        dbus_connection_send(_connection, message, NULL);
-        dbus_message_unref(message);
-        [self scheduleDBusWrite];
-    }
+    // Reads only count once Orbit has accepted this registration (receiveOrbitReply).
+    orbitDiagnostic("wayland-registration", "destination=space.unmade.GlobalMenu orbit-generation=%u", _orbitOwnerGeneration);
+    [self queryOrbitIntegration: OrbitRegistrationQuery];
     // This is the user-selected duplicate-menu policy, not a presentation acknowledgement.
     [self updateWaylandMenuPresentation];
 }
 
 - (void) registerWindow: (Window) x11Window forMenu: (NSMenu *) menu {
+    orbitDiagnostic("backend-detected", "backend=x11 available=%d connection=%d", _available, _connection != NULL);
     if (!_available || !_connection)
         return;
 
