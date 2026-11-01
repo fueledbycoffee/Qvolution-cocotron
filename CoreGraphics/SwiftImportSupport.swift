@@ -72,6 +72,11 @@ extension CGPath {
     }
 }
 
+extension CGRect {
+    public var width: CGFloat { return abs(size.width) }
+    public var height: CGFloat { return abs(size.height) }
+}
+
 extension CGRect: Equatable {
     public static func == (lhs: CGRect, rhs: CGRect) -> Bool {
         if CGRectIsNull(lhs) && CGRectIsNull(rhs) { return true }

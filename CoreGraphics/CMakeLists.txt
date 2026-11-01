@@ -144,11 +144,8 @@ add_framework(CoreGraphics
 		IOKit
 )
 
-# Since macOS 14 the CoreGraphics Swift overlay is part of CoreGraphics.framework, so apps bind symbols such as
-# $sSo12CGContextRefa12CoreGraphicsE7addLine2toySo7CGPointV_tF to CoreGraphics. Re-export the overlay from
-# src/external/swift (installed as /usr/lib/swift/libswiftCoreGraphics.dylib) so those binds resolve.
 set_property(TARGET CoreGraphics APPEND_STRING PROPERTY
-	LINK_FLAGS " -Wl,-reexport_library,${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCoreGraphics.dylib -Wl,-rpath,/usr/lib/swift ")
+	LINK_FLAGS " -Wl,-rpath,/usr/lib/swift ")
 
 # The x86_64 import supplement is required, with compiler-generated Swift ABI.
 include("${CMAKE_CURRENT_SOURCE_DIR}/SwiftToolchain.cmake")
@@ -204,6 +201,12 @@ if(BUILD_TARGET_64BIT AND APPLE_ARCH_64BIT STREQUAL "x86_64")
         "-Wl,-dylib_file,/usr/lib/swift/libswiftCoreGraphicsImports.dylib:${CMAKE_CURRENT_BINARY_DIR}/libswiftCoreGraphicsImports.dylib")
     install(TARGETS swiftCoreGraphicsImports DESTINATION libexec/darling/usr/lib/swift)
 endif()
+
+# dyld returns the first matching reexport. Keep the supplement ahead of the
+# legacy overlay so its CGRect operators and witnesses are selected together.
+# Older overlay entries remain available through the parent framework.
+set_property(TARGET CoreGraphics APPEND_STRING PROPERTY LINK_FLAGS
+    " -Wl,-reexport_library,${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCoreGraphics.dylib")
 
 # NSBundle finds the backends through the framework's Resources link.
 InstallSymlink("Versions/Current/Resources" "${CMAKE_INSTALL_PREFIX}/libexec/darling/System/Library/Frameworks/CoreGraphics.framework/Resources")
