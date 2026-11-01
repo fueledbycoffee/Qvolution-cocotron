@@ -259,6 +259,9 @@ finish:
 
 int main(int argc, char **argv) { @autoreleasepool {
     setbuf(stdout, NULL);
+    // Desktop menu export can asynchronously remove the local menu strip.
+    // Keep identical window geometry for shm/EGL backing-pixel comparisons.
+    setenv("DARLING_NO_GLOBAL_MENU", "1", 1);
     [NSApplication sharedApplication];
     Driver *d = [Driver new];
     d->mode = [[NSString alloc] initWithUTF8String: argc > 1 ? argv[1] : "verify"];
