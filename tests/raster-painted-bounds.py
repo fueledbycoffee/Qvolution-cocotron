@@ -3,6 +3,7 @@
 Reuses the existing raster fixture extraction; no guest or Objective-C claim.
 """
 import argparse
+import re
 from pathlib import Path
 import os
 import subprocess
@@ -20,9 +21,21 @@ extract = extract.replace("source=(root/'Onyx2D/O2Context_builtin.m').read_text(
 exec(compile(extract, str(fixture), 'exec'), namespace)
 source = namespace['src'].split('int main(void)', 1)[0]
 reference = args.reference.read_text()
-a = reference.index('void O2DContextFillEdgesOnSurface(')
+# The reference sweep with its own edge-list helpers, renamed: production
+# helpers may store per-edge state the old sweep does not expect.
+a = reference.index('ONYX2D_STATIC_INLINE void sortEdgesByMinY')
 b = reference.index('\nvoid O2DContextClipAndFillEdges(', a)
-old = reference[a:b].replace('O2DContextFillEdgesOnSurface(', 'referenceFillEdgesOnSurface(', 1)
+old = reference[a:b]
+for name in ['sortEdgesByMinY', 'initEdgeForAET', 'incrementEdgeForAET', 'removeEdgeFromAET',
+             'CoverageNode', 'writeCoverageNode']:
+    old = re.sub(r'\b%s\b' % name, 'reference_' + name, old)
+old = re.sub(r'\bO2DContextFillEdgesOnSurface\b', 'referenceFillEdgesOnSurface', old)
+# Span order and extent, not only final pixels: incrementally evaluated paints
+# (gradients, images) see span starts.
+source = source.replace('static void writeCoverage(O2Surface *s,O2Surface *mask,O2Paint *p,int x,int y,int cov,int n,void *blend){',
+    'static unsigned long long spanHash;static void writeCoverage(O2Surface *s,O2Surface *mask,O2Paint *p,int x,int y,int cov,int n,void *blend){'
+    '{int v[4]={x,y,cov,n};for(int i=0;i<4;i++){spanHash^=(unsigned)v[i];spanHash*=1099511628211ULL;}}', 1)
+assert 'spanHash^=' in source
 source = source.replace('sampleIndex++;', 'sampleIndex++; sampleVisits++;')
 old = old.replace('sampleIndex++;', 'sampleIndex++; sampleVisits++;')
 source = source.replace('void O2DContextFillEdgesOnSurface(', 'static unsigned long long sampleVisits;\nvoid O2DContextFillEdgesOnSurface(', 1)
@@ -46,7 +59,8 @@ int main(void){setbuf(stdout,NULL);
    // Closed self-intersections, offscreen geometry, degenerate and thin marks.
    if(trial%3==0){double x=randomCoord(),y=randomCoord();p[0]=(O2Point){x,y};p[1]=(O2Point){x+1,y};p[2]=(O2Point){x+1,y+8};p[3]=(O2Point){x,y+8};n=4;}
    if(trial%19==0){for(int j=0;j<n;j++)p[j].x=10;}
-   polygon(&a,p,n);polygon(&b,p,n);int rule=trial&1?1:-1;render(&a,&sa,0,rule);render(&b,&sb,1,rule);
+   polygon(&a,p,n);polygon(&b,p,n);int rule=trial&1?1:-1;spanHash=0;render(&a,&sa,0,rule);unsigned long long spans=spanHash;spanHash=0;render(&b,&sb,1,rule);
+   assert(spans==spanHash);
    assert(!memcmp(sa.pixels,sb.pixels,64*48*sizeof(O2argb32f)));
    if(a._clipSamples)assert(!memcmp(a._clipSamples,b._clipSamples,64*48*8*sizeof(uint32_t)));
    for(int i=0;i<64*256+1;i++)assert(a._winding[i]==0&&b._winding[i]==0);
