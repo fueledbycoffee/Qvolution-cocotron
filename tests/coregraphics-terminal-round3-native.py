@@ -68,6 +68,7 @@ preamble = r'''
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 static unsigned checks;
 typedef void NSZone;
+typedef double O2Float;
 typedef struct { double a,b,c,d,tx,ty; } O2AffineTransform;
 static const O2AffineTransform O2AffineTransformIdentity = {1,0,0,1,0,0};
 typedef struct { double width,height; } O2Size;
@@ -118,7 +119,7 @@ enum { kO2BlendModeNormal, kO2InterpolationDefault };
  uint32_t _fontSmoothingStyle;
  double _pointSize,_lineWidth,_miterLimit,_alpha; int _blendMode,_interpolationQuality,_antialiasingQuality;
  O2Size _patternPhase;
- double *_dashLengths; unsigned _dashLengthsCount;
+ double *_dashLengths; int _dashLengthsCount;
 }
 - initWithDeviceTransform:(O2AffineTransform)t;
 - (void) setShouldAntialias:(BOOL)b;
@@ -241,6 +242,6 @@ source.write_text(preamble+methods+functions+main)
 include=subprocess.check_output(['gcc','-print-file-name=include'],text=True).strip()
 binary=args.output/'round3'
 subprocess.run(['clang','-O1','-g','-Wall','-Wextra','-Wno-unused-parameter',
- '-Wno-unused-function','-fobjc-runtime=gcc','-fsanitize=address,undefined',
+ '-Wno-unused-function','-Wno-missing-method-return-type','-Werror','-fobjc-runtime=gcc','-fsanitize=address,undefined',
  '-fno-omit-frame-pointer','-I'+include,str(source),'-lobjc','-o',str(binary)],check=True)
 subprocess.run([str(binary)],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
