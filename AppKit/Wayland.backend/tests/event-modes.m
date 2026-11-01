@@ -41,9 +41,16 @@ int main(void) {
             [display nextEventMatchingMask: NSAnyEventMask untilDate: deadline inMode: mode dequeue: YES];
         } while (!mapped && [deadline timeIntervalSinceNow] > 0);
         double elapsed = CFAbsoluteTimeGetCurrent() - start;
-        // Inspect only our source-defined platform object; scale-only exposure
-        // must not be mistaken for delivery of xdg_surface.configure.
-        BOOL configured = [[[window platformWindow] valueForKey: @"configured"] boolValue];
+        // Unrelated sources can return nextEvent before configure arrives.
+        // Continue the CF wait without calling nextEvent again: its pre-wait
+        // dispatch would mask an unregistered private-mode source.
+        BOOL configured = NO;
+        while (mapped) {
+            configured = [[[window platformWindow] valueForKey: @"configured"] boolValue];
+            if (configured || [deadline timeIntervalSinceNow] <= 0) break;
+            CFRunLoopRunInMode((CFStringRef)mode, [deadline timeIntervalSinceNow], true);
+        }
+        elapsed = CFAbsoluteTimeGetCurrent() - start;
         printf("mode=%s mapped=%d configured=%d exposed=%u elapsed=%.3f\n",
                [mode UTF8String], mapped, configured, exposures, elapsed);
         CFRunLoopTimerInvalidate(timer); CFRelease(timer);
