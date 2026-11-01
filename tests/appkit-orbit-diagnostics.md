@@ -19,6 +19,11 @@ query's `error` is the D-Bus error name, including access-denied, unknown-name
 and timeout errors. A stale reply is logged before being rejected. Owner changes
 and layout requests identify both generations.
 
+A GetLayout qualifies when it is a root read delivered by the bus
+(`bus-sender=1`) while the authenticated gates hold. `reader-is-registrar` is
+informational: Orbit reads from a sibling process whose unique name differs
+from the `registrar` owner.
+
 `layout-reply queued=1` is the existing successful `dbus_connection_send`
 criterion. `transport-progress pending-write=0` means the local connection's
 queue drained. Neither proves peer receipt or GNOME pixel presentation, and

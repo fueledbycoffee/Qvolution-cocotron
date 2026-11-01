@@ -281,6 +281,15 @@ static void readLayout(X11GlobalMenu *exporter,const char *sender) {
     }
     dbus_message_unref(message);
 }
+// A separate peer, like Orbit's reader process, whose unique name is not the registrar's.
+static DBusConnection *reader;
+static void readLayoutFrom(X11GlobalMenu *exporter,DBusConnection *connection,int32_t root) {
+    DBusMessage *message=dbus_message_new_method_call(dbus_bus_get_unique_name(exporter->_connection),"/MenuBar","com.canonical.dbusmenu","GetLayout");
+    int32_t depth=-1; appendBasic(message,DBUS_TYPE_INT32,&root); appendBasic(message,DBUS_TYPE_INT32,&depth);
+    DBusMessageIter iter,array; dbus_message_iter_init_append(message,&iter); dbus_message_iter_open_container(&iter,DBUS_TYPE_ARRAY,"s",&array); dbus_message_iter_close_container(&iter,&array);
+    dbus_connection_send(connection,message,NULL); dbus_connection_flush(connection); pump(exporter);
+    dbus_message_unref(message);
+}
 static int resizeMutations;
 static void mutateWindows(NSWindow *window) { resizeObserver=NULL; NSApp->allWindows->count=0; resizeMutations++; }
 static NSWindow *layoutFixture(CGFloat title) {
@@ -330,7 +339,18 @@ int main(void) {
     CHECK(!exporter->_orbitShellOwner,"error replies never become owner names"); dbus_message_unref(errorReply);
     dbus_bus_request_name(receiver,"org.gnome.Shell",DBUS_NAME_FLAG_DO_NOT_QUEUE,&error); pump(exporter);
     CHECK(!menu->hidden,"active integration waits for actual Orbit menu read");
-    readLayout(exporter,":99.99"); CHECK(!menu->hidden,"unrelated layout reader cannot hide the menu");
+    reader=dbus_bus_get_private(DBUS_BUS_SESSION,&error);
+    CHECK(reader && strcmp(dbus_bus_get_unique_name(reader),sender)!=0,"fake Orbit reader has a unique name different from the registrar owner");
+    readLayoutFrom(exporter,reader,1); CHECK(!menu->hidden && !exporter->_orbitMenuRead,"submenu read from the reader does not count as top-level presentation");
+    DBusMessage *unstamped=dbus_message_new_method_call(dbus_bus_get_unique_name(exporter->_connection),"/MenuBar","com.canonical.dbusmenu","GetLayout");
+    int32_t unstampedRoot=0,unstampedDepth=-1; appendBasic(unstamped,DBUS_TYPE_INT32,&unstampedRoot); appendBasic(unstamped,DBUS_TYPE_INT32,&unstampedDepth);
+    DBusMessageIter unstampedIter,unstampedArray; dbus_message_iter_init_append(unstamped,&unstampedIter); dbus_message_iter_open_container(&unstampedIter,DBUS_TYPE_ARRAY,"s",&unstampedArray); dbus_message_iter_close_container(&unstampedIter,&unstampedArray);
+    dbus_message_set_serial(unstamped,1); [exporter handleDBusMessage:unstamped onConnection:exporter->_connection]; dbus_message_unref(unstamped);
+    CHECK(!menu->hidden && !exporter->_orbitMenuRead,"request without a bus-stamped sender does not count");
+    readLayoutFrom(exporter,reader,0); CHECK(menu->hidden && exporter->_orbitMenuRead,"root read from a reader whose name differs from the registrar hides the local menu");
+    stateSignal(exporter,"global-menu@unmade.space",2,sender); CHECK(!menu->hidden,"distinct-reader engagement still follows the authenticated extension state");
+    stateSignal(exporter,"global-menu@unmade.space",1,sender); CHECK(!menu->hidden,"reactivation waits for a fresh distinct-reader read");
+    readLayoutFrom(exporter,reader,0); CHECK(menu->hidden,"fresh distinct-reader read engages again");
     failLayoutSend=YES; readLayout(exporter,sender); CHECK(!menu->hidden,"failed initial layout send retains local fallback"); failLayoutSend=NO;
     resizeObserver=mutateWindows;
     readLayout(exporter,sender); CHECK(menu->hidden,"active GNOME Orbit reader hides duplicate local menu");
@@ -441,8 +461,9 @@ int main(void) {
     for(int n=0;n<20 && !raceExporter->_orbitStateWatchReady;n++) pump(raceExporter);
     CHECK(raceExporter->_orbitStateWatchRetries==1 && raceExporter->_orbitStateWatchReady,"state watch retries independently of an exhausted owner watch");
     dbus_connection_close(raceExporter->_connection);
+    dbus_connection_close(reader);
     dbus_connection_close(receiver);
     if(failures) return 1;
-    puts("PASS: production layout, GNOME/Orbit activation, authenticated readers, state/owner fallback and repeated transitions");
+    puts("PASS: production layout, GNOME/Orbit activation, bus-delivered readers, state/owner fallback and repeated transitions");
     return 0;
 }

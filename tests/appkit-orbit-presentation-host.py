@@ -86,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix='orbit-presentation-host-') as directory
         log = diagnostic.read_text()
         for token in ['event=query-request', 'event=query-authentication',
                       'event=query-rejected', 'reason=stale-generation',
-                      'event=layout-request', 'sender-valid=0', 'qualified=1',
+                      'event=layout-request', 'reader-is-registrar=0', 'reader-is-registrar=1', 'bus-sender=0', 'qualified=1',
                       'event=layout-reply', 'queued=0', 'queued=1',
                       'delivery=queue-only', 'event=decision hide=1',
                       'reason=progress-failed', 'reason=disconnect']:

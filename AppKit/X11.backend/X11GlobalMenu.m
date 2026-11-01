@@ -783,17 +783,23 @@ static DBusHandlerResult dbusFilterCallback(DBusConnection *connection,
             }
         }
 
-        BOOL orbitReadRequest = _waylandApplicationMenu && _orbitOwner && parentId == 0 && recursionDepth != 0 &&
-            dbus_message_is_method_call(message, "com.canonical.dbusmenu", "GetLayout") &&
-            path && strcmp(path, "/MenuBar") == 0 && dbus_message_has_signature(message, "iias") &&
-            dbus_message_has_sender(message, [_orbitOwner UTF8String]);
-        orbitDiagnostic("layout-request", "serial=%u sender=%s expected=%s orbit-generation=%u shell-generation=%u wayland=%d owner-present=%d root=%d depth=%d method=%d path=%d signature=%s signature-valid=%d sender-valid=%d qualified=%d",
-            dbus_message_get_serial(message), orbitText(dbus_message_get_sender(message)), orbitText([_orbitOwner UTF8String]),
+        // Orbit owns its registrar name in one process and reads layouts from a sibling
+        // process with its own unique name and no well-known name, so the reader cannot
+        // be matched to the registrar. Matching gave no protection either: dbusmenu
+        // answers every peer and every session-bus peer is this user. A root read
+        // delivered by the bus qualifies while the authenticated owner, Shell and
+        // extension gates hold; those gates, not the reader's name, decide presentation.
+        const char *reader = dbus_message_get_sender(message);
+        BOOL orbitReadRequest = _waylandApplicationMenu && _orbitOwner && reader && parentId == 0 &&
+            recursionDepth != 0 && dbus_message_is_method_call(message, "com.canonical.dbusmenu", "GetLayout") &&
+            path && strcmp(path, "/MenuBar") == 0 && dbus_message_has_signature(message, "iias");
+        orbitDiagnostic("layout-request", "serial=%u sender=%s registrar=%s orbit-generation=%u shell-generation=%u wayland=%d owner-present=%d root=%d depth=%d method=%d path=%d signature=%s signature-valid=%d bus-sender=%d reader-is-registrar=%d qualified=%d",
+            dbus_message_get_serial(message), orbitText(reader), orbitText([_orbitOwner UTF8String]),
             _orbitOwnerGeneration, _orbitShellGeneration, _waylandApplicationMenu, _orbitOwner != nil, parentId == 0,
             recursionDepth, dbus_message_is_method_call(message, "com.canonical.dbusmenu", "GetLayout"),
             path && strcmp(path, "/MenuBar") == 0, dbus_message_get_signature(message),
-            dbus_message_has_signature(message, "iias"), _orbitOwner && dbus_message_has_sender(message, [_orbitOwner UTF8String]),
-            orbitReadRequest);
+            dbus_message_has_signature(message, "iias"), reader != NULL,
+            _orbitOwner && reader && strcmp(reader, [_orbitOwner UTF8String]) == 0, orbitReadRequest);
         DBusMessage *reply = dbus_message_new_method_return(message);
         if (!reply) {
             orbitDiagnostic("layout-reply", "request-serial=%u queued=0 reason=allocation-failed qualified-request=%d",
