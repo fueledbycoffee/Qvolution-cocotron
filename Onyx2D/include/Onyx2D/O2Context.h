@@ -143,6 +143,7 @@ typedef void (*O2ContextShowGlyphsFunction)(O2ContextRef, SEL, const O2Glyph *,
 
     O2ContextShowTextFunction _showTextFunction;
     O2ContextShowGlyphsFunction _showGlyphsFunction;
+    NSMutableArray *_transparencyLayerStates;
 }
 
 + (BOOL) canInitBitmap;

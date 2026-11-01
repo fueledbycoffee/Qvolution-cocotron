@@ -183,14 +183,19 @@ static inline O2AffineTransform createImageToSurfaceTransform(O2ImageRef image,
 - (void) beginTransparencyLayerWithInfo: (NSDictionary *) unused {
     O2LayerRef layer = O2LayerCreateWithContext(self, [self size], unused);
 
-    if (layer == nil)
+    if (layer == nil || O2LayerGetContext(layer) == nil) {
+        O2LayerRelease(layer);
+        [super beginTransparencyLayerWithInfo: unused];
         return;
+    }
     NSArray *phases = [O2GStateClipState(O2ContextCurrentGState(self)) clipPhases];
     [_layerClipPhases addObject: phases != nil ?
             [[phases copy] autorelease] : [NSArray array]];
     [self->_layerStack addObject: layer];
     O2LayerRelease(layer);
-    O2ContextSaveGState(self);
+    [super beginTransparencyLayerWithInfo: unused];
+    [_transparencyLayerStates replaceObjectAtIndex: [_transparencyLayerStates count] - 1
+                                      withObject: [NSNumber numberWithBool: YES]];
 
     /**
      * From Cocoa doc :
@@ -207,6 +212,11 @@ static inline O2AffineTransform createImageToSurfaceTransform(O2ImageRef image,
 }
 
 - (void) endTransparencyLayer {
+    // A failed nested begin must not consume the parent's successful layer.
+    if (![[self->_transparencyLayerStates lastObject] boolValue]) {
+        [super endTransparencyLayer];
+        return;
+    }
     if ([_stateStack count] > 1) {
         O2GState *restored = [_stateStack objectAtIndex:[_stateStack count] - 2];
         if (restored->_shadowKernel)
@@ -218,7 +228,7 @@ static inline O2AffineTransform createImageToSurfaceTransform(O2ImageRef image,
         return;
     [self->_layerStack removeLastObject];
     [_layerClipPhases removeLastObject];
-    O2ContextRestoreGState(self);
+    [super endTransparencyLayer];
 
     O2Size size = [self size];
 
