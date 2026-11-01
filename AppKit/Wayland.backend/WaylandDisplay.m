@@ -235,8 +235,9 @@ static void sourceCallback(void *info) {
 }
 
 static void wakeMain(void *info) {
-    CFRunLoopSourceSignal((CFRunLoopSourceRef)info);
-    CFRunLoopWakeUp(CFRunLoopGetMain());
+    WaylandEventTarget *target = info;
+    CFRunLoopSourceSignal(target->source);
+    CFRunLoopWakeUp(target->loop);
 }
 
 static void stallObserver(CFRunLoopObserverRef observer,
@@ -306,6 +307,10 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         return nil;
     }
 
+    // NSDisplay is thread-local (NSThreadSharedInstance). Its callbacks must
+    // run on the loop that owns its event queue, not an unrelated main loop.
+    _eventTarget.loop = (CFRunLoopRef)CFRetain(CFRunLoopGetCurrent());
+    _eventModes = [NSMutableSet new];
     const char *boundaries = getenv("DARLING_WAYLAND_BOUNDARIES");
     if (boundaries && strcmp(boundaries, "1") == 0) {
         const char *path = getenv("DARLING_WAYLAND_BOUNDARY_LOG");
@@ -323,7 +328,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         _stallObserver = CFRunLoopObserverCreate(NULL, kCFRunLoopAllActivities,
                 true, 0, stallObserver, &observerContext);
         if (!_stallObserver) { [self release]; return nil; }
-        CFRunLoopAddObserver(CFRunLoopGetMain(), _stallObserver, kCFRunLoopCommonModes);
+        CFRunLoopAddObserver(_eventTarget.loop, _stallObserver, kCFRunLoopCommonModes);
         dprintf(_eventPump.boundaryFD, "QV_WAYLAND enabled pid=%d threshold_ms=100\n", getpid());
     }
 
@@ -337,15 +342,15 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
     CFRunLoopSourceContext context = {.version = 0, .info = self,
                                        .perform = sourceCallback};
-    _wlSource = CFRunLoopSourceCreate(NULL, 0, &context);
+    _eventTarget.source = CFRunLoopSourceCreate(NULL, 0, &context);
     _eventPump.wake = wakeMain;
-    _eventPump.info = _wlSource;
-    if (_wlSource == NULL) {
+    _eventPump.info = &_eventTarget;
+    if (_eventTarget.source == NULL) {
         NSLog(@"Wayland backend: cannot create the compositor run-loop source");
         [self release];
         return nil;
     }
-    CFRunLoopAddSource(CFRunLoopGetMain(), _wlSource, kCFRunLoopCommonModes);
+    CFRunLoopAddSource(_eventTarget.loop, _eventTarget.source, kCFRunLoopCommonModes);
     [self logEventCheck: "source_registered" requestedMode: kCFRunLoopCommonModes];
 
     union wl_argument args[1] = {{.o = NULL}};
@@ -453,11 +458,13 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     [self cancelPendingModifier];
     [_heldKeyIdentities release];
 
-    if (_wlSource != NULL) {
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), _wlSource,
-                              kCFRunLoopCommonModes);
-        CFRelease(_wlSource);
+    if (_eventTarget.source != NULL) {
+        // Invalidate removes the source from every explicitly serviced mode.
+        CFRunLoopSourceInvalidate(_eventTarget.source);
+        CFRelease(_eventTarget.source);
     }
+    [_eventModes release];
+    if (_eventTarget.loop) CFRelease(_eventTarget.loop);
     if (_xkbState != NULL)
         WL.xkb_state_unref(_xkbState);
     if (_xkbKeymap != NULL)
@@ -511,7 +518,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     dprintf(_eventPump.boundaryFD,
             "QV_WAYLAND check pid=%d display=%p queue=default reason=%s check=%lu mode=%s requested=%s current_loop=%p main_loop=%p source_loop=%p fd=%d\n",
             getpid(), _wlDisplay, reason, ++_mainChecks, mode, wanted,
-            current, CFRunLoopGetMain(), CFRunLoopGetMain(), WL.wl_display_get_fd(_wlDisplay));
+            current, CFRunLoopGetMain(), _eventTarget.loop, WL.wl_display_get_fd(_wlDisplay));
     if (currentMode) CFRelease(currentMode);
 }
 
@@ -529,7 +536,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                 getpid(), elapsed, mode, (unsigned long)_lastBoundaryActivity);
     }
     if (_lastBoundaryMode) CFRelease(_lastBoundaryMode);
-    _lastBoundaryMode = CFRunLoopCopyCurrentMode(CFRunLoopGetMain());
+    _lastBoundaryMode = CFRunLoopCopyCurrentMode(_eventTarget.loop);
     _lastBoundaryTime = now;
     _lastBoundaryActivity = activity;
 }
@@ -588,6 +595,16 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                              inMode: (NSRunLoopMode) mode
                             dequeue: (BOOL) dequeue
 {
+    // A caller can ask for a mode outside the common set. Without this, a
+    // worker read signals a source that runMode: never handles, leaving the
+    // default queue pending while the caller waits for its first event.
+    if (mode && ![_eventModes containsObject: mode]) {
+        CFRunLoopAddSource(_eventTarget.loop, _eventTarget.source, (CFStringRef)mode);
+        if (_stallObserver)
+            CFRunLoopAddObserver(_eventTarget.loop, _stallObserver, (CFStringRef)mode);
+        [_eventModes addObject: mode];
+        [self logEventCheck: "mode_registered" requestedMode: (CFStringRef) mode];
+    }
     [self logEventCheck: "next_event" requestedMode: (CFStringRef) mode];
     [self processPendingEvents];
 
@@ -1849,7 +1866,7 @@ static NSUInteger modifierDeviceMask(int code) {
     _repeatTimer = CFRunLoopTimerCreate(
             NULL, CFAbsoluteTimeGetCurrent() + _repeatDelay / 1000.0,
             1.0 / _repeatRate, 0, 0, repeatTimerCallback, &context);
-    CFRunLoopAddTimer(CFRunLoopGetMain(), _repeatTimer, kCFRunLoopCommonModes);
+    CFRunLoopAddTimer(_eventTarget.loop, _repeatTimer, kCFRunLoopCommonModes);
 }
 
 - (void) stopKeyRepeat {
@@ -1866,7 +1883,7 @@ static NSUInteger modifierDeviceMask(int code) {
         return;
     [self postKeyEventForKeycode: _repeatKeycode pressed: YES repeat: YES];
     // A timer doesn't end -[NSRunLoop runMode:beforeDate:], so wake the event loop.
-    CFRunLoopStop(CFRunLoopGetMain());
+    CFRunLoopStop(_eventTarget.loop);
 }
 
 - (int) keyboardLayoutId {

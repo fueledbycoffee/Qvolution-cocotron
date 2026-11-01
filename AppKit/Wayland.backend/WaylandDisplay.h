@@ -51,6 +51,11 @@ struct xkb_state;
 - (void) preferredScaleChanged: (uint32_t) scale120;
 @end
 
+typedef struct {
+    CFRunLoopRef loop;
+    CFRunLoopSourceRef source;
+} WaylandEventTarget;
+
 // Identifies the object a dispatched event belongs to.
 typedef enum {
     WaylandObjectRegistry = 1,
@@ -125,7 +130,8 @@ struct wl_proxy *WaylandCreateObject(struct wl_proxy *proxy, uint32_t opcode,
     CGFloat _pinchScale;
     struct wl_proxy *_keyboard;
     WaylandEventPump _eventPump;
-    CFRunLoopSourceRef _wlSource;
+    WaylandEventTarget _eventTarget;
+    NSMutableSet *_eventModes;
     CFRunLoopObserverRef _stallObserver;
     double _lastBoundaryTime;
     CFRunLoopActivity _lastBoundaryActivity;
