@@ -857,10 +857,6 @@ createImageToSurfaceTransform(O2ImageRef image, O2Rect rect,
                   surfaceToImage: O2AffineTransformInvert(imageToSurface)
                    surfaceToMask: O2AffineTransformInvert(maskToSurface)];
 
-    if ([imagePaint isKindOfClass: [O2Paint_image class]]) {
-        [(O2Paint_image *)imagePaint setAlpha: gState->_alpha];
-    }
-
     O2ContextSetupPaintAndBlendMode(self, imagePaint, gState->_blendMode);
 
     O2PaintRelease(imagePaint);
@@ -1761,7 +1757,15 @@ void O2ContextSetupPaintAndBlendMode(O2Context_builtin *self, O2PaintRef paint,
     self->_blend_argb8u_PRE = NULL;
     self->_writeCoverage_argb8u_PRE = NULL;
 
-    O2ContextSetPaint(self, paint);
+    O2Float alpha = O2ContextCurrentGState(self)->_alpha;
+    if (alpha == 1)
+        O2ContextSetPaint(self, paint);
+    else {
+        O2PaintRef source = O2PaintCreateWithAlpha(paint, alpha);
+        O2ContextSetPaint(self, source);
+        O2PaintRelease(source);
+    }
+    paint = self->_paint;
 
     if (O2PaintIsOpaque(self->_paint) && (blendMode == kO2BlendModeNormal))
         blendMode = kO2BlendModeCopy;

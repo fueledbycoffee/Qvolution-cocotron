@@ -53,6 +53,7 @@ O2PaintRef O2PaintInitWithTransform(O2PaintRef self,
 
 O2PaintRef O2PaintRetain(O2PaintRef self);
 void O2PaintRelease(O2PaintRef self);
+O2PaintRef O2PaintCreateWithAlpha(O2PaintRef paint, O2Float alpha);
 
 @end
 

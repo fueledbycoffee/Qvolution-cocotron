@@ -300,7 +300,7 @@ static BOOL glyphBitmapPosition(NSInteger anchorX, NSInteger anchorY,
                     &anchorX, &anchorY)))
                 renderFreeTypeBitmap(self, surface, &cached->bitmap,
                         position ? anchorX : point.x + cached->left,
-                        position ? anchorY : point.y - cached->top, paint);
+                        position ? anchorY : point.y - cached->top, self->_paint);
 
             if (advances != NULL) {
                 // Advances are in text space, so only the linear part of Trm
