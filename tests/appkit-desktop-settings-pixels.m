@@ -35,7 +35,12 @@ static void raster(int scale) {
     NSGraphicsStyle *style=[NSGraphicsStyle new];
     [style drawMenuSelectionInRect:NSMakeRect(28,0,24,24) enabled:YES];
     [style drawPushButtonNormalInRect:NSMakeRect(56,0,24,24) defaulted:YES];
-    sample(s,12*scale,12*scale,240,200,219);sample(s,40*scale,12*scale,213,97,153);sample(s,68*scale,12*scale,213,97,153);
+    sample(s,12*scale,12*scale,240,200,219);sample(s,40*scale,12*scale,213,97,153);
+    // P4 replaces P1's flat default fill with an 8%-white-to-accent
+    // gradient. Its midpoint is a 4% white mix, still within +/-2/255.
+    sample(s,68*scale,12*scale,215,103,157);
+    [style drawDefaultButtonFaceInRect:NSMakeRect(56,0,24,24) pressed:YES];
+    sample(s,68*scale,12*scale,187,85,135);
     [NSGraphicsContext restoreGraphicsState];[style release];[context release];[s release];
 }
 int main(int argc,char **argv) { @autoreleasepool {

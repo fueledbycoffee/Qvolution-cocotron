@@ -29,7 +29,7 @@ static NSData *raster(NSView *view,NSString *path){
 - initWithImage:(NSImage *)image selected:(BOOL)selected { if((self=[super initWithFrame:NSMakeRect(0,0,16,16)])){_image=[image retain];_selected=selected;}return self; }
 - (BOOL)isFlipped{return YES;}
 - (void)dealloc{[_image release];[super dealloc];}
-- (void)drawRect:(NSRect)rect{[(_selected?[NSColor blackColor]:[NSColor whiteColor])setFill];NSRectFill([self bounds]);[_image drawInRect:[self bounds]fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1];}
+- (void)drawRect:(NSRect)rect{[[NSColor whiteColor]setFill];NSRectFill([self bounds]);[_image drawInRect:[self bounds]fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1];}
 @end
 static NSWindow *window;static NSScrollView *scroll;static NSTextView *text;static NSView *bar;static NSString *output;
 static NSString *captureName(NSString *name){return [output stringByAppendingPathComponent:[name stringByAppendingPathExtension:@"png"]];}
@@ -59,7 +59,7 @@ static int icons(void){
   if([button image])for(unsigned selected=0;selected<2;selected++){
    NSImage *image=selected?[button alternateImage]:[button image];expect(image!=nil,"normal and selected glyph images exist");if(!image)continue;
    GlyphCanvas *canvas=[[[GlyphCanvas alloc]initWithImage:image selected:selected]autorelease];NSData *bytes=raster(canvas,captureName([name stringByAppendingString:selected?@"-selected-art":@"-normal-art"]));INPUT([bytes length]==16*16*4,"original16pointglyph raster extent");
-   const unsigned char *pixels=[bytes bytes];NSUInteger ink=0;for(NSUInteger i=0;i<16*16;i++){unsigned sum=pixels[i*4]+pixels[i*4+1]+pixels[i*4+2];if(selected?sum>600:sum<300)ink++;}
+   const unsigned char *pixels=[bytes bytes];NSUInteger ink=0;for(NSUInteger i=0;i<16*16;i++){unsigned sum=pixels[i*4]+pixels[i*4+1]+pixels[i*4+2];if(sum<300)ink++;}
    expect(ink>=4&&ink<220,"glyph has visible contrasting ink independent of bezel");if(!selected)[distinct addObject:bytes];
   }
  }

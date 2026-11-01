@@ -19,13 +19,20 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
 #import <AppKit/NSEvent.h>
 #import <AppKit/NSGraphics.h>
+#import <AppKit/NSGraphicsContext.h>
 #import <AppKit/NSGraphicsStyle.h>
 #import <AppKit/NSImage.h>
 #import <AppKit/NSMenu.h>
 #import <AppKit/NSPopUpButtonCellPrivate.h>
 #import <AppKit/NSPopUpWindow.h>
 #import <AppKit/NSRaise.h>
+#import <AppKit/NSWindow.h>
 #import <Foundation/NSKeyedArchiver.h>
+
+@interface NSButtonCell (NSControlFacesPrivate)
+- (CGFloat) _bezelRadius;
+- (NSRect) getControlSizeAdjustment: (BOOL) flipped;
+@end
 
 @implementation NSPopUpButtonCell
 
@@ -361,49 +368,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
         return [NSImage imageNamed: @"NSPopUpButtonCellPopUp"];
 }
 
+// The indicator is a rounded square inset 2 from the bezel's right edge.
 - (NSRect) _arrowRectForRect: (NSRect) frame {
-    NSRect result;
-    // For no arrow or no arrow image, return a zero-sized
-    // rect positioned on the right edge of the frame.
-    result.origin.x = NSMaxX(frame);
-    result.origin.y = NSMaxY(frame);
-    result.size.width = 0;
-    result.size.height = frame.size.height;
+    if (_arrowPosition == NSPopUpNoArrow)
+        return NSMakeRect(NSMaxX(frame), NSMaxY(frame), 0, frame.size.height);
 
-    if (_arrowPosition != NSPopUpNoArrow) {
-        NSImage *arrowImage =
-                (_arrowPosition != NSPopUpNoArrow) ? [self arrowImage] : NULL;
-
-        if (arrowImage != nil) {
-
-            // Scale down the arrows so they look proportional to the control
-            // size
-            CGFloat sizeFactor = 0;
-
-            switch ([self controlSize]) {
-            case NSRegularControlSize:
-            case NSControlSizeLarge:
-                sizeFactor = 0;
-                break;
-            case NSSmallControlSize:
-                sizeFactor = 1;
-                break;
-            case NSMiniControlSize:
-                sizeFactor = 2;
-                break;
-            }
-            NSRect otherFrame = frame;
-            NSSize arrowSize = [arrowImage size];
-            otherFrame.origin.x += otherFrame.size.width -
-                                   (arrowSize.width + (4 - sizeFactor));
-            otherFrame.origin.y +=
-                    (otherFrame.size.height - arrowSize.height) / 2;
-            otherFrame.size = arrowSize;
-
-            result = NSInsetRect(otherFrame, sizeFactor, sizeFactor);
-        }
-    }
-    return result;
+    CGFloat width = 16 * [self _bezelRadius] / NSControlBezelRadius;
+    return NSMakeRect(NSMaxX(frame) - 2 - width, NSMinY(frame) + 2, width,
+                      MAX(0, frame.size.height - 4));
 }
 
 - (NSRect) titleRectForBounds: (NSRect) rect {
@@ -420,20 +392,25 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 
     [super drawBezelWithFrame: frame inView: controlView];
 
-    // Now draw the arrow
-    if (_arrowPosition != NSPopUpNoArrow) {
-        NSImage *arrowImage =
-                (_arrowPosition != NSPopUpNoArrow) ? [self arrowImage] : NULL;
+    if (_arrowPosition == NSPopUpNoArrow)
+        return;
 
-        if (arrowImage == NULL)
-            return;
+    NSRect adjustment = [self getControlSizeAdjustment: [controlView isFlipped]];
+    NSRect body = frame;
+    body.size.width -= adjustment.size.width;
+    body.size.height -= adjustment.size.height + 1;
+    body.origin.x += adjustment.origin.x;
+    body.origin.y += adjustment.origin.y + ([controlView isFlipped] ? 0 : 1);
 
-        NSRect arrowFrame = [self _arrowRectForRect: frame];
-        [[controlView graphicsStyle] drawButtonImage: arrowImage
-                                              inRect: arrowFrame
-                                             enabled: YES
-                                               mixed: YES];
-    }
+    CGContextRef context = [[NSGraphicsContext currentContext] graphicsPort];
+    CGContextSaveGState(context);
+    if (![self isEnabled])
+        CGContextSetAlpha(context, 0.5);
+    [[controlView graphicsStyle]
+            drawPopUpIndicatorInRect: [self _arrowRectForRect: body]
+                           pullsDown: _pullsDown
+                              active: [[controlView window] isKeyWindow]];
+    CGContextRestoreGState(context);
 }
 
 - (NSSize) cellSize {
