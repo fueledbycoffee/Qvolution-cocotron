@@ -983,7 +983,8 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
             [NSGraphicsContext graphicsContextWithGraphicsPort: (CGContextRef) _context flipped: NO]];
         O2ContextResetClip(_context);
         O2ContextSetCTM(_context, O2AffineTransformIdentity);
-        CGFloat w = ceil(_frame.size.width), h = _frame.size.height;
+        // The renderer and the surface place the title strip at the ceiled height.
+        CGFloat w = ceil(_frame.size.width), h = ceil(_frame.size.height);
         NSDictionary *attributes = @{
             NSFontAttributeName: [NSFont titleBarFontOfSize: NSTitlebarFontSize],
             NSForegroundColorAttributeName: _activated ? [NSColor labelColor] : [NSColor tertiaryLabelColor],
