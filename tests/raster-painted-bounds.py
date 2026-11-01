@@ -45,7 +45,7 @@ source += r'''
 static unsigned rng=12345;
 static double randomCoord(void){rng=rng*1664525u+1013904223u;return (rng%9600)/100.-16;}
 static void polygon(O2Context_builtin *c,const O2Point *p,int n){for(int i=0;i<n;i++)O2DContextAddEdge(c,p[i],p[(i+1)%n]);}
-static void render(O2Context_builtin *c,O2Surface *s,int reference,int rule){if(reference)referenceFillEdgesOnSurface(c,s,c->_clipContext?c->_clipContext->_surface:NULL,NULL,rule);else O2DContextFillEdgesOnSurface(c,s,c->_clipContext?c->_clipContext->_surface:NULL,NULL,rule);O2RasterizerClear(c);}
+static void render(O2Context_builtin *c,O2Surface *s,int reference,int rule){if(reference)referenceFillEdgesOnSurface(c,s,c->_clipContext?c->_clipContext->_surface:NULL,NULL,rule);else{s->damaged=0;s->expectDamage=1;O2DContextFillEdgesOnSurface(c,s,c->_clipContext?c->_clipContext->_surface:NULL,NULL,rule);s->expectDamage=0;}O2RasterizerClear(c);}
 static double now(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec/1e9;}
 int main(void){setbuf(stdout,NULL);
  unsigned cases=0;

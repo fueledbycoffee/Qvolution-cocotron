@@ -44,6 +44,7 @@ typedef struct {O2Float x,y;} O2Point;
 static O2Point Vector2Subtract(O2Point a,O2Point b){return (O2Point){a.x-b.x,a.y-b.y};}
 '''+arithmetic+edge+r'''
 typedef struct {size_t width,height;O2argb32f *pixels;} O2Surface;
+static void O2SurfaceAddDamage(O2Surface *s,int64_t x,int64_t y,int64_t w,int64_t h){(void)s;(void)x;(void)y;(void)w;(void)h;}
 typedef struct {O2argb32f color;} O2Paint;
 typedef O2Surface O2Image;
 typedef struct O2Context_builtin {

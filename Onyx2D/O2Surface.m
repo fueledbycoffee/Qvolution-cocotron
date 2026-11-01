@@ -637,6 +637,7 @@ static BOOL initFunctionsForParameters(O2Surface *self, size_t bitsPerComponent,
 }
 
 - (void) dealloc {
+    free(_damage);
     _pixelBytes =
             NULL; // if we own it, it's in the provider, if not, no release
     pthread_mutex_destroy(&_lock);
@@ -693,6 +694,40 @@ void O2SurfaceUnlock(O2Surface *surface) {
         _provider = O2DataProviderCreateWithCFData((CFDataRef) data);
         _pixelBytes = [data mutableBytes];
     }
+    O2SurfaceAddDamage(self, 0, 0, _width, _height);
+}
+
+void O2SurfaceSetTracksDamage(O2Surface *self, BOOL tracks) {
+    if (!tracks) {
+        free(self->_damage);
+        self->_damage = NULL;
+    } else if (self->_damage == NULL) {
+        self->_damage = calloc(1, sizeof(*self->_damage));
+        if (self->_damage == NULL)
+            [NSException raise: NSMallocException
+                        format: @"O2Surface damage allocation failed"];
+        O2SurfaceAddDamage(self, 0, 0, self->_width, self->_height);
+    }
+}
+
+void O2SurfaceAddDamage(O2Surface *self, int64_t x, int64_t y, int64_t width,
+                        int64_t height)
+{
+    if (self->_damage == NULL)
+        return;
+    O2SurfaceDamageAdd(self->_damage, x, y, width, height,
+                       (int32_t) MIN(self->_width, INT32_MAX),
+                       (int32_t) MIN(self->_height, INT32_MAX));
+}
+
+BOOL O2SurfaceTakeDamage(O2Surface *self, O2SurfaceDamage *damage) {
+    if (self->_damage == NULL) {
+        damage->count = 0;
+        return NO;
+    }
+    *damage = *self->_damage;
+    self->_damage->count = 0;
+    return YES;
 }
 
 void *O2SurfaceGetPixelBytes(O2Surface *surface) {

@@ -30,6 +30,7 @@ typedef float O2Float;typedef long NSInteger;typedef bool BOOL;
 '''+arithmetic+r'''
 typedef void (*O2BlendSpan_argb32f)(O2argb32f *,O2argb32f *,int);
 typedef struct { unsigned char bytes[4][(320*16)+16]; int width,height; } O2Surface;
+static void O2SurfaceAddDamage(O2Surface *s,int64_t x,int64_t y,int64_t w,int64_t h){(void)s;(void)x;(void)y;(void)w;(void)h;}
 typedef struct { void *_paint_largb8u_PRE; O2argb32f color; int skipX; } O2Paint;
 typedef struct O2Context_builtin { NSInteger _vpx,_vpy,_vpwidth,_vpheight; O2BlendSpan_argb32f _blend_argb32f_PRE; struct O2Context_builtin *_clipContext; O2Surface *_surface; void *_blend_argb8u_PRE; } O2Context_builtin; typedef O2Context_builtin O2Context_builtin_FT;
 typedef struct { unsigned width,rows; int pitch; unsigned char *buffer; } FT_Bitmap;

@@ -18,6 +18,7 @@
 
 #import <CoreGraphics/CGWindowPrivate.h>
 #import <Onyx2D/O2Geometry.h>
+#import <Onyx2D/O2SurfaceDamage.h>
 #include <wayland-util.h>
 
 #import "WaylandDisplay.h"
@@ -35,6 +36,7 @@ struct WaylandBuffer {
     int32_t width, height;
     uint32_t format;
     BOOL busy; // attached and not yet released by the compositor
+    O2SurfaceDamage stale; // backing-store pixels changed since this buffer was filled
 };
 
 // A top-level window: an xdg_toplevel whose content is Onyx2D's CPU rendering,
@@ -106,6 +108,13 @@ struct WaylandBuffer {
     CAWindowOpenGLContext *_eglPresenter;
     uint64_t _eglSwaps, _eglChecks, _eglBytes, _eglFailures;
     int32_t _eglWidth, _eglHeight;
+    // What the compositor holds: the last committed shm buffer's size and format.
+    int32_t _committedWidth, _committedHeight;
+    uint32_t _committedFormat;
+    NSTitlebarFrame _maskedFrame; // frame the content corners were last cut for
+    BOOL _maskedFrameValid, _damageVerify;
+    uint64_t _damageRects, _damagePixels, _copiedPixels, _wholeDamagePresents;
+    uint64_t _verifiedPresents, _staleVerifiedPresents;
 }
 
 - (instancetype) initWithDelegate: (NSWindow *) delegate;

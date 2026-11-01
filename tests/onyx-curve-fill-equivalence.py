@@ -27,7 +27,7 @@ source = namespace['source'] + r'''
 static unsigned rng=12345;
 static double randomCoord(void){rng=rng*1664525u+1013904223u;return (rng%9600)/100.-16;}
 static unsigned randomBelow(unsigned n){rng=rng*1664525u+1013904223u;return rng%n;}
-static void render(O2Context_builtin *c,O2Surface *s,int reference,int rule){if(reference)referenceFillEdgesOnSurface(c,s,c->_clipContext?c->_clipContext->_surface:NULL,NULL,rule);else O2DContextFillEdgesOnSurface(c,s,c->_clipContext?c->_clipContext->_surface:NULL,NULL,rule);O2RasterizerClear(c);}
+static void render(O2Context_builtin *c,O2Surface *s,int reference,int rule){if(reference)referenceFillEdgesOnSurface(c,s,c->_clipContext?c->_clipContext->_surface:NULL,NULL,rule);else{s->damaged=0;s->expectDamage=1;O2DContextFillEdgesOnSurface(c,s,c->_clipContext?c->_clipContext->_surface:NULL,NULL,rule);s->expectDamage=0;}O2RasterizerClear(c);}
 static double now(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec/1e9;}
 static int allocateClipSamplesForTest(O2Context_builtin *c){c->_clipSamples=calloc(c->_surface->width*c->_surface->height,8*sizeof(uint32_t));return c->_clipSamples!=NULL;}
 static double rotCos=1,rotSin=0,offX=0,offY=0;

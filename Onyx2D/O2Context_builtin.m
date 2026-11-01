@@ -1487,7 +1487,7 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
     // Partial-row edges otherwise propagate winding to the viewport's right
     // edge, even for a one-pixel ruler tick. Closed geometry has no coverage
     // beyond its last edge. Keep the original pixel sample coordinates.
-    double minY = ylimit, maxY = firstY, maxX = self->_vpx;
+    double minY = ylimit, maxY = firstY, minX = xlimit, maxX = self->_vpx;
     BOOL finiteBounds = YES;
     for (int i = 0; i < edgeCount; i++) {
         Edge *edge = edges[i];
@@ -1498,6 +1498,7 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
         }
         minY = MIN(minY, edge->v0.y);
         maxY = MAX(maxY, edge->v1.y);
+        minX = MIN(minX, MIN(edge->v0.x, edge->v1.x));
         maxX = MAX(maxX, MAX(edge->v0.x, edge->v1.x));
     }
     if (finiteBounds) {
@@ -1505,6 +1506,13 @@ void O2DContextFillEdgesOnSurface(O2Context_builtin *self, O2Surface *surface,
         ylimit = MIN(ylimit, ceil(MIN((double)ylimit, maxY)));
         xlimit = MIN(xlimit, ceil(MIN((double)xlimit, maxX)));
     }
+    // Report what the sweep can write before writing it: rows [firstY,
+    // ylimit) and, coverage being zero left of every edge, columns from the
+    // leftmost edge's pixel up to xlimit.
+    int firstX = finiteBounds
+            ? (int)MIN((double)xlimit, MAX((double)self->_vpx, floor(minX)))
+            : self->_vpx;
+    O2SurfaceAddDamage(surface, firstX, firstY, xlimit - firstX, ylimit - firstY);
 
     Edge *activeRoot = NULL;
     int nextAvailableEdge = 0;

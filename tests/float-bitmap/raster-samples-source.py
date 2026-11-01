@@ -42,7 +42,7 @@ typedef double O2Float;typedef bool BOOL;
 typedef struct {O2Float x,y;} O2Point;
 static O2Point Vector2Subtract(O2Point a,O2Point b){return (O2Point){a.x-b.x,a.y-b.y};}
 '''+arithmetic+edge+r'''
-typedef struct {size_t width,height;O2argb32f *pixels;} O2Surface;
+typedef struct {size_t width,height;O2argb32f *pixels;int64_t damage[4];int damaged,expectDamage;} O2Surface;
 typedef struct {O2argb32f color;} O2Paint;
 typedef O2Surface O2Image;
 typedef struct O2Context_builtin {
@@ -57,13 +57,15 @@ static size_t O2ImageGetHeight(O2Surface *s){return s->height;}
 static void O2Image_read_argb32f(O2Surface *s,int x,int y,O2argb32f *out,int n){assert(x>=0&&y>=0&&(size_t)(x+n)<=s->width&&(size_t)y<s->height);memcpy(out,s->pixels+y*s->width+x,n*sizeof(*out));}
 static void O2ImageReadSpan_Af_MASK(O2Surface *s,int x,int y,O2Float *out,int n){assert(x>=0&&y>=0&&(size_t)(x+n)<=s->width&&(size_t)y<s->height);for(int i=0;i<n;i++)out[i]=s->pixels[y*s->width+x+i].a;}
 static void O2SurfaceWriteSpan_largb32f_PRE(O2Surface *s,int x,int y,O2argb32f *in,int n){assert(x>=0&&y>=0&&(size_t)(x+n)<=s->width&&(size_t)y<s->height);memcpy(s->pixels+y*s->width+x,in,n*sizeof(*in));}
-static void writeCoverage(O2Surface *s,O2Surface *mask,O2Paint *p,int x,int y,int cov,int n,void *blend){(void)p;(void)blend;assert(x>=0&&y>=0&&(size_t)(x+n)<=s->width&&(size_t)y<s->height);for(int i=0;i<n;i++)s->pixels[y*s->width+x+i]=O2argb32fInit(cov/256.f,cov/256.f,cov/256.f,cov/256.f);if(mask)for(int i=0;i<n;i++)s->pixels[y*s->width+x+i]=O2argb32fMultiplyByFloat(s->pixels[y*s->width+x+i],mask->pixels[y*mask->width+x+i].a);}
+// Production sweeps report damage before writing; every span must lie inside it.
+static void O2SurfaceAddDamage(O2Surface *s,int64_t x,int64_t y,int64_t w,int64_t h){if(w<=0||h<=0)return;if(!s->damaged){s->damage[0]=x;s->damage[1]=y;s->damage[2]=x+w;s->damage[3]=y+h;s->damaged=1;return;}if(x<s->damage[0])s->damage[0]=x;if(y<s->damage[1])s->damage[1]=y;if(x+w>s->damage[2])s->damage[2]=x+w;if(y+h>s->damage[3])s->damage[3]=y+h;}
+static void writeCoverage(O2Surface *s,O2Surface *mask,O2Paint *p,int x,int y,int cov,int n,void *blend){if(s->expectDamage)assert(s->damaged&&x>=s->damage[0]&&x+n<=s->damage[2]&&y>=s->damage[1]&&y<s->damage[3]);(void)p;(void)blend;assert(x>=0&&y>=0&&(size_t)(x+n)<=s->width&&(size_t)y<s->height);for(int i=0;i<n;i++)s->pixels[y*s->width+x+i]=O2argb32fInit(cov/256.f,cov/256.f,cov/256.f,cov/256.f);if(mask)for(int i=0;i<n;i++)s->pixels[y*s->width+x+i]=O2argb32fMultiplyByFloat(s->pixels[y*s->width+x+i],mask->pixels[y*mask->width+x+i].a);}
 '''
 for name in ['void O2RasterizerSetViewport(', 'void O2RasterizerClear(', 'void O2DContextAddEdge(', 'ONYX2D_STATIC double radicalInverseBase2(', 'void O2RasterizerSetShouldAntialias(']:src+=function(name)+'\n'
 src+=function('static unsigned clipSampleCount(')+'\n'
 a=source.index('ONYX2D_STATIC_INLINE void sortEdgesByMinY');b=source.index('void O2DContextClipAndFillEdges(',a);src+=source[a:b]
 src+=r'''
-static void init(O2Context_builtin *c,O2Surface *s,int w,int h){memset(c,0,sizeof(*c));s->width=w;s->height=h;s->pixels=calloc(w*h,sizeof(O2argb32f));c->_surface=s;c->_edgeCapacity=256;c->_edges=calloc(256,sizeof(Edge *));c->_sortCache=calloc(129,sizeof(Edge *));c->_winding=calloc(w*256+1,sizeof(int));c->_rowIncrease=calloc(w*256+1,sizeof(int));c->_increase=malloc(w*sizeof(int));for(int x=0;x<w;x++)c->_increase[x]=INT_MAX;c->samplesX=calloc(256,sizeof(O2Float));c->_writeCoverageFunction=writeCoverage;O2RasterizerSetViewport(c,0,0,w,h);O2RasterizerSetShouldAntialias(c,YES,64);}
+static void init(O2Context_builtin *c,O2Surface *s,int w,int h){memset(c,0,sizeof(*c));memset(s,0,sizeof(*s));s->width=w;s->height=h;s->pixels=calloc(w*h,sizeof(O2argb32f));c->_surface=s;c->_edgeCapacity=256;c->_edges=calloc(256,sizeof(Edge *));c->_sortCache=calloc(129,sizeof(Edge *));c->_winding=calloc(w*256+1,sizeof(int));c->_rowIncrease=calloc(w*256+1,sizeof(int));c->_increase=malloc(w*sizeof(int));for(int x=0;x<w;x++)c->_increase[x]=INT_MAX;c->samplesX=calloc(256,sizeof(O2Float));c->_writeCoverageFunction=writeCoverage;O2RasterizerSetViewport(c,0,0,w,h);O2RasterizerSetShouldAntialias(c,YES,64);}
 static void dispose(O2Context_builtin *c){O2RasterizerClear(c);for(int i=0;i<c->_edgeAllocated;i++)free(c->_edges[i]);free(c->_edges);free(c->_sortCache);free(c->_winding);free(c->_rowIncrease);free(c->_increase);free(c->samplesX);free(c->_clipSamples);free(c->_surface->pixels);}
 static void triangle(O2Context_builtin *c){O2DContextAddEdge(c,(O2Point){2,2},(O2Point){14,2});O2DContextAddEdge(c,(O2Point){14,2},(O2Point){2,14});O2DContextAddEdge(c,(O2Point){2,14},(O2Point){2,2});}
 static void rect(O2Context_builtin *c,float x,float y,float w,float h){O2DContextAddEdge(c,(O2Point){x,y},(O2Point){x+w,y});O2DContextAddEdge(c,(O2Point){x+w,y},(O2Point){x+w,y+h});O2DContextAddEdge(c,(O2Point){x+w,y+h},(O2Point){x,y+h});O2DContextAddEdge(c,(O2Point){x,y+h},(O2Point){x,y});}

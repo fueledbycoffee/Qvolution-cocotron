@@ -96,6 +96,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     _eglRequested = [renderer isEqualToString:@"egl"];
     _eglVerify = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_EGL_VERIFY"] isEqualToString:@"1"];
     _eglCorrupt = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_EGL_TEST_CORRUPT"] isEqualToString:@"1"];
+    _damageVerify = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_DAMAGE_VERIFY"] isEqualToString:@"1"];
     if (_eglCorrupt && !_eglVerify)
         [NSException raise:NSInvalidArgumentException format:@"EGL test corruption requires verification"];
     NSString *captureDirectory=[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_CAPTURE_DIR"];
@@ -392,6 +393,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
             munmap(buffer->data, buffer->size);
         memset(buffer, 0, sizeof(*buffer));
     }
+    _committedWidth = _committedHeight = 0;
+    _committedFormat = 0;
 }
 
 // Unmapping an xdg surface requires a new configure sequence before it can be
@@ -900,6 +903,8 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
                       bitmapInfo: kO2ImageAlphaPremultipliedFirst |
                                   kO2BitmapByteOrder32Little];
         O2ColorSpaceRelease(colorSpace);
+        // Presentation copies and announces only what drawing wrote.
+        O2SurfaceSetTracksDamage(surface, YES);
         _context = [[WaylandDrawingContext alloc] initWithSurface: surface logicalSize: logical
                                                           border: _margin];
         _decorationsDirty = YES;
@@ -1011,18 +1016,30 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
     NSTitlebarBitmap bitmap = [self titlebarBitmap];
     NSTitlebarFrame frame = [self titlebarFrame];
     NSTitlebarRenderFrame(&bitmap, &frame);
+    O2SurfaceAddDamage([_context surface], 0, 0, bitmap.width, bitmap.height);
     [self drawTitle];
     _decorationsDirty = NO;
 }
 
+static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
+    return a->margin == b->margin && a->width == b->width && a->height == b->height &&
+           a->rounded == b->rounded && a->shadow == b->shadow &&
+           a->state.active == b->state.active && a->state.dark == b->state.dark;
+}
+
 // The application redraws its content every flush, including the bottom
-// corners, so they are cut again each time.
+// corners, so they are cut again each time. Cutting stores the same pixels
+// again unless content drew there (already damaged) or the frame changed.
 - (void) maskContentCorners {
     if (!_clientDecorated || _margin <= 0 || _context == nil)
         return;
     NSTitlebarBitmap bitmap = [self titlebarBitmap];
     NSTitlebarFrame frame = [self titlebarFrame];
     NSTitlebarMaskContentCorners(&bitmap, &frame);
+    if (!_maskedFrameValid || !sameCornerMask(&frame, &_maskedFrame))
+        O2SurfaceAddDamage([_context surface], 0, 0, bitmap.width, bitmap.height);
+    _maskedFrame = frame;
+    _maskedFrameValid = YES;
 }
 
 - (void) flushBuffer {
@@ -1105,6 +1122,7 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
     reusable->width = width;
     reusable->height = height;
     reusable->format = format;
+    O2SurfaceDamageAdd(&reusable->stale, 0, 0, width, height, width, height);
     return reusable;
 }
 
@@ -1114,7 +1132,11 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
              @"captureError": @(_captureRequested&&!_clientCapture?1:[_clientCapture errorCode]),
              @"clientPresents": @(_clientPresents), @"captured": @([_clientCapture writtenCount]),
              @"checks": @(_eglChecks), @"uploadedBytes": @(_eglBytes), @"failures": @(_eglFailures),
-             @"width": @(_eglWidth), @"height": @(_eglHeight), @"scale120": @(_renderScale120)};
+             @"width": @(_eglWidth), @"height": @(_eglHeight), @"scale120": @(_renderScale120),
+             @"damageRects": @(_damageRects), @"damagePixels": @(_damagePixels),
+             @"copiedPixels": @(_copiedPixels), @"wholeDamagePresents": @(_wholeDamagePresents),
+             @"damageVerify": @(_damageVerify), @"verifiedPresents": @(_verifiedPresents),
+             @"staleVerifiedPresents": @(_staleVerifiedPresents)};
 }
 
 - (void) destroyEGLPresenter {
@@ -1177,7 +1199,10 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
     return YES;
 }
 
-- (void) presentEGLSurface: (O2Surface *) surface {
+// `damage` lists the backing-store rectangles changed since the previous
+// present; the presenter still uploads the whole surface.
+- (void) presentEGLSurface: (O2Surface *) surface damage: (const O2SurfaceDamage *) damage {
+    (void) damage;
     if (_eglFailed) return;
     size_t width = O2SurfaceGetWidth(surface), height = O2SurfaceGetHeight(surface);
     CGLContextObj previous = CGLGetCurrentContext();
@@ -1272,8 +1297,26 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
     return _isOpaque && !_clientDecorated;
 }
 
-// Copies the current content into a shm buffer and commits it, at most once
-// per frame callback.
+// DARLING_APPKIT_DAMAGE_VERIFY=1: the buffer about to be committed must equal
+// the backing store everywhere, not only where damage was copied.
+- (void) verifyBuffer: (struct WaylandBuffer *) buffer pixels: (const uint8_t *) pixels stride: (size_t) stride {
+    size_t width = (size_t) buffer->width, stale = 0;
+    for (size_t row = 0; row < (size_t) buffer->height; row++) {
+        const uint8_t *have = (const uint8_t *) buffer->data + row * width * 4, *want = pixels + row * stride;
+        if (memcmp(have, want, width * 4) != 0)
+            for (size_t x = 0; x < width; x++)
+                stale += memcmp(have + x * 4, want + x * 4, 4) != 0;
+    }
+    ++_verifiedPresents;
+    if (stale != 0) {
+        ++_staleVerifiedPresents;
+        NSLog(@"Wayland damage verification: %zu stale pixels in present %llu", stale,
+              (unsigned long long) _clientPresents + 1);
+    }
+}
+
+// Copies what changed into a shm buffer and commits it, at most once per
+// frame callback.
 - (void) presentIfPossible {
     if ([_delegate isFlushWindowDisabled] || !_needsPresent || !_mapped || !_configured || _configureUpdatePending || _frameCallback != NULL ||
         _context == nil)
@@ -1288,7 +1331,9 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
         return;
 
     if (_eglRequested) {
-        [self presentEGLSurface:surface];
+        O2SurfaceDamage damage;
+        O2SurfaceTakeDamage(surface, &damage);
+        [self presentEGLSurface:surface damage:&damage];
         return;
     }
 
@@ -1300,10 +1345,24 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
     if (buffer == NULL)
         return;
 
-    // Both start with the top row.
-    for (size_t row = 0; row < height; row++)
-        memcpy((uint8_t *) buffer->data + row * width * 4,
-               pixels + row * sourceStride, width * 4);
+    // Both buffers lack what was drawn since the last present; the one filled
+    // two presents ago also lacks what the previous present carried. Copy
+    // only what this buffer lacks (both start with the top row).
+    O2SurfaceDamage damage;
+    O2SurfaceTakeDamage(surface, &damage);
+    for (int i = 0; i < 2; i++)
+        if (_buffers[i].buffer != NULL)
+            O2SurfaceDamageUnion(&_buffers[i].stale, &damage, (int32_t) width, (int32_t) height);
+    for (int i = 0; i < buffer->stale.count; i++) {
+        O2SurfaceDamageRect r = buffer->stale.rects[i];
+        for (int32_t row = r.y; row < r.y + r.height; row++)
+            memcpy((uint8_t *) buffer->data + (size_t) row * width * 4 + (size_t) r.x * 4,
+                   pixels + (size_t) row * sourceStride + (size_t) r.x * 4, (size_t) r.width * 4);
+    }
+    _copiedPixels += O2SurfaceDamagePixelCount(&buffer->stale);
+    buffer->stale.count = 0;
+    if (_damageVerify)
+        [self verifyBuffer: buffer pixels: pixels stride: sourceStride];
 
     union wl_argument args[4] = {{.o = (struct wl_object *) buffer->buffer},
                                  {.i = 0},
@@ -1319,14 +1378,36 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
     }
     WaylandMarshal(_surface, WP_SURFACE_ATTACH, NULL, 0, args);
 
-    args[0].i = 0;
-    args[1].i = 0;
-    args[2].i = _display->_compositorVersion >= 4 ? (int32_t)width : (int32_t)logical.width;
-    args[3].i = _display->_compositorVersion >= 4 ? (int32_t)height : (int32_t)logical.height;
-    WaylandMarshal(_surface,
-                   _display->_compositorVersion >= 4 ? WP_SURFACE_DAMAGE_BUFFER
-                                                     : WP_SURFACE_DAMAGE,
-                   NULL, 0, args);
+    // Damage is relative to what the compositor holds. Without
+    // damage_buffer (surface coordinates under a scale), or when the size or
+    // format changed, the whole surface is damaged.
+    if (_display->_compositorVersion < 4 || _committedWidth != (int32_t) width ||
+        _committedHeight != (int32_t) height || _committedFormat != format) {
+        args[0].i = 0;
+        args[1].i = 0;
+        args[2].i = _display->_compositorVersion >= 4 ? (int32_t)width : (int32_t)logical.width;
+        args[3].i = _display->_compositorVersion >= 4 ? (int32_t)height : (int32_t)logical.height;
+        WaylandMarshal(_surface,
+                       _display->_compositorVersion >= 4 ? WP_SURFACE_DAMAGE_BUFFER
+                                                         : WP_SURFACE_DAMAGE,
+                       NULL, 0, args);
+        ++_wholeDamagePresents;
+        ++_damageRects;
+        _damagePixels += (uint64_t) width * height;
+    } else {
+        for (int i = 0; i < damage.count; i++) {
+            args[0].i = damage.rects[i].x;
+            args[1].i = damage.rects[i].y;
+            args[2].i = damage.rects[i].width;
+            args[3].i = damage.rects[i].height;
+            WaylandMarshal(_surface, WP_SURFACE_DAMAGE_BUFFER, NULL, 0, args);
+        }
+        _damageRects += damage.count;
+        _damagePixels += O2SurfaceDamagePixelCount(&damage);
+    }
+    _committedWidth = (int32_t) width;
+    _committedHeight = (int32_t) height;
+    _committedFormat = format;
 
     args[0].o = NULL;
     _frameCallback = WaylandCreateObject(_surface, WP_SURFACE_FRAME,
