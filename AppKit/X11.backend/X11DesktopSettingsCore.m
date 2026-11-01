@@ -9,6 +9,23 @@ void QVDesktopStateInit(QVDesktopState *s) {
     s->textScale = 1; s->overlayScrolling = true;
 }
 
+void QVDesktopSharedInit(QVDesktopShared *shared, const QVDesktopState *state) {
+    pthread_mutex_init(&shared->lock, NULL);
+    shared->state = *state;
+}
+
+void QVDesktopSharedLoad(QVDesktopShared *shared, QVDesktopState *state) {
+    pthread_mutex_lock(&shared->lock);
+    *state = shared->state;
+    pthread_mutex_unlock(&shared->lock);
+}
+
+void QVDesktopSharedStore(QVDesktopShared *shared, const QVDesktopState *state) {
+    pthread_mutex_lock(&shared->lock);
+    shared->state = *state;
+    pthread_mutex_unlock(&shared->lock);
+}
+
 bool QVDesktopApply(QVDesktopState *s, const char *space, const char *key, DBusMessageIter *variant) {
     if (!space || !key || dbus_message_iter_get_arg_type(variant) != DBUS_TYPE_VARIANT) return false;
     DBusMessageIter v; dbus_message_iter_recurse(variant, &v);

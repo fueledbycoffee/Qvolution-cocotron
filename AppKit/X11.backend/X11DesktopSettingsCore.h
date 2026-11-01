@@ -2,6 +2,7 @@
 // Original Qvolution implementation of the public portal Settings protocol.
 #pragma once
 #include <dbus/dbus.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 typedef struct {
@@ -11,6 +12,16 @@ typedef struct {
     char fontName[256];
 } QVDesktopState;
 void QVDesktopStateInit(QVDesktopState *state);
+// The published state: written by the main-thread portal drain, read by any
+// drawing thread (dynamic colours, effectiveAppearance). Readers copy it whole
+// under the lock, so they never see a partly written accent or font name.
+typedef struct {
+    pthread_mutex_t lock;
+    QVDesktopState state;
+} QVDesktopShared;
+void QVDesktopSharedInit(QVDesktopShared *shared, const QVDesktopState *state);
+void QVDesktopSharedLoad(QVDesktopShared *shared, QVDesktopState *state);
+void QVDesktopSharedStore(QVDesktopShared *shared, const QVDesktopState *state);
 bool QVDesktopApply(QVDesktopState *state, const char *space, const char *key, DBusMessageIter *variant);
 bool QVDesktopReadAll(QVDesktopState *state, DBusMessage *message);
 bool QVDesktopChanged(QVDesktopState *state, DBusMessage *message);

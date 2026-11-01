@@ -35,16 +35,17 @@ __attribute__((objc_root_class)) @interface NSAppearance { Class isa; }
 - (void)_desktopSettingsDidChangeFrom:(id)previous;
 @end
 @interface X11DesktopSettings : NSAppearance {
-@public QVDesktopState _state; DBusConnection *_connection;
+@public QVDesktopShared _shared; DBusConnection *_connection;
 }
 - (void)processPendingEvents; - (void)disconnect;
 @end
 static Application *NSApp;
 static X11DesktopSettings *settings;
+static QVDesktopState published(void) { QVDesktopState s; QVDesktopSharedLoad(&settings->_shared,&s); return s; }
 @implementation Application
 - (id)effectiveAppearance { return self; }
-- (void)willChangeValueForKey:(id)key { assert(settings->_state.accent[0]>.8); will++; }
-- (void)_desktopSettingsDidChangeFrom:(id)previous { assert(settings->_state.accent[2]==1); did++; notifications++; }
+- (void)willChangeValueForKey:(id)key { assert(published().accent[0]>.8); will++; }
+- (void)_desktopSettingsDidChangeFrom:(id)previous { assert(published().accent[2]==1); did++; notifications++; }
 @end
 static dbus_bool_t fixtureRead(DBusConnection *c,int timeout) { assert(timeout==0);return 1; }
 static DBusMessage *fixturePop(DBusConnection *c) { return head<tail?queue[head++]:NULL; }
@@ -133,13 +134,13 @@ int main(void) {
  m=signalAccent(pink);assert(QVDesktopChanged(&s,m));dbus_message_unref(m);
  // The actual production run-loop callback drains a fake portal's broadcast
  // queue, and delivers precisely one KVO/change notification transaction.
- settings=[X11DesktopSettings new];settings->_state=s;settings->_connection=(DBusConnection*)1;NSApp=[Application new];
+ settings=[X11DesktopSettings new];QVDesktopSharedInit(&settings->_shared,&s);settings->_connection=(DBusConnection*)1;NSApp=[Application new];
  queue[tail++]=signalAccent(blue);queue[tail++]=signalAccent(blue);
  [settings processPendingEvents];assert(will==1&&did==1&&notifications==1);
  [settings processPendingEvents];assert(notifications==1);
  // Unicast messages can bypass bus matches and must never modify the state.
  m=signalAccent(pink);dbus_message_set_destination(m,":1.43");queue[tail++]=m;
- [settings processPendingEvents];assert(notifications==1&&settings->_state.accent[2]==1);
+ [settings processPendingEvents];assert(notifications==1&&published().accent[2]==1);
  disconnected=1;[settings processPendingEvents];assert(!settings->_connection);
  puts("PASS native fake portal: ReadAll, pink accent/menu/text pixels, invalid values, exact one-turn notification, duplicate/unicast rejection, disconnect");
  return 0;
@@ -147,6 +148,33 @@ int main(void) {
 '''.replace('/* PRODUCTION */',method)
 flags=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','dbus-1'],text=True))
 objc=subprocess.check_output(['gcc','-print-file-name=include'],text=True).strip()
+threaded=r'''
+#include <assert.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <string.h>
+#include "X11DesktopSettingsCore.h"
+static QVDesktopShared shared; static int done;
+static void fill(QVDesktopState *s,unsigned g) {
+ QVDesktopStateInit(s);s->colorScheme=g;s->contrast=g;s->accent[0]=s->accent[1]=s->accent[2]=g;
+ memset(s->fontName,'a'+g%26,sizeof(s->fontName)-1);
+}
+static void *reader(void *unused) {
+ (void)unused;unsigned long reads=0;
+ while(!__atomic_load_n(&done,__ATOMIC_ACQUIRE)||reads<1000) {
+  QVDesktopState s;QVDesktopSharedLoad(&shared,&s);unsigned g=s.colorScheme;
+  assert(s.contrast==g&&s.accent[0]==g&&s.accent[2]==g&&s.fontName[0]==s.fontName[254]);reads++;
+ }
+ return NULL;
+}
+int main(void) {
+ QVDesktopState s;fill(&s,0);QVDesktopSharedInit(&shared,&s);
+ pthread_t t[3];for(int i=0;i<3;i++)assert(!pthread_create(t+i,NULL,reader,NULL));
+ for(unsigned g=1;g<20000;g++){fill(&s,g);QVDesktopSharedStore(&shared,&s);}
+ __atomic_store_n(&done,1,__ATOMIC_RELEASE);for(int i=0;i<3;i++)pthread_join(t[i],NULL);
+ puts("PASS shared desktop state: concurrent readers never see a torn snapshot (ThreadSanitizer)");return 0;
+}
+'''
 with tempfile.TemporaryDirectory(prefix='theme-p1-native-') as tmp:
  tmp=Path(tmp);(tmp/'test.m').write_text(harness)
  for opt in ['-O0','-O2']:
@@ -154,3 +182,6 @@ with tempfile.TemporaryDirectory(prefix='theme-p1-native-') as tmp:
   subprocess.run(['clang',opt,'-Wno-unused-parameter','-Wno-objc-root-class','-Wno-objc-method-access','-fsanitize=address,undefined','-I'+objc,'-I'+str(root/'AppKit/X11.backend'),str(tmp/'test.m'),str(tmp/'core.o'),'-lobjc','-lm',*flags,'-o',str(tmp/'test')],check=True)
   import os
   subprocess.run([str(tmp/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0','UBSAN_OPTIONS':'halt_on_error=1'})
+ (tmp/'threaded.c').write_text(threaded)
+ subprocess.run(['clang','-x','c','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-fsanitize=thread','-I'+str(root/'AppKit/X11.backend'),*[f for f in flags if f.startswith('-I')],str(tmp/'threaded.c'),str(root/'AppKit/X11.backend/X11DesktopSettingsCore.m'),'-lm','-lpthread',*flags,'-o',str(tmp/'threaded')],check=True)
+ subprocess.run([str(tmp/'threaded')],check=True,env={**os.environ,'TSAN_OPTIONS':'halt_on_error=1'})

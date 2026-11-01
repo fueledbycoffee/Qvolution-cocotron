@@ -4,7 +4,7 @@
 #import "X11DesktopSettingsCore.h"
 @class NSColor, NSAppearance;
 @interface X11DesktopSettings : NSObject {
-    QVDesktopState _state;
+    QVDesktopShared _shared;
     DBusConnection *_connection;
     CFSocketRef _socket;
     CFRunLoopSourceRef _source;
