@@ -584,6 +584,9 @@ void CGContextSetAllowsFontSubpixelQuantization(
 void CGContextSetShouldSubpixelQuantizeFonts(CGContextRef context,
                                              bool shouldSubpixelQuantizeFonts)
 {
+    if (context == NULL)
+        return;
+
     O2ContextSetShouldSubpixelQuantizeFonts((O2ContextRef) context,
                                             shouldSubpixelQuantizeFonts);
 }
