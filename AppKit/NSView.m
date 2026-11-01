@@ -81,6 +81,7 @@ const NSViewFullScreenModeOptionKey NSFullScreenModeApplicationPresentationOptio
 - (void) _addLayerToSuperlayer;
 - (void) _updateLayerVisibility;
 - (void) _removeLayerFromSuperlayer;
+- (void) _createLayersInTreeIfNeeded;
 @end
 
 @interface _NSViewDisplayLinkTarget : NSObject {
@@ -538,6 +539,7 @@ typedef struct __VFlags {
     if (_rectsBeingRedrawn != NULL) {
         NSZoneFree(NULL, _rectsBeingRedrawn);
     }
+    if ([_layer delegate] == (id)self) [_layer setDelegate: nil];
     [_layer release];
 
     [_layerContext invalidate];
@@ -653,6 +655,8 @@ static inline void configureLayerGeometry(NSView *self) {
     [CATransaction begin];
     [CATransaction setDisableActions: YES];
 
+    if ([layer isKindOfClass:[NSViewBackingLayer class]] && self->_window != nil)
+        [layer setContentsScale:[self->_window backingScaleFactor]];
     [layer setAnchorPoint: CGPointMake(0, 0)];
 
     if ([layer superlayer] == nil)
@@ -660,7 +664,11 @@ static inline void configureLayerGeometry(NSView *self) {
     else
         [layer setPosition: self->_frame.origin];
 
+    if (!CGSizeEqualToSize([layer bounds].size, self->_bounds.size))
+        [layer setNeedsDisplay];
     [layer setBounds: self->_bounds];
+    [layer setGeometryFlipped: [self isFlipped] !=
+            ([layer superlayer] != nil && [self->_superview isFlipped])];
     [CATransaction commit];
 }
 
@@ -1294,6 +1302,7 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
 - (void) setBounds: (NSRect) bounds {
     if (!NSEqualRects(bounds, _bounds)) {
         _bounds = bounds;
+        configureLayerGeometry(self);
         invalidateTransform(self);
 
         [_window invalidateCursorRectsForView: self]; // this also invalidates
@@ -1416,8 +1425,8 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
 
     [view viewDidMoveToSuperview];
 
-    if (_wantsLayer)
-        [view setWantsLayer: YES];
+    if (_layer != nil)
+        [view _createLayersInTreeIfNeeded];
 }
 
 - (void) addSubview: (NSView *) view {
@@ -2121,6 +2130,7 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
         // implicitly or explicitly The distinction appears to be based on the
         // layers class, not how it was set (host vs. backing)
         if ([_layer isKindOfClass: [NSViewBackingLayer class]]) {
+            if ([_layer delegate] == (id)self) [_layer setDelegate: nil];
             [_layer release];
             _layer = nil;
         }
@@ -2136,16 +2146,22 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
     if (_layer == nil) {
         _layer = [[self makeBackingLayer] retain];
         [_layer setOpacity: _alphaValue];
+        [_layer setDelegate: (id)self];
+        [_layer setNeedsDisplay];
         configureLayerGeometry(self);
     }
 
     [self _addLayerToSuperlayer];
+    configureLayerGeometry(self);
     [self _updateLayerVisibility];
 
     [_subviews makeObjectsPerformSelector: _cmd];
 }
 
 - (void) setWantsLayer: (BOOL) value {
+    if (_wantsLayer == value) return;
+    [_superview setNeedsDisplayInRect:_frame];
+    [self setNeedsDisplay:YES];
     if (!value) {
         if (_wantsLayer) {
             _wantsLayer = NO;
@@ -2164,6 +2180,7 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
         return;
 
     if (value != _layer) {
+        [_superview setNeedsDisplayInRect:_frame];
         [_subviews makeObjectsPerformSelector: @selector
                    (_removeLayerFromSuperlayer)];
 
@@ -2176,10 +2193,12 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
             }
         } else if (value == nil) {
             [self _removeLayerFromSuperlayer];
+            if ([_layer delegate] == (id)self) [_layer setDelegate: nil];
             [_layer release];
             _layer = nil;
         } else {
             [[_superview layer] replaceSublayer: _layer with: value];
+            if ([_layer delegate] == (id)self) [_layer setDelegate: nil];
             [_layer release];
             _layer = value;
 
@@ -2196,8 +2215,17 @@ static void alignAxis(CGFloat *origin, CGFloat *length, NSAlignmentOptions optio
                 [self _createLayerContextIfNeeded];
         }
 
+        if (_layer != nil) {
+            if ([_layer delegate] == nil && [_layer contents] == nil && [_layer class] == [CALayer class]) {
+                [_layer setDelegate: (id)self];
+                [_layer setNeedsDisplay];
+            }
+            [self _createLayersInTreeIfNeeded];
+        }
         [_subviews
                 makeObjectsPerformSelector: @selector(_addLayerToSuperlayer)];
+        configureLayerGeometry(self);
+        [self setNeedsDisplay: YES];
         [self _updateLayerVisibility];
     }
 }
@@ -2358,6 +2386,7 @@ static void clearNeedsDisplay(NSView *self) {
     clearInvalidRects(self);
 
     if (_needsDisplay) {
+        [_layer setNeedsDisplay];
         [[self window] setViewsNeedDisplay: YES];
     }
 }
@@ -2394,6 +2423,7 @@ static void clearNeedsDisplay(NSView *self) {
     }
 
     _needsDisplay = YES;
+    [_layer setNeedsDisplay];
     [[self window] setViewsNeedDisplay: YES];
 }
 
@@ -2505,7 +2535,7 @@ static NSView *viewBeingPrinted = nil;
     [[graphicsContext focusStack] removeLastObject];
     [NSGraphicsContext restoreGraphicsState];
 
-    if (_window != nil) {
+    if (_window != nil && graphicsContext == [_window graphicsContext]) {
         [[_window platformWindow] flushBuffer];
     }
 }
@@ -2638,6 +2668,7 @@ static NSView *viewBeingPrinted = nil;
 }
 
 - (void) display {
+    [_layer setNeedsDisplay];
     [self displayRect: [self visibleRect]];
 }
 
@@ -2726,7 +2757,7 @@ static NSView *viewBeingPrinted = nil;
     }
 
     @try {
-        NSView *opaque = [self opaqueAncestor];
+        NSView *opaque = (_layer != nil && viewBeingPrinted == nil) ? self : [self opaqueAncestor];
 
         if (opaque != self)
             rect = [self convertRect: rect toView: opaque];
@@ -2758,6 +2789,11 @@ static NSView *viewBeingPrinted = nil;
         if ([self canDraw]) {
             // This view must be locked/unlocked prior to drawing subviews otherwise
             // gState changes may affect subviews.
+            if (_layer != nil && viewBeingPrinted == nil) {
+                if ([self wantsUpdateLayer] && [_layer delegate] != (id)self && [self needsDisplay])
+                    [self updateLayer];
+                [_layer displayIfNeeded];
+            } else {
             [[self effectiveAppearance] performAsCurrentDrawingAppearance:^{
                 [self lockFocus];
                 @try {
@@ -2795,6 +2831,7 @@ static NSView *viewBeingPrinted = nil;
 
                 } @finally { [self unlockFocus]; }
             }];
+            }
 
             NSEnumerator *viewEnumerator = [self _subviewsInDisplayOrderEnumerator];
 
@@ -3264,10 +3301,46 @@ static CGFloat backingScaleFactor(NSView *view) {
                                        self, NSStringFromRect(_frame)];
 }
 
-// XXX: this probably shouldn't be here, but it's a convenient way for CALayers to request a re-render
-- (void)displayLayer: (CALayer*)layer
-{
-    [self display];
+// Layer display never traverses subviews: each backing layer owns its raster.
+- (void) displayLayer: (CALayer *) layer {
+    if (layer != _layer) return;
+    if ([self wantsUpdateLayer]) {
+        [self updateLayer];
+        clearNeedsDisplay(self);
+        return;
+    }
+    NSRect bounds = [self bounds];
+    CGFloat scale = [layer contentsScale];
+    CGFloat w = ceil(bounds.size.width * scale), h = ceil(bounds.size.height * scale);
+    if (!isfinite(w) || !isfinite(h) || !isfinite(scale) || scale <= 0 ||
+        w < 0 || h < 0 || w > 16384 || h > 16384)
+        [NSException raise:NSInvalidArgumentException format:@"Invalid backing layer raster size"];
+    if (w == 0 || h == 0) { [layer setContents:nil]; return; }
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGContextRef bitmap = CGBitmapContextCreate(NULL, w, h, 8, 0, space,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    CGColorSpaceRelease(space);
+    if (bitmap == NULL) [NSException raise:NSMallocException format:@"Backing layer raster allocation failed"];
+    @try {
+        NSGraphicsContext *context = [NSGraphicsContext graphicsContextWithGraphicsPort:bitmap flipped:[self isFlipped]];
+        [[self effectiveAppearance] performAsCurrentDrawingAppearance:^{
+            [self _lockFocusInContext:context];
+            @try {
+                CGAffineTransform transform = CGAffineTransformConcat([self transformToLayer],
+                    CGAffineTransformMakeScale(scale, scale));
+                CGContextSetCTM(bitmap, transform);
+                CGContextClipToRect(bitmap, bounds);
+                // A new image is a complete raster, even for a small invalidation.
+                clearInvalidRects(self);
+                _needsDisplay = YES;
+                [self drawRect:bounds];
+            } @finally { [self unlockFocus]; }
+        }];
+        CGImageRef image = CGBitmapContextCreateImage(bitmap);
+        [layer setContents:(id)image];
+        CGImageRelease(image);
+        clearNeedsDisplay(self);
+    } @finally { CGContextRelease(bitmap); }
 }
 
 + (IBMetricsTable *) ibLayoutMetrics {
