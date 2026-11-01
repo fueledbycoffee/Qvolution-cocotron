@@ -234,8 +234,16 @@ int main(void) {
         [plain becomeKeyWindow];
         expect([plain isKeyWindow] && [plainDefault needsDisplay], "becoming key redraws the default button");
         [plainDefault setNeedsDisplay: NO];
-        [window becomeKeyWindow];
-        expect(![plain isKeyWindow] && [plainDefault needsDisplay], "resigning key redraws the default button");
+        // A second ordinary window takes key status (the fixture's KeyWindow
+        // always claims to be key, so it would return early).
+        NSWindow *other = [[NSWindow alloc] initWithContentRect: NSMakeRect(0, 0, 200, 100)
+                                                      styleMask: NSTitledWindowMask
+                                                        backing: NSBackingStoreBuffered
+                                                          defer: YES];
+        [other becomeKeyWindow];
+        expect([other isKeyWindow] && ![plain isKeyWindow] && [plainDefault needsDisplay],
+               "resigning key redraws the default button");
+        [other release];
         [plain release];
 
         printf("RESULT failures=%u\n", failures);
