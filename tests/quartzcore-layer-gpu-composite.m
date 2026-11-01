@@ -104,6 +104,8 @@ static void countingRender(id self, SEL _cmd) {
 - (void) tick: (NSTimer *) timer {
     if (frame == 0) {
         expectThat(drawer->solid == 1 && drawer->stripes == 1, "each layer drew its content once before any motion");
+        expectThat(CGImageGetWidth((CGImageRef)[a contents]) == 200 &&
+                   CGImageGetHeight((CGImageRef)[a contents]) == 160, "contentsScale 2 rasterizes at twice the point dimensions");
         t0 = now(); cpu0 = cpuSeconds();
     }
     if (frame == frames) {
@@ -144,6 +146,7 @@ int main(int argc, char **argv) {
         d->host = [[NSView alloc] initWithFrame:NSMakeRect(20, 20, 600, 440)];
         d->root = [CALayer layer];
         d->a = [CALayer layer]; [d->a setName:@"A"]; [d->a setBounds:CGRectMake(0, 0, 100, 80)];
+        [d->a setContentsScale:2];
         [d->a setDelegate:(id)d->drawer]; [d->a setNeedsDisplay];
         d->s = [CAScrollLayer layer]; [d->s setFrame:CGRectMake(380, 40, 200, 100)];
         d->b = [CALayer layer]; [d->b setName:@"B"]; [d->b setFrame:CGRectMake(0, 0, 200, 400)];

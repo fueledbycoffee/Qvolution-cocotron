@@ -158,9 +158,8 @@ CA_EXPORT CAToneMapMode const CAToneMapModeIfSupported;
 
 // How contents maps onto the layer: contentsScale is the ratio of contents
 // pixels to layer points, contentsCenter the stretchable region of the
-// contents in unit coordinates. Stored and defaulted per the documented
-// behaviour, but CARenderer still draws contents unscaled and unstretched,
-// the way masksToBounds is stored without clipping yet.
+// contents in unit coordinates. Rasterization and natural-size gravity use
+// contentsScale; contentsCenter stretching is not implemented yet.
 @property CGFloat contentsScale;
 @property CGRect contentsCenter;
 @property(copy) CALayerContentsFormat contentsFormat;
@@ -181,7 +180,7 @@ CA_EXPORT CAToneMapMode const CAToneMapModeIfSupported;
 
 // Appearance. CARenderer draws the background and the border as rounded rects
 // with cornerRadius, and the contents between them (not clipped to the corners).
-// masksToBounds is stored but sublayers aren't clipped yet.
+// masksToBounds clips contents and sublayers to the rounded bounds.
 @property CGColorRef backgroundColor;
 @property CGColorRef borderColor;
 @property CGFloat borderWidth;

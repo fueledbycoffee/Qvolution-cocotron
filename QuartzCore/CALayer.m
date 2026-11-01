@@ -275,7 +275,12 @@ static char swiftUIViewTestPropertiesAssociationKey;
 }
 
 - (void) setContentsScale: (CGFloat) value {
-    _contentsScale = value;
+    if (!isfinite(value) || value <= 0)
+        [NSException raise:NSInvalidArgumentException format:@"contentsScale must be finite and positive"];
+    if (_contentsScale != value) {
+        _contentsScale = value;
+        [self setNeedsDisplay];
+    }
 }
 
 - (CGRect) contentsCenter {
@@ -910,8 +915,13 @@ static void replaceColor(CGColorRef *slot, CGColorRef value) {
         return;
     }
 
-    size_t width = (size_t) ceil(MAX(_bounds.size.width, 0));
-    size_t height = (size_t) ceil(MAX(_bounds.size.height, 0));
+    CGFloat pixelWidth = ceil(MAX(_bounds.size.width, 0) * _contentsScale);
+    CGFloat pixelHeight = ceil(MAX(_bounds.size.height, 0) * _contentsScale);
+    if (!isfinite(pixelWidth) || !isfinite(pixelHeight) ||
+        pixelWidth > 16384 || pixelHeight > 16384)
+        [NSException raise:NSInvalidArgumentException format:@"Invalid layer raster size"];
+    size_t width = (size_t) pixelWidth;
+    size_t height = (size_t) pixelHeight;
     if (width == 0 || height == 0) {
         [self setContents: nil];
         return;
@@ -932,6 +942,7 @@ static void replaceColor(CGColorRef *slot, CGColorRef value) {
         CGContextTranslateCTM(context, 0, height);
         CGContextScaleCTM(context, 1, -1);
     }
+    CGContextScaleCTM(context, _contentsScale, _contentsScale);
     CGContextTranslateCTM(context, -_bounds.origin.x, -_bounds.origin.y);
     [self drawInContext: context];
 

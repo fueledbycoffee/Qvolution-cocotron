@@ -560,9 +560,25 @@ static void roundedRectOutline(CGRect r, CGFloat radius, GLfloat *xy) {
     const GLfloat uprightTexture[4 * 2] = {0, 1, 1, 1, 0, 0, 1, 0};
     const GLfloat flippedTexture[4 * 2] = {0, 0, 1, 0, 0, 1, 1, 1};
     const GLfloat *textureVertices = flipped ? flippedTexture : uprightTexture;
-    const GLfloat vertices[4 * 2] = {0, 0, bounds.size.width, 0,
-                                     0, bounds.size.height,
-                                     bounds.size.width, bounds.size.height};
+    CGRect target = CGRectMake(0, 0, bounds.size.width, bounds.size.height);
+    NSString *gravity = layer.contentsGravity;
+    CGFloat w = CGImageGetWidth(image) / layer.contentsScale;
+    CGFloat h = CGImageGetHeight(image) / layer.contentsScale;
+    if (![gravity isEqual:kCAGravityResize] && w > 0 && h > 0) {
+        if ([gravity isEqual:kCAGravityResizeAspect] || [gravity isEqual:kCAGravityResizeAspectFill]) {
+            CGFloat sx = bounds.size.width / w, sy = bounds.size.height / h;
+            CGFloat ratio = [gravity isEqual:kCAGravityResizeAspect] ? MIN(sx, sy) : MAX(sx, sy);
+            w *= ratio; h *= ratio;
+        }
+        target = CGRectMake((bounds.size.width - w) / 2, (bounds.size.height - h) / 2, w, h);
+        if ([gravity isEqual:kCAGravityLeft] || [gravity isEqual:kCAGravityTopLeft] || [gravity isEqual:kCAGravityBottomLeft]) target.origin.x = 0;
+        if ([gravity isEqual:kCAGravityRight] || [gravity isEqual:kCAGravityTopRight] || [gravity isEqual:kCAGravityBottomRight]) target.origin.x = bounds.size.width - w;
+        BOOL top = [gravity isEqual:kCAGravityTop] || [gravity isEqual:kCAGravityTopLeft] || [gravity isEqual:kCAGravityTopRight];
+        BOOL bottom = [gravity isEqual:kCAGravityBottom] || [gravity isEqual:kCAGravityBottomLeft] || [gravity isEqual:kCAGravityBottomRight];
+        if (top || bottom) target.origin.y = (top != flipped) ? bounds.size.height - h : 0;
+    }
+    const GLfloat vertices[4 * 2] = {CGRectGetMinX(target), CGRectGetMinY(target), CGRectGetMaxX(target), CGRectGetMinY(target),
+                                    CGRectGetMinX(target), CGRectGetMaxY(target), CGRectGetMaxX(target), CGRectGetMaxY(target)};
 
     glTexCoordPointer(2, GL_FLOAT, 0, textureVertices);
     glVertexPointer(2, GL_FLOAT, 0, vertices);
@@ -573,6 +589,27 @@ static void roundedRectOutline(CGRect r, CGFloat radius, GLfloat *xy) {
     glDisable(GL_TEXTURE_2D);
 }
 
+// Increment/decrement only pixels inside the parent's stencil value. Replaying
+// the same transformed outline on exit preserves arbitrary nested/rotated masks.
+static void drawLayerMask(CALayer *layer, CGRect bounds, unsigned depth, BOOL entering) {
+    GLfloat fan[2 * (kRoundedRectPoints + 2)];
+    CGRect rect = CGRectMake(0, 0, bounds.size.width, bounds.size.height);
+    fan[0] = CGRectGetMidX(rect); fan[1] = CGRectGetMidY(rect);
+    roundedRectOutline(rect, layer.cornerRadius, fan + 2);
+    fan[2 * (kRoundedRectPoints + 1)] = fan[2];
+    fan[2 * (kRoundedRectPoints + 1) + 1] = fan[3];
+    glPushAttrib(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_ENABLE_BIT | GL_STENCIL_BUFFER_BIT);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glDisable(GL_ALPHA_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_TEXTURE_2D);
+    glEnable(GL_STENCIL_TEST);
+    glStencilMask(0xff);
+    glStencilFunc(GL_EQUAL, depth, 0xff);
+    glStencilOp(GL_KEEP, GL_KEEP, entering ? GL_INCR : GL_DECR);
+    glVertexPointer(2, GL_FLOAT, 0, fan);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, kRoundedRectPoints + 2);
+    glPopAttrib();
+}
+
 // Layers are composited in painter's order: a layer's background, contents and
 // border, then its sublayers in array order. Opacity multiplies down the tree.
 // parentFlipped says whether the parent's coordinate space is y-flipped on screen.
@@ -580,6 +617,7 @@ static void roundedRectOutline(CGRect r, CGFloat radius, GLfloat *xy) {
           currentTime: (CFTimeInterval) currentTime
         parentOpacity: (CGFloat) parentOpacity
         parentFlipped: (BOOL) parentFlipped
+            maskDepth: (unsigned) maskDepth
 {
     if (layer.hidden)
         return;
@@ -611,6 +649,19 @@ static void roundedRectOutline(CGRect r, CGFloat radius, GLfloat *xy) {
         flipped = !flipped;
     }
 
+    BOOL masked = [layer masksToBounds];
+    if (masked) {
+        GLint bits = 0; glGetIntegerv(GL_STENCIL_BITS, &bits);
+        if (bits < 8 || maskDepth == 255)
+            [NSException raise:NSInternalInconsistencyException format:@"Layer masks require an 8-bit stencil buffer and depth below 256"];
+        drawLayerMask(layer, bounds, maskDepth, YES);
+        ++maskDepth;
+    }
+    glEnable(GL_STENCIL_TEST);
+    glStencilMask(0);
+    glStencilFunc(GL_EQUAL, maskDepth, 0xff);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
     [self _drawBackgroundOfLayer: layer bounds: bounds opacity: opacity];
     // A layer that draws its own content (CAMetalLayer draws the texture the GPU
     // filled in) opts out of the contents path, which would otherwise upload
@@ -632,9 +683,12 @@ static void roundedRectOutline(CGRect r, CGFloat radius, GLfloat *xy) {
         [self _renderLayer: child
                 currentTime: currentTime
 parentOpacity: opacity
-              parentFlipped: flipped];
+              parentFlipped: flipped
+                  maskDepth: maskDepth];
     glPopMatrix();
 
+    if (masked) drawLayerMask(layer, bounds, maskDepth, NO);
+    glStencilFunc(GL_EQUAL, masked ? maskDepth - 1 : maskDepth, 0xff);
     glPopMatrix();
 }
 
@@ -671,7 +725,10 @@ static void displayLayerTreeIfNeeded(CALayer *layer) {
     } else {
         glClearColor(0, 0, 0, 0);
     }
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_SCISSOR_TEST);
+    glStencilMask(0xff);
+    glClearStencil(0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     // Painter's order instead of depth testing: every layer used to get z+1,
     // which put layers nested two or more deep outside the [-1, 1] depth range
@@ -689,7 +746,9 @@ static void displayLayerTreeIfNeeded(CALayer *layer) {
     [self _renderLayer: _rootLayer
             currentTime: CACurrentMediaTime()
           parentOpacity: 1.0
-          parentFlipped: [_rootLayer.superlayer contentsAreFlipped]];
+          parentFlipped: [_rootLayer.superlayer contentsAreFlipped]
+              maskDepth: 0];
+    glDisable(GL_STENCIL_TEST);
 
     glFlush();
 }
