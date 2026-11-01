@@ -2272,15 +2272,18 @@ static void markKeyStateControls(NSView *view) {
             // Show all the views getting redrawn.
             [NSGraphicsContext setQuartzDebugMode: YES];
             [self disableFlushWindow];
-            [_backgroundView displayIfNeeded];
-            [self enableFlushWindow];
+            @try { [_backgroundView displayIfNeeded]; }
+            @finally {
+                [self enableFlushWindow];
+                [NSGraphicsContext setQuartzDebugMode: NO];
+            }
             [self flushWindowIfNeeded];
         }
 
         [NSGraphicsContext setQuartzDebugMode: NO];
         [self disableFlushWindow];
-        [_backgroundView displayIfNeeded];
-        [self enableFlushWindow];
+        @try { [_backgroundView displayIfNeeded]; }
+        @finally { [self enableFlushWindow]; }
         [self flushWindow];
         [self setViewsNeedDisplay: NO];
     }

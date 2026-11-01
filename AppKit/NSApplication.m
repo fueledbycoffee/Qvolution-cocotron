@@ -1249,9 +1249,16 @@ static void _hookXcodeDevTools(void)
     NSArray *windows = [[NSApp windows] copy];
     @try {
         for (NSWindow *window in windows) {
-            if ([window isVisible] && ![window isMiniaturized])
-                [[window _backgroundView] layoutSubtreeIfNeeded];
-            [window displayIfNeeded];
+            @try {
+                if ([window isVisible] && ![window isMiniaturized])
+                    [[window _backgroundView] layoutSubtreeIfNeeded];
+                [window displayIfNeeded];
+            } @catch (id exception) {
+                [self reportException: exception];
+                [[NSRunLoop currentRunLoop]
+                        cancelPerformSelector: @selector(_displayAllWindowsIfNeeded)
+                                       target: self argument: nil];
+            }
         }
     } @finally {
         [windows release];
