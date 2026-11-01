@@ -816,6 +816,33 @@ static NSString *matchedFamily(FcConfig *config, NSString *family) {
         FcPatternAddString(pat, FC_FAMILY,
                            (const FcChar8 *) [family UTF8String]);
     }
+    // An explicit installed family is document content, even when desktop
+    // Fontconfig rules redirect that family for other clients. A nil family
+    // (the default-font query) has nothing to keep, so skip the font list.
+    FcObjectSet *props = family != nil ? FcObjectSetCreate() : NULL;
+    if (props != NULL) {
+        FcObjectSetAdd(props, FC_FAMILY);
+        FcFontSet *installed = FcFontList(config, pat, props);
+        BOOL exact = NO;
+        if (family != nil && installed != NULL) {
+            for (int i = 0; !exact && i < installed->nfont; ++i) {
+                FcChar8 *name;
+                for (int j = 0; FcPatternGetString(installed->fonts[i], FC_FAMILY,
+                        j, &name) == FcResultMatch; ++j) {
+                    if (strcmp((const char *)name, [family UTF8String]) == 0) {
+                        exact = YES;
+                        break;
+                    }
+                }
+            }
+        }
+        if (installed != NULL) FcFontSetDestroy(installed);
+        FcObjectSetDestroy(props);
+        if (exact) {
+            FcPatternDestroy(pat);
+            return family;
+        }
+    }
     FcConfigSubstitute(config, pat, FcMatchPattern);
     FcDefaultSubstitute(pat);
 
