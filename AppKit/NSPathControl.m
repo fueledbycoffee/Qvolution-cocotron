@@ -63,12 +63,11 @@
 }
 
 - (id<NSPathControlDelegate>) delegate; {
-    NSUnimplementedMethod();
-    return nil;
+    return _delegate;
 }
 
 - (void) setDelegate: (id<NSPathControlDelegate>) delegate; {
-    NSUnimplementedMethod();
+    _delegate = delegate;
 }
 
 - (void) setDraggingSourceOperationMask: (NSDragOperation) mask

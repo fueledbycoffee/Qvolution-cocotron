@@ -26,6 +26,7 @@
 @end
 
 @interface NSPathControl : NSControl {
+    id<NSPathControlDelegate> _delegate;
 }
 
 - (NSPathStyle) pathStyle;

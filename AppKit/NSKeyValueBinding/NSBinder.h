@@ -41,6 +41,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 - (void) setSource: (id) value;
 
 - (id) destination;
+- (id) destinationValue;
 - (void) setDestination: (id) value;
 
 - (NSString *) keyPath;
@@ -56,6 +57,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 - (id) bindingPath;
 
 - (NSArray *) peerBinders;
+// YES for enabled, editable and hidden: every binding of the family
+// (enabled, enabled2, enabled3, ...) writes the one property, combined
+// with AND (OR for hidden), and never feeds the result back to a model.
+- (BOOL) _isCombinedBooleanBinding;
 
 - (void) startObservingChanges;
 - (void) stopObservingChanges;

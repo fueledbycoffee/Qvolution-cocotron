@@ -311,20 +311,31 @@ static NSString *const NSPopUpButtonBindingObservationContext =
         values = [NSArray arrayWithObject: values];
     }
 
-    // The cell stores titles, so every member must be a string. A binding whose
-    // collection holds non-strings reaches -[NSMenu itemWithTitle:], which sends
-    // -isEqualToString: to each member and raises on anything else.
-    if (values != nil) {
-        NSMutableArray *titles = [NSMutableArray arrayWithCapacity: values.count];
-        for (id value in values) {
-            [titles addObject: [value isKindOfClass: [NSString class]] ? value :
-                              ([value respondsToSelector: @selector(description)] ? [value description] : @"")];
-        }
-        values = titles;
-    }
+    if ([values isKindOfClass: [NSSet class]])
+        values = [(NSSet *) values allObjects];
 
-    [_cell removeAllItems];
-    [_cell addItemsWithTitles: values];
+    if ([key isEqual: @"representedObject"]) {
+        if ([self numberOfItems] != [values count]) {
+            [_cell removeAllItems];
+            for (id value in values)
+                [_cell insertItemWithTitle: [value description] atIndex: [self numberOfItems]];
+        }
+        for (NSUInteger i = 0; i < [values count]; i++) {
+            [[self itemAtIndex: i] setRepresentedObject: [values objectAtIndex: i]];
+            if (![self _binderForBinding: @"contentValues"])
+                [[self itemAtIndex: i] setTitle: [[values objectAtIndex: i] description]];
+        }
+    } else {
+        if ((![self _binderForBinding: @"content"] &&
+             ![self _binderForBinding: @"contentObjects"]) ||
+            [self numberOfItems] != [values count]) {
+            [_cell removeAllItems];
+            for (id value in values)
+                [_cell insertItemWithTitle: [value description] atIndex: [self numberOfItems]];
+        }
+        for (NSUInteger i = 0; i < [values count]; i++)
+            [[self itemAtIndex: i] setTitle: [[values objectAtIndex: i] description]];
+    }
 
     if ([self indexOfSelectedItem] >= values.count) {
         [self selectItem: nil];
@@ -342,23 +353,40 @@ static NSString *const NSPopUpButtonBindingObservationContext =
 }
 
 - (id) _contentObjects {
-    return [self valueForKeyPath: @"itemArray.title"];
+    return [self _content];
 }
 
 - (void) _setContentObjects: (NSArray *) objects {
-    [self _setItemValues: objects forKey: @"title"];
+    [self _setContent: objects];
 }
 
 - (id) _content {
-    return [self valueForKeyPath: @"itemArray.representedObject"];
+    NSMutableArray *objects = [NSMutableArray array];
+    for (NSMenuItem *item in [self itemArray])
+        [objects addObject: [item representedObject] ?: [NSNull null]];
+    return objects;
 }
 
 - (void) _setContent: (NSArray *) values {
     [self _setItemValues: values forKey: @"representedObject"];
-    if (![self _binderForBinding: @"contentValues"]) {
-        [self _setItemValues: [values valueForKey: @"description"]
-                      forKey: @"title"];
+}
+
+- (id) _selectedObject {
+    return [[self selectedItem] representedObject];
+}
+
+- (void) _setSelectedObject: (id) object {
+    if (object == nil || object == [NSNull null]) {
+        [self selectItem: nil];
+        return;
     }
+    for (NSMenuItem *item in [self itemArray]) {
+        if ([[item representedObject] isEqual: object]) {
+            [self selectItem: item];
+            return;
+        }
+    }
+    [self selectItem: nil];
 }
 
 - (NSInteger) _selectedTag {
@@ -377,7 +405,10 @@ static NSString *const NSPopUpButtonBindingObservationContext =
 }
 
 - (void) _setSelectedIndex: (NSUInteger) idx {
-    [self selectItemAtIndex: idx];
+    if (idx == NSNotFound)
+        [self selectItem: nil];
+    else if (idx < [self numberOfItems])
+        [self selectItemAtIndex: idx];
 }
 
 - (id) _selectedValue {

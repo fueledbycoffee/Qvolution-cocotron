@@ -33,6 +33,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSKeyValueBinding.h>
 #import <AppKit/NSObject+BindingSupport.h>
 #import <AppKit/NSModalSessionX.h>
+#import <AppKit/NSNib.h>
 #import <AppKit/NSNibLoading.h>
 #import <AppKit/NSPageLayout.h>
 #import <objc/runtime.h>
@@ -925,6 +926,12 @@ static void _hookXcodeDevTools(void)
 }
 
 - (BOOL) openFiles {
+    return [self _openFilesWithDefaultLaunch: NULL];
+}
+
+// defaultLaunch reports whether the launch named no file to open, which is
+// independent of whether opening a named file then succeeded.
+- (BOOL) _openFilesWithDefaultLaunch: (BOOL *) defaultLaunch {
     BOOL opened = NO;
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 
@@ -984,6 +991,8 @@ static void _hookXcodeDevTools(void)
         }
     }
 
+    if (defaultLaunch)
+        *defaultLaunch = ([openFiles count] == 0);
     if ([openFiles count] == 0) {
         return NO;
     }
@@ -1017,6 +1026,7 @@ static void _hookXcodeDevTools(void)
     _hookXcodeDevTools();
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
     BOOL needsUntitled = YES;
+    BOOL defaultLaunch = YES;
 
     NS_DURING [[NSNotificationCenter defaultCenter]
             postNotificationName: NSApplicationWillFinishLaunchingNotification
@@ -1050,7 +1060,7 @@ static void _hookXcodeDevTools(void)
     if ([types count] > 0)
         controller = [NSDocumentController sharedDocumentController];
 
-    if ([self openFiles]) {
+    if ([self _openFilesWithDefaultLaunch: &defaultLaunch]) {
         needsUntitled = NO;
     }
 
@@ -1078,7 +1088,11 @@ static void _hookXcodeDevTools(void)
 
     NS_DURING [[NSNotificationCenter defaultCenter]
             postNotificationName: NSApplicationDidFinishLaunchingNotification
-                          object: self];
+                          object: self
+                        userInfo: [NSDictionary
+                                          dictionaryWithObject:
+                                                  [NSNumber numberWithBool: defaultLaunch]
+                                                        forKey: NSApplicationLaunchIsDefaultLaunchKey]];
     NS_HANDLER [self reportException: localException];
     NS_ENDHANDLER
 
@@ -1248,9 +1262,16 @@ static void _hookXcodeDevTools(void)
     NSArray *windows = [[NSApp windows] copy];
     @try {
         for (NSWindow *window in windows) {
-            if ([window isVisible] && ![window isMiniaturized])
-                [[window _backgroundView] layoutSubtreeIfNeeded];
-            [window displayIfNeeded];
+            @try {
+                if ([window isVisible] && ![window isMiniaturized])
+                    [[window _backgroundView] layoutSubtreeIfNeeded];
+                [window displayIfNeeded];
+            } @catch (id exception) {
+                [self reportException: exception];
+                [[NSRunLoop currentRunLoop]
+                        cancelPerformSelector: @selector(_displayAllWindowsIfNeeded)
+                                       target: self argument: nil];
+            }
         }
     } @finally {
         [windows release];
@@ -2307,10 +2328,14 @@ if (argc > 1) {
     NSStoryboard *storyboard = [NSStoryboard mainStoryboard];
     if (storyboard != nil)
         [storyboard _instantiateAsMainStoryboard];
-    else {
+    else if ([nibFile length] > 0) {
         nibFile = [nibFile stringByDeletingPathExtension];
 
-        if (![NSBundle loadNibNamed: nibFile owner: NSApp])
+        NSDictionary *nameTable = [NSDictionary dictionaryWithObject: NSApp
+                                                            forKey: NSNibOwner];
+        BOOL loaded = [bundle loadNibFile: nibFile externalNameTable: nameTable
+                                withZone: NSDefaultMallocZone()];
+        if (!loaded)
             NSLog(@"Unable to load main nib file %@", nibFile);
     }
 

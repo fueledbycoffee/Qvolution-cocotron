@@ -1406,6 +1406,14 @@ static BOOL _allowsAutomaticWindowTabbing;
     _resizeIncrements.height = value.height / value.width;
 }
 
+- (NSColor *) contentSeparatorColor {
+    return [NSColor separatorColor];
+}
+
+- (void) _setContentHasShadow: (BOOL) value {
+    [self setHasShadow: value];
+}
+
 - (void) setHasShadow: (BOOL) value {
     _hasShadow = value;
     [_platformWindow setHasShadow: value];
@@ -2272,15 +2280,18 @@ static void markKeyStateControls(NSView *view) {
             // Show all the views getting redrawn.
             [NSGraphicsContext setQuartzDebugMode: YES];
             [self disableFlushWindow];
-            [_backgroundView displayIfNeeded];
-            [self enableFlushWindow];
+            @try { [_backgroundView displayIfNeeded]; }
+            @finally {
+                [self enableFlushWindow];
+                [NSGraphicsContext setQuartzDebugMode: NO];
+            }
             [self flushWindowIfNeeded];
         }
 
         [NSGraphicsContext setQuartzDebugMode: NO];
         [self disableFlushWindow];
-        [_backgroundView displayIfNeeded];
-        [self enableFlushWindow];
+        @try { [_backgroundView displayIfNeeded]; }
+        @finally { [self enableFlushWindow]; }
         [self flushWindow];
         [self setViewsNeedDisplay: NO];
     }

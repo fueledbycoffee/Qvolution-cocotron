@@ -82,6 +82,9 @@ static NSMutableArray<NSString *> *_nibPaths(void) {
 + (BOOL) loadNibNamed: (NSString *) name owner: owner {
     NIBDEBUG(@"+ loadNibNamed: '%@'", name);
 
+    if ([name length] == 0)
+        return NO;
+
     NSDictionary *nameTable = [NSDictionary dictionaryWithObject: owner
                                                           forKey: NSNibOwner];
     NSBundle *bundle = [NSBundle bundleForClass: [owner class]];
@@ -94,6 +97,8 @@ static NSMutableArray<NSString *> *_nibPaths(void) {
         externalNameTable: (NSDictionary *) nameTable
                  withZone: (NSZone *) zone
 {
+    if ([fileName length] == 0)
+        return NO;
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
 
     NIBDEBUG(@"- loadNibNamed: '%@' externalNameTable: withZone:", fileName);
@@ -139,6 +144,11 @@ static NSMutableArray<NSString *> *_nibPaths(void) {
         path = fileName;
     }
 
+    if (path == nil) {
+        [pool release];
+        return NO;
+    }
+
     [NSBundle pushNibPath: path];
     [NSBundle pushNibLoadingBundle: self];
 
@@ -158,6 +168,8 @@ static NSMutableArray<NSString *> *_nibPaths(void) {
                   owner: (id) owner
         topLevelObjects: (NSArray **) topLevelObjects
 {
+    if ([name length] == 0)
+        return NO;
     [NSBundle pushNibPath: [self pathForResource: name ofType: @"nib"]];
     [NSBundle pushNibLoadingBundle: self];
 

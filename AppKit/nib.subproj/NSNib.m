@@ -139,6 +139,11 @@ NSString *const NSNibTopLevelObjects = @"NSNibTopLevelObjects";
 
     NIBDEBUG(@"initWithNibNamed: %@ bundle: %@", name, bundle);
 
+    if ([name length] == 0) {
+        [self release];
+        return nil;
+    }
+
     if (bundle == nil)
         bundle = [NSBundle mainBundle];
 

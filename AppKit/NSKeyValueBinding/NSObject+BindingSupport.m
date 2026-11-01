@@ -22,6 +22,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <AppKit/NSObject+BindingSupport.h> // Remove soon
 #import <AppKit/NSObservationProxy.h>
 #import <Foundation/NSAutoreleasePool.h>
+#import <Foundation/NSArray.h>
 #import <Foundation/NSBundle.h>
 #import <Foundation/NSDictionary.h>
 #import <Foundation/NSEnumerator.h>
@@ -172,6 +173,19 @@ void NSDetermineBindingDebugLoggingLevel(void) {
         return @"objectValue";
     }
 
+    for (NSString *name in [NSArray arrayWithObjects: @"enabled", @"editable", @"hidden", nil]) {
+        if ([binding hasPrefix: name]) {
+            NSString *suffix = [binding substringFromIndex: [name length]];
+            if ([suffix length] == 0)
+                return name;
+            BOOL numbered = [suffix intValue] >= 2;
+            for (NSUInteger i = 0; i < [suffix length]; i++)
+                numbered &= [suffix characterAtIndex: i] >= '0' &&
+                            [suffix characterAtIndex: i] <= '9';
+            if (numbered)
+                return name;
+        }
+    }
     return binding;
 }
 
@@ -220,7 +234,18 @@ void NSDetermineBindingDebugLoggingLevel(void) {
     id binder = [ownBinders objectForKey: binding];
     [binder unbind];
 
+    // Recompute a combined boolean from the peers that remain bound.
+    NSArray *peers = [binder _isCombinedBooleanBinding]
+                             ? [[binder peerBinders] retain]
+                             : nil;
     [ownBinders removeObjectForKey: binding];
+    for (_NSBinder *peer in peers) {
+        if (peer != binder && [peer respondsToSelector: @selector(syncUp)]) {
+            [(id) peer syncUp];
+            break;
+        }
+    }
+    [peers release];
     if ([ownBinders count] == 0) {
         NSBindingDebugLog(kNSBindingDebugLogLevel2,
                           @"Removing binders for key: %@", key);

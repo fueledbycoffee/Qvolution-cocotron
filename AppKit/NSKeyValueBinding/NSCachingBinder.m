@@ -150,7 +150,7 @@ NSString *NSFormatDisplayPattern(NSString *pattern, id *values,
 
 - (id) destinationValue {
     @try {
-        return [_destination valueForKeyPath: _keyPath];
+        return [super destinationValue];
     } @catch (id ex) {
         if ([self raisesForNotApplicableKeys])
             [ex raise];

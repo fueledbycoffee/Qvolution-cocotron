@@ -33,7 +33,7 @@ BOOL NSIsControllerMarker(id object) {
 
 @implementation NSController
 
-+ (void) initialize {
++ (void) load {
     if (self == [NSController class]) {
         NSNoSelectionMarker = [[_NSControllerMarker alloc]
                 initWithString: @"NSNoSelectionMarker"];
