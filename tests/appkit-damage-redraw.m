@@ -27,6 +27,9 @@ static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
 static int cmpDouble(const void *a, const void *b) { double x = *(const double *)a, y = *(const double *)b; return (x > y) - (x < y); }
 static double median(double *v, int n) { qsort(v, n, sizeof *v, cmpDouble); return n ? (n & 1 ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2) : NAN; }
 
+// Time spent inside the fixture's own drawRect: implementations.
+static double gradientMs, tilesMs, spinnerMs;
+
 static NSDictionary *stats(NSWindow *w) { return [[w platformWindow] eglPresentationStatistics]; }
 static unsigned long long stat(NSWindow *w, NSString *key) { id v = [stats(w) objectForKey: key]; return v ? [v unsignedLongLongValue] : 0; }
 static BOOL hasDamageStats(NSWindow *w) { return [stats(w) objectForKey: @"damageRects"] != nil; }
@@ -48,9 +51,11 @@ static BOOL framePending(NSWindow *w) {
 - (BOOL)isOpaque { return YES; }
 - (void)drawRect:(NSRect)dirty {
     NSRect b = [self bounds];
+    double t0 = now();
     [[[[NSGradient alloc] initWithStartingColor: [NSColor colorWithCalibratedRed: .86 green: .89 blue: .95 alpha: 1]
                                     endingColor: [NSColor colorWithCalibratedRed: .97 green: .95 blue: .90 alpha: 1]] autorelease]
         drawInRect: b angle: 90];
+    double t1 = now(); gradientMs += t1 - t0;
     for (CGFloat y = 8; y < NSHeight(b); y += 46)
         for (CGFloat x = 8; x < NSWidth(b); x += 58) {
             NSRect tile = NSMakeRect(x, y, 50, 38);
@@ -59,6 +64,7 @@ static BOOL framePending(NSWindow *w) {
             [[NSColor colorWithCalibratedHue: (k % 23) / 23.0 saturation: .25 brightness: .97 alpha: .9] setFill];
             [[NSBezierPath bezierPathWithRoundedRect: tile xRadius: 7 yRadius: 7] fill];
         }
+    tilesMs += now() - t1;
 }
 @end
 
@@ -66,7 +72,7 @@ static BOOL framePending(NSWindow *w) {
 @interface Spinner : NSView { @public unsigned phase, draws; } @end
 @implementation Spinner
 - (void)drawRect:(NSRect)dirty {
-    draws++;
+    draws++; double t0 = now();
     NSRect b = NSInsetRect([self bounds], 4, 4);
     [[NSColor colorWithCalibratedWhite: .2 alpha: .25] setStroke];
     NSBezierPath *ring = [NSBezierPath bezierPathWithOvalInRect: b]; [ring setLineWidth: 5]; [ring stroke];
@@ -75,6 +81,7 @@ static BOOL framePending(NSWindow *w) {
     CGFloat start = (phase % 60) * 6.0;
     [arc appendBezierPathWithArcWithCenter: c radius: NSWidth(b) / 2 startAngle: start endAngle: start + 100];
     [arc setLineWidth: 5]; [[NSColor colorWithCalibratedRed: .1 green: .45 blue: .9 alpha: 1] setStroke]; [arc stroke];
+    spinnerMs += now() - t0;
 }
 @end
 
@@ -130,7 +137,8 @@ enum { VerifySteps = 16 };
 
 static void timing(Driver *d) {
     enum { N = 21, F = 5 };
-    double small[N], caret[N], highlight[N], full[F]; int inlineSmall = 0;
+    double small[N], caret[N], highlight[N], full[F], smallDraw[N], smallPresent[N], fullDraw[F], fullPresent[F]; int inlineSmall = 0;
+    double g0 = gradientMs, t0s = tilesMs, s0 = spinnerMs;
     for (int i = 0; i < N; i++) {
         while (framePending(d->window)) [[NSRunLoop currentRunLoop] runMode: NSDefaultRunLoopMode beforeDate: [NSDate dateWithTimeIntervalSinceNow: .002]];
         unsigned long long p0 = stat(d->window, @"clientPresents");
@@ -142,15 +150,28 @@ static void timing(Driver *d) {
         [d->text unlockFocus]; [d->window flushWindow]; caret[i] = now() - t0;
         while (framePending(d->window)) [[NSRunLoop currentRunLoop] runMode: NSDefaultRunLoopMode beforeDate: [NSDate dateWithTimeIntervalSinceNow: .002]];
         t0 = now(); [d->button highlight: !(i & 1)]; [d->window displayIfNeeded]; highlight[i] = now() - t0;
+        // The same spinner update split into the display pass and its present.
+        while (framePending(d->window)) [[NSRunLoop currentRunLoop] runMode: NSDefaultRunLoopMode beforeDate: [NSDate dateWithTimeIntervalSinceNow: .002]];
+        d->spinner->phase++; [d->spinner setNeedsDisplay: YES];
+        t0 = now(); [d->window disableFlushWindow]; [d->window displayIfNeeded]; [d->window enableFlushWindow]; smallDraw[i] = now() - t0;
+        t0 = now(); [d->window flushWindow]; smallPresent[i] = now() - t0;
     }
+    double g1 = gradientMs, t1s = tilesMs, s1 = spinnerMs;
     for (int i = 0; i < F; i++) {
         while (framePending(d->window)) [[NSRunLoop currentRunLoop] runMode: NSDefaultRunLoopMode beforeDate: [NSDate dateWithTimeIntervalSinceNow: .002]];
         double t0 = now(); [d->window display]; full[i] = now() - t0;
+        while (framePending(d->window)) [[NSRunLoop currentRunLoop] runMode: NSDefaultRunLoopMode beforeDate: [NSDate dateWithTimeIntervalSinceNow: .002]];
+        t0 = now(); [d->window disableFlushWindow]; [[d->window contentView] display]; [d->window enableFlushWindow]; fullDraw[i] = now() - t0;
+        t0 = now(); [d->window flushWindow]; fullPresent[i] = now() - t0;
     }
     for (int i = 0; i < N; i++) printf("TIME kind=small i=%d ms=%.3f\nTIME kind=caret i=%d ms=%.3f\nTIME kind=highlight i=%d ms=%.3f\n", i, small[i], i, caret[i], i, highlight[i]);
     for (int i = 0; i < F; i++) printf("TIME kind=full i=%d ms=%.3f\n", i, full[i]);
     printf("SUMMARY timing small_median_ms=%.3f caret_median_ms=%.3f highlight_median_ms=%.3f full_median_ms=%.3f small_presented_inline=%d/%d\n",
            median(small, N), median(caret, N), median(highlight, N), median(full, F), inlineSmall, N);
+    printf("SUMMARY drawrect per_small_update gradient_ms=%.3f tiles_ms=%.3f spinner_ms=%.3f (2 spinner updates per iteration)\n",
+           (g1 - g0) / (2 * N), (t1s - t0s) / (2 * N), (s1 - s0) / (2 * N));
+    printf("SUMMARY split small_draw_median_ms=%.3f small_present_median_ms=%.3f full_draw_median_ms=%.3f full_present_median_ms=%.3f\n",
+           median(smallDraw, N), median(smallPresent, N), median(fullDraw, F), median(fullPresent, F));
     expect(inlineSmall == N, "every small update presented within its display pass");
 }
 
