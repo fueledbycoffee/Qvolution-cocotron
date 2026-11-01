@@ -99,15 +99,6 @@ static NSDictionary *sScrollerButtonAttributes = nil;
     return sBranchArrow;
 }
 
-- (NSInterfacePartAttributedString *) checkMark {
-    static NSInterfacePartAttributedString *sCheckMark = nil;
-
-    if (sCheckMark == nil)
-        sCheckMark = [[NSInterfacePartAttributedString alloc]
-                initWithMarlettCharacter: 0x61];
-    return sCheckMark;
-}
-
 - (NSSize) menuItemSeparatorSize {
     return NSMakeSize(0, 9);
 }
@@ -126,9 +117,8 @@ static NSDictionary *sScrollerButtonAttributes = nil;
 }
 
 - (NSSize) menuItemCheckMarkSize {
-    NSSize result = [[self checkMark] size];
-
-    return result;
+    CGFloat size = ceil([[NSFont menuFontOfSize: 0] pointSize]);
+    return NSMakeSize(size, size);
 }
 
 - (Margins) menuItemGutterMargins {
@@ -303,29 +293,49 @@ static NSDictionary *sScrollerButtonAttributes = nil;
     }
 }
 
+// Coordinates are relative to the font-sized gutter. The menu views are
+// flipped; mirror the vertical coordinates for an unflipped client.
+- (void) drawMenuStateMarkInRect: (NSRect) rect
+                           mixed: (BOOL) mixed
+                         enabled: (BOOL) enabled
+                        selected: (BOOL) selected
+{
+    CGFloat size = MIN(MIN(rect.size.width, rect.size.height),
+                       ceil([[NSFont menuFontOfSize: 0] pointSize]));
+    CGFloat x = NSMidX(rect) - size / 2;
+    CGFloat y = NSMidY(rect) - size / 2;
+    BOOL flipped = [_view isFlipped];
+    NSBezierPath *path = [NSBezierPath bezierPath];
+    NSColor *color = enabled ? (selected ? [NSColor selectedMenuItemTextColor]
+                                         : [NSColor menuItemTextColor])
+                             : [NSColor grayColor];
+    [color set];
+    [path setLineWidth: MAX(1.0, size * 0.13)];
+    [path setLineCapStyle: NSRoundLineCapStyle];
+    [path setLineJoinStyle: NSRoundLineJoinStyle];
+    if (mixed) {
+        [path moveToPoint: NSMakePoint(x + size * 0.23, y + size * 0.5)];
+        [path lineToPoint: NSMakePoint(x + size * 0.77, y + size * 0.5)];
+    } else {
+        [path moveToPoint: NSMakePoint(x + size * 0.16, y + size * (flipped ? 0.51 : 0.49))];
+        [path lineToPoint: NSMakePoint(x + size * 0.39, y + size * (flipped ? 0.73 : 0.27))];
+        [path lineToPoint: NSMakePoint(x + size * 0.84, y + size * (flipped ? 0.27 : 0.73))];
+    }
+    [path stroke];
+}
+
 - (void) drawMenuCheckmarkInRect: (NSRect) rect
                          enabled: (BOOL) enabled
                         selected: (BOOL) selected
 {
-    NSColor *color;
-    NSInterfacePartAttributedString *checkMark;
-    Margins margins = [self menuItemTextMargins];
+    [self drawMenuStateMarkInRect: rect mixed: NO enabled: enabled selected: selected];
+}
 
-    if (enabled)
-        color = selected ? [NSColor selectedControlTextColor]
-                         : [NSColor menuItemTextColor];
-    else
-        color = [NSColor disabledControlTextColor];
-
-    checkMark = [[NSInterfacePartAttributedString alloc]
-            initWithCharacter: 0x61
-                     fontName: @"Marlett"
-                    pointSize: 10
-                        color: color];
-    rect.origin.x += margins.left;
-    rect.origin.y += margins.top;
-
-    [checkMark drawAtPoint: rect.origin];
+- (void) drawMenuMixedMarkInRect: (NSRect) rect
+                        enabled: (BOOL) enabled
+                       selected: (BOOL) selected
+{
+    [self drawMenuStateMarkInRect: rect mixed: YES enabled: enabled selected: selected];
 }
 
 - (void) drawMenuBranchArrowInRect: (NSRect) rect

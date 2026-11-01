@@ -55,6 +55,9 @@ typedef struct _Margins {
 - (void) drawMenuCheckmarkInRect: (NSRect) rect
                          enabled: (BOOL) enabled
                         selected: (BOOL) selected;
+- (void) drawMenuMixedMarkInRect: (NSRect) rect
+                        enabled: (BOOL) enabled
+                       selected: (BOOL) selected;
 - (void) drawMenuItemText: (NSString *) string
                    inRect: (NSRect) rect
                   enabled: (BOOL) enabled

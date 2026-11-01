@@ -206,9 +206,14 @@ static NSRect boundsToTitleAreaRect(NSRect rect) {
                     [[self graphicsStyle] menuItemGutterSize]);
             if ([item state]) {
                 [[self graphicsStyle] drawMenuGutterInRect: partRect];
-                [[self graphicsStyle] drawMenuCheckmarkInRect: partRect
-                                                      enabled: showsEnabled
-                                                     selected: selected];
+                if ([item state] == NSMixedState)
+                    [[self graphicsStyle] drawMenuMixedMarkInRect: partRect
+                                                         enabled: showsEnabled
+                                                        selected: selected];
+                else
+                    [[self graphicsStyle] drawMenuCheckmarkInRect: partRect
+                                                         enabled: showsEnabled
+                                                        selected: selected];
             }
 
             partRect.origin.x += [[self graphicsStyle] menuItemGutterGap];
