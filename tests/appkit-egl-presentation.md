@@ -2,11 +2,14 @@
 
 Opt in per process with DARLING_APPKIT_RENDERER=egl on the Wayland backend.
 Unset or `shm` retains the current wl_shm path. Each root or popup window uses
-its own private compatibility CGL context and native root wl_egl_window. Requested
-EGL failures are explicit, including unavailable EGL, known software renderers,
-insufficient RGBA channel precision, upload/output/verification or swap failure;
-there is no silent shm fallback. This prototype requires desktop OpenGL3+ and
-RGBA8 native buffers. Existing default runtime/device policy is unchanged.
+its own private compatibility CGL context and native root wl_egl_window. When EGL
+cannot present a window (unavailable EGL, a known software renderer, insufficient
+RGBA channel precision, upload/output or swap failure) the window continues on
+wl_shm; the first such reason in a process is logged, and statistics report
+renderer "shm", requested "egl" and the fallbackReason. With
+DARLING_APPKIT_EGL_VERIFY=1 every failure stays fatal instead. This presenter
+requires desktop OpenGL3+ and RGBA8 native buffers. The default renderer is
+unchanged (shm).
 
 Classification: Onyx2D still rasterizes all AppKit drawing on CPU. The actual
 stride-aware CATexImage2DCGImage helper uploads the backing surface; a texture

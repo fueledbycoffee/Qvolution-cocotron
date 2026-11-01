@@ -135,6 +135,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     [_surfaceOutputs release];
     [_clientCapture release];
     [_title release];
+    [_eglFallbackReason release];
     [super dealloc];
 }
 
@@ -1188,7 +1189,9 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
 
 - (NSDictionary *) eglPresentationStatistics {
     O2Surface *surface = [_context surface];
-    return @{@"renderer": _eglRequested ? @"egl" : @"shm", @"swaps": @(_eglSwaps),
+    BOOL egl = _eglRequested && _eglFallbackReason == nil;
+    return @{@"renderer": egl ? @"egl" : @"shm", @"requested": _eglRequested ? @"egl" : @"shm",
+             @"fallbackReason": _eglFallbackReason ? _eglFallbackReason : @"", @"swaps": @(_eglSwaps),
              @"captureRequested": @(_captureRequested), @"captureReady": @(_clientCapture!=nil),
              @"captureError": @(_captureRequested&&!_clientCapture?1:[_clientCapture errorCode]),
              @"clientPresents": @(_clientPresents), @"captured": @([_clientCapture writtenCount]),
@@ -1230,14 +1233,26 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
         NSLog(@"AppKit EGL: cannot restore caller context during teardown");
 }
 
+// Verification exists to catch wrong pixels, so there a failure stays fatal.
+// Otherwise EGL is only an accelerator: the window continues on wl_shm.
 - (void) failEGLPresentation: (NSString *) reason {
-    ++_eglFailures; _eglFailed = YES;
+    ++_eglFailures;
     if (_frameCallback) { WL.wl_proxy_destroy(_frameCallback); _frameCallback = NULL; }
-    [NSException raise:NSInternalInconsistencyException format:@"Requested AppKit EGL presentation failed: %@", reason];
+    if (_eglVerify) {
+        _eglFailed = YES;
+        [NSException raise:NSInternalInconsistencyException format:@"Requested AppKit EGL presentation failed: %@", reason];
+    }
+    [self destroyEGLPresenter];
+    _eglFallbackReason = [reason copy];
+    static BOOL logged;
+    if (!logged || _eglSwaps) {
+        NSLog(@"AppKit EGL: %@; presenting with wl_shm", reason);
+        logged = YES;
+    }
 }
 
-- (BOOL) ensureEGLPresenterWidth: (int32_t) width height: (int32_t) height {
-    if (!_display->_eglAvailable) return NO;
+- (NSString *) ensureEGLPresenterWidth: (int32_t) width height: (int32_t) height {
+    if (!_display->_eglAvailable) return @"EGL is unavailable on this Wayland display";
     if (!_eglContext) {
         CGLPixelFormatAttribute attributes[] = {kCGLPFAAccelerated, 0};
         CGLPixelFormatObj format = NULL; GLint count = 0;
@@ -1245,49 +1260,58 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
         if (error == kCGLNoError && format && count)
             error = CGLCreateContext(format, NULL, &_eglContext);
         if (format) CGLReleasePixelFormat(format);
-        if (error != kCGLNoError || !_eglContext) return NO;
+        if (error != kCGLNoError || !_eglContext) return @"no accelerated CGL context";
         _eglWindow = WL.wl_egl_window_create((struct wl_surface *)_surface, width, height);
-        if (!_eglWindow) return NO;
+        if (!_eglWindow) return @"wl_egl_window_create failed";
         _eglDrawable = CGLGetWindowForContext(_eglContext, _eglWindow);
-        if (!_eglDrawable) return NO;
+        if (!_eglDrawable) return @"no EGL window surface";
     }
     WL.wl_egl_window_resize(_eglWindow, width, height, 0, 0);
-    if (CGLContextMakeCurrentAndAttachToWindow(_eglContext, _eglDrawable) != kCGLNoError) return NO;
+    if (CGLContextMakeCurrentAndAttachToWindow(_eglContext, _eglDrawable) != kCGLNoError) return @"cannot make the EGL context current";
     GLint interval = 0;
-    if (CGLSetParameter(_eglContext, kCGLCPSwapInterval, &interval) != kCGLNoError) return NO;
+    if (CGLSetParameter(_eglContext, kCGLCPSwapInterval, &interval) != kCGLNoError) return @"cannot disable the swap interval";
+    if (_eglPresenter) {
+        _eglWidth = width; _eglHeight = height;
+        return nil;
+    }
     const char *name = (const char *)glGetString(GL_RENDERER), *version = (const char *)glGetString(GL_VERSION);
-    if (!name || !version || strtol(version, NULL, 10) < 3) return NO;
+    if (!name || !version || strtol(version, NULL, 10) < 3) return @"OpenGL 3 or later is required";
     NSString *renderer = [[NSString stringWithUTF8String:name] lowercaseString];
     for (NSString *software in @[@"llvmpipe", @"softpipe", @"swrast", @"software", @"swiftshader", @"lavapipe"])
-        if ([renderer rangeOfString:software].location != NSNotFound) return NO;
+        if ([renderer rangeOfString:software].location != NSNotFound)
+            return [NSString stringWithFormat:@"software renderer %s", name];
     GLint red, green, blue, alpha;
     glGetIntegerv(GL_RED_BITS, &red); glGetIntegerv(GL_GREEN_BITS, &green);
     glGetIntegerv(GL_BLUE_BITS, &blue); glGetIntegerv(GL_ALPHA_BITS, &alpha);
-    if (red < 8 || green < 8 || blue < 8 || alpha < 8) return NO;
-    if (!_eglPresenter) {
-        _eglPresenter = [[CAWindowOpenGLContext alloc] initWithCGLContext:_eglContext];
-        NSLog(@"AppKit EGL experimental CPU-raster/GPU-presentation renderer: %s", name);
+    if (red < 8 || green < 8 || blue < 8 || alpha < 8) return @"no RGBA8 EGL drawable";
+    _eglPresenter = [[CAWindowOpenGLContext alloc] initWithCGLContext:_eglContext];
+    static BOOL announced;
+    if (!announced) {
+        NSLog(@"AppKit EGL: presenting windows through %s", name);
+        announced = YES;
     }
     _eglWidth = width; _eglHeight = height;
-    return YES;
+    return nil;
 }
 
-// `damage` lists the backing-store rectangles changed since the previous
-// present; the presenter still uploads the whole surface.
-- (void) presentEGLSurface: (O2Surface *) surface damage: (const O2SurfaceDamage *) damage {
-    (void) damage;
-    if (_eglFailed) return;
+// Returns NO when the window could not be presented with EGL and must use wl_shm.
+- (BOOL) presentEGLSurface: (O2Surface *) surface {
+    if (_eglFailed) return YES;
     size_t width = O2SurfaceGetWidth(surface), height = O2SurfaceGetHeight(surface);
     CGLContextObj previous = CGLGetCurrentContext();
     NSString *failure = nil;
     BOOL whole = _damageAll || _damageCount == 0;
     @try {
-        if (width > INT32_MAX || height > INT32_MAX || ![self ensureEGLPresenterWidth:(int32_t)width height:(int32_t)height])
-            failure = @"hardware RGBA8 EGL drawable unavailable";
+        if (width > INT32_MAX || height > INT32_MAX)
+            failure = @"surface too large for EGL";
+        else
+            failure = [self ensureEGLPresenterWidth:(int32_t)width height:(int32_t)height];
+        if (failure)
+            ;
         else if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque]
                                          damage:_damage count:whole ? 0 : _damageCount
                                          verify:_eglVerify corrupt:_eglCorrupt])
-            failure = @"texture upload, GPU output or CPU reference verification";
+            failure = @"texture upload, GPU output or CPU reference verification failed";
         else {
             if (_eglVerify) ++_eglChecks;
             if (_display->_compositorVersion >= 3) {
@@ -1305,7 +1329,7 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
             _frameCallback = WaylandCreateObject(_surface, WP_SURFACE_FRAME,
                 &wl_callback_interface, args, WaylandObjectFrameCallback, self);
             if (!_frameCallback || CGLFlushDrawable(_eglContext) != kCGLNoError)
-                failure = @"native EGL swap";
+                failure = @"native EGL swap failed";
             else {
                 ++_clientPresents;
                 [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
@@ -1322,10 +1346,14 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
             }
         }
     } @finally {
-        if (CGLSetCurrentContext(previous) != kCGLNoError)
-            failure = @"restore caller CGL context";
+        if (CGLSetCurrentContext(previous) != kCGLNoError && !failure)
+            failure = @"cannot restore the caller CGL context";
     }
-    if (failure) [self failEGLPresentation:failure];
+    if (failure) {
+        [self failEGLPresentation:failure];
+        return NO;
+    }
+    return YES;
 }
 
 - (void) setSurfaceRegion: (uint32_t) opcode rects: (const O2Rect *) rects count: (int) count {
@@ -1413,12 +1441,8 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     if (pixels == NULL || width == 0 || height == 0 || sourceStride < width * 4)
         return;
 
-    if (_eglRequested) {
-        O2SurfaceDamage damage;
-        O2SurfaceTakeDamage(surface, &damage);
-        [self presentEGLSurface:surface damage:&damage];
+    if (_eglRequested && _eglFallbackReason == nil && [self presentEGLSurface:surface])
         return;
-    }
 
     // Onyx2D's premultiplied, little-endian ARGB is wl_shm's ARGB8888.
     uint32_t format = [self presentsOpaque] ? WP_SHM_FORMAT_XRGB8888 : WP_SHM_FORMAT_ARGB8888;

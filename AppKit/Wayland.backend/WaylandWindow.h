@@ -120,6 +120,8 @@ struct WaylandBuffer {
     BOOL _maskedFrameValid, _damageVerify;
     uint64_t _damageRects, _damagePixels, _copiedPixels, _wholeDamagePresents;
     uint64_t _verifiedPresents, _staleVerifiedPresents;
+    // Set when EGL was requested but cannot present this window; it then uses wl_shm.
+    NSString *_eglFallbackReason;
     uint64_t _eglFullUploads, _eglPartialUploads, _eglLastUploadBytes;
     // Backing-surface damage since the last present; none reported means everything.
     CGRect _damage[16];
