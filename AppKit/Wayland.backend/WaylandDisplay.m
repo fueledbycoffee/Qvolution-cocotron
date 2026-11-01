@@ -47,6 +47,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <limits.h>
+#include <fcntl.h>
 
 @interface WaylandScreen : NSScreen {
 @public
@@ -134,6 +135,8 @@ static void WaylandCopyOutputText(NSString **destination, const char *text) {
                  arguments: (union wl_argument *) args;
 - (void) attachLogicalOutput: (WaylandOutput *) output;
 - (void) processPendingEvents;
+- (void) observeRunLoop: (CFRunLoopActivity) activity;
+- (void) logEventCheck: (const char *) reason requestedMode: (CFStringRef) requested;
 - (void) handleEvent: (uint32_t) opcode
                 kind: (WaylandObjectKind) kind
                proxy: (struct wl_proxy *) proxy
@@ -215,7 +218,8 @@ struct wl_proxy *WaylandCreateObject(struct wl_proxy *proxy, uint32_t opcode,
                                      union wl_argument *args,
                                      WaylandObjectKind kind, id object)
 {
-    struct wl_proxy *created = WaylandMarshal(proxy, opcode, interface, 0, args);
+    struct wl_proxy *created = WaylandMainQueueObject(&WL, proxy, opcode,
+                                                     interface, args);
     if (created == NULL) {
         NSLog(@"Wayland backend: cannot create a %s", interface->name);
         exit(1);
@@ -226,10 +230,30 @@ struct wl_proxy *WaylandCreateObject(struct wl_proxy *proxy, uint32_t opcode,
     return created;
 }
 
-static void socketCallback(CFSocketRef socket, CFSocketCallBackType type,
-                           CFDataRef address, const void *data, void *info)
-{
-    [(WaylandDisplay *) info processPendingEvents];
+static void sourceCallback(void *info) {
+    [(WaylandDisplay *)info processPendingEvents];
+}
+
+static void wakeMain(void *info) {
+    WaylandEventTarget *target = info;
+    if (target->pump->boundaries) {
+        // Query the target even when it never handles our source (for example
+        // a direct CF wait in a private mode that bypasses nextEvent:).
+        CFStringRef currentMode = CFRunLoopCopyCurrentMode(target->loop);
+        char mode[256] = "none";
+        if (currentMode) CFStringGetCString(currentMode, mode, sizeof(mode), kCFStringEncodingUTF8);
+        dprintf(target->pump->boundaryFD,
+                "QV_WAYLAND wake_target pid=%d display=%p queue=default source_loop=%p mode=%s\n",
+                getpid(), target->pump->display, target->loop, mode);
+        if (currentMode) CFRelease(currentMode);
+    }
+    CFRunLoopSourceSignal(target->source);
+    CFRunLoopWakeUp(target->loop);
+}
+
+static void stallObserver(CFRunLoopObserverRef observer,
+                          CFRunLoopActivity activity, void *info) {
+    [(WaylandDisplay *)info observeRunLoop: activity];
 }
 
 static void repeatTimerCallback(CFRunLoopTimerRef timer, void *info) {
@@ -294,6 +318,53 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         return nil;
     }
 
+    // NSDisplay is thread-local (NSThreadSharedInstance). Its callbacks must
+    // run on the loop that owns its event queue, not an unrelated main loop.
+    _eventTarget.loop = (CFRunLoopRef)CFRetain(CFRunLoopGetCurrent());
+    _eventTarget.pump = &_eventPump;
+    _eventModes = [NSMutableSet new];
+    const char *boundaries = getenv("DARLING_WAYLAND_BOUNDARIES");
+    if (boundaries && strcmp(boundaries, "1") == 0) {
+        const char *path = getenv("DARLING_WAYLAND_BOUNDARY_LOG");
+        _eventPump.boundaryFD = path && *path ?
+                open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600) : -1;
+        if (_eventPump.boundaryFD < 0) {
+            NSLog(@"Wayland backend: boundaries require a writable DARLING_WAYLAND_BOUNDARY_LOG");
+            [self release];
+            return nil;
+        }
+        _eventPump.boundaries = true;
+        _lastBoundaryTime = WaylandBoundaryMilliseconds();
+        _lastBoundaryMode = CFRetain(CFSTR("startup"));
+        CFRunLoopObserverContext observerContext = {.version = 0, .info = self};
+        _stallObserver = CFRunLoopObserverCreate(NULL, kCFRunLoopAllActivities,
+                true, 0, stallObserver, &observerContext);
+        if (!_stallObserver) { [self release]; return nil; }
+        CFRunLoopAddObserver(_eventTarget.loop, _stallObserver, kCFRunLoopCommonModes);
+        dprintf(_eventPump.boundaryFD, "QV_WAYLAND enabled pid=%d threshold_ms=100\n", getpid());
+    }
+
+    _eventPump.library = &WL;
+    _eventPump.display = _wlDisplay;
+    _eventPump.queue = WL.wl_display_create_queue(_wlDisplay);
+    if (!_eventPump.queue) {
+        [self release];
+        return nil;
+    }
+
+    CFRunLoopSourceContext context = {.version = 0, .info = self,
+                                       .perform = sourceCallback};
+    _eventTarget.source = CFRunLoopSourceCreate(NULL, 0, &context);
+    _eventPump.wake = wakeMain;
+    _eventPump.info = &_eventTarget;
+    if (_eventTarget.source == NULL) {
+        NSLog(@"Wayland backend: cannot create the compositor run-loop source");
+        [self release];
+        return nil;
+    }
+    CFRunLoopAddSource(_eventTarget.loop, _eventTarget.source, kCFRunLoopCommonModes);
+    [self logEventCheck: "source_registered" requestedMode: kCFRunLoopCommonModes];
+
     union wl_argument args[1] = {{.o = NULL}};
     _registry = WaylandCreateObject((struct wl_proxy *) _wlDisplay,
                                     WP_DISPLAY_GET_REGISTRY,
@@ -302,12 +373,24 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
     // The first roundtrip delivers the globals; the second one the initial
     // events of the objects bound meanwhile (output modes, seat capabilities).
-    if (WL.wl_display_roundtrip(_wlDisplay) < 0 ||
-        WL.wl_display_roundtrip(_wlDisplay) < 0)
+    int roundtrip1 = WL.wl_display_roundtrip(_wlDisplay);
+    int roundtripErrno1 = roundtrip1 < 0 ? WL.native_errno() : 0;
+    int roundtrip2 = roundtrip1 < 0 ? -1 : WL.wl_display_roundtrip(_wlDisplay);
+    if (_eventPump.boundaries)
+        dprintf(_eventPump.boundaryFD,
+                "QV_WAYLAND roundtrip pid=%d display=%p first=%d first_errno=%d second=%d second_errno=%d\n",
+                getpid(), _wlDisplay, roundtrip1, roundtripErrno1, roundtrip2,
+                roundtrip2 < 0 ? WL.native_errno() : 0);
+    if (roundtrip1 < 0 || roundtrip2 < 0)
     {
         NSLog(@"Wayland backend: the compositor connection failed during setup "
               @"(error %d), trying the next backend",
               WL.wl_display_get_error(_wlDisplay));
+        [self release];
+        return nil;
+    }
+    if (_wmBase && !_eventPump.started) {
+        NSLog(@"Wayland backend: cannot start the compositor event pump");
         [self release];
         return nil;
     }
@@ -363,26 +446,10 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
             &wp_viewport_interface, viewport, 0, nil);
     }
 
-    CFSocketContext context = {.version = 0, .info = self};
-    _wlSocket = CFSocketCreateWithNative(NULL, WL.wl_display_get_fd(_wlDisplay),
-                                         kCFSocketReadCallBack, socketCallback,
-                                         &context);
-    if (_wlSocket != NULL) {
-        // The descriptor belongs to libwayland.
-        CFSocketSetSocketFlags(_wlSocket, CFSocketGetSocketFlags(_wlSocket) &
-                                                  ~kCFSocketCloseOnInvalidate);
-        _wlSource = CFSocketCreateRunLoopSource(NULL, _wlSocket, 0);
-    }
-    if (_wlSource == NULL) {
-        NSLog(@"Wayland backend: cannot watch the compositor connection, trying "
-              @"the next backend");
-        [self release];
-        return nil;
-    }
-    CFRunLoopAddSource(CFRunLoopGetMain(), _wlSource, kCFRunLoopCommonModes);
 
     [self runAfterDispatchBlocks];
     [self flush];
+    [self logEventCheck: "setup_complete" requestedMode: NULL];
 
     NSLog(@"Wayland backend: connected, %lu output(s), seat %s, decorations %s",
           (unsigned long) [_outputs count], _seat ? "present" : "missing",
@@ -391,6 +458,13 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 }
 
 - (void) dealloc {
+    WaylandPumpStop(&_eventPump);
+    if (_stallObserver) {
+        CFRunLoopObserverInvalidate(_stallObserver);
+        CFRelease(_stallObserver);
+    }
+    if (_lastBoundaryMode) CFRelease(_lastBoundaryMode);
+    if (_eventPump.boundaries) close(_eventPump.boundaryFD);
     [_draggingManager invalidate];
     [_draggingManager release];
     [self consumeDragPress];
@@ -403,15 +477,13 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     [self cancelPendingModifier];
     [_heldKeyIdentities release];
 
-    if (_wlSource != NULL) {
-        CFRunLoopRemoveSource(CFRunLoopGetMain(), _wlSource,
-                              kCFRunLoopCommonModes);
-        CFRelease(_wlSource);
+    if (_eventTarget.source != NULL) {
+        // Invalidate removes the source from every explicitly serviced mode.
+        CFRunLoopSourceInvalidate(_eventTarget.source);
+        CFRelease(_eventTarget.source);
     }
-    if (_wlSocket != NULL) {
-        CFSocketInvalidate(_wlSocket);
-        CFRelease(_wlSocket);
-    }
+    [_eventModes release];
+    if (_eventTarget.loop) CFRelease(_eventTarget.loop);
     if (_xkbState != NULL)
         WL.xkb_state_unref(_xkbState);
     if (_xkbKeymap != NULL)
@@ -435,6 +507,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
             if (output->_logicalProxy) WL.wl_proxy_destroy(output->_logicalProxy);
             WL.wl_proxy_destroy(output->_proxy);
         }
+        if (_eventPump.queue) WL.wl_event_queue_destroy(_eventPump.queue);
         WL.wl_display_disconnect(_wlDisplay);
     }
 
@@ -454,9 +527,44 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
 
 #pragma mark - Connection and event loop
 
+- (void) logEventCheck: (const char *) reason requestedMode: (CFStringRef) requested {
+    if (!_eventPump.boundaries) return;
+    CFRunLoopRef current = CFRunLoopGetCurrent();
+    CFStringRef currentMode = CFRunLoopCopyCurrentMode(current);
+    char mode[256] = "none", wanted[256] = "none";
+    if (currentMode) CFStringGetCString(currentMode, mode, sizeof(mode), kCFStringEncodingUTF8);
+    if (requested) CFStringGetCString(requested, wanted, sizeof(wanted), kCFStringEncodingUTF8);
+    dprintf(_eventPump.boundaryFD,
+            "QV_WAYLAND check pid=%d display=%p queue=default reason=%s check=%lu mode=%s requested=%s current_loop=%p main_loop=%p source_loop=%p fd=%d\n",
+            getpid(), _wlDisplay, reason, ++_mainChecks, mode, wanted,
+            current, CFRunLoopGetMain(), _eventTarget.loop, WL.wl_display_get_fd(_wlDisplay));
+    if (currentMode) CFRelease(currentMode);
+}
+
+- (void) observeRunLoop: (CFRunLoopActivity) activity {
+    [self logEventCheck: "observer" requestedMode: NULL];
+    double now = WaylandBoundaryMilliseconds();
+    double elapsed = now - _lastBoundaryTime;
+    // A sleeping run loop is responsive idle time, not main-thread work.
+    if (_lastBoundaryActivity != kCFRunLoopBeforeWaiting && elapsed > 100) {
+        char mode[256] = "unknown";
+        if (_lastBoundaryMode)
+            CFStringGetCString(_lastBoundaryMode, mode, sizeof(mode), kCFStringEncodingUTF8);
+        dprintf(_eventPump.boundaryFD,
+                "QV_WAYLAND main_stall pid=%d duration_ms=%.3f mode=%s activity=%lu\n",
+                getpid(), elapsed, mode, (unsigned long)_lastBoundaryActivity);
+    }
+    __atomic_add_fetch(&_eventPump.mainActivities, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&_eventPump.lastActivity, (unsigned long)activity, __ATOMIC_RELAXED);
+    if (_lastBoundaryMode) CFRelease(_lastBoundaryMode);
+    _lastBoundaryMode = CFRunLoopCopyCurrentMode(_eventTarget.loop);
+    _lastBoundaryTime = now;
+    _lastBoundaryActivity = activity;
+}
+
 - (void) flush {
     if (_wlDisplay != NULL)
-        WL.wl_display_flush(_wlDisplay);
+        WaylandRecordedFlush(&_eventPump, "main", NULL);
 }
 
 - (void) connectionFailed {
@@ -486,26 +594,21 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     if (_wlDisplay == NULL)
         return;
 
-    while (WL.wl_display_prepare_read(_wlDisplay) != 0) {
-        if (WL.wl_display_dispatch_pending(_wlDisplay) < 0)
-            [self connectionFailed];
-    }
-    WL.wl_display_flush(_wlDisplay);
+    if (__atomic_load_n(&_eventPump.error, __ATOMIC_ACQUIRE))
+        [self connectionFailed];
 
-    struct pollfd pfd = {.fd = WL.wl_display_get_fd(_wlDisplay),
-                         .events = POLLIN};
-    if (poll(&pfd, 1, 0) > 0) {
-        if (WL.wl_display_read_events(_wlDisplay) < 0)
-            [self connectionFailed];
-    } else {
-        WL.wl_display_cancel_read(_wlDisplay);
-    }
-
-    if (WL.wl_display_dispatch_pending(_wlDisplay) < 0)
+    [self logEventCheck: "dispatch_pending" requestedMode: NULL];
+    int count = WL.wl_display_dispatch_pending(_wlDisplay);
+    if (count > 0) _mainEvents += count;
+    if (_eventPump.boundaries)
+        dprintf(_eventPump.boundaryFD,
+                "QV_WAYLAND dispatch pid=%d display=%p queue=default queue_id=default count=%d total=%lu error=%d\n",
+                getpid(), _wlDisplay, count, _mainEvents, WL.wl_display_get_error(_wlDisplay));
+    if (count < 0)
         [self connectionFailed];
 
     [self runAfterDispatchBlocks];
-    WL.wl_display_flush(_wlDisplay);
+    WaylandRecordedFlush(&_eventPump, "process_events", NULL);
 }
 
 - (NSEvent *) nextEventMatchingMask: (NSEventMask) mask
@@ -513,6 +616,17 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                              inMode: (NSRunLoopMode) mode
                             dequeue: (BOOL) dequeue
 {
+    // A caller can ask for a mode outside the common set. Without this, a
+    // worker read signals a source that runMode: never handles, leaving the
+    // default queue pending while the caller waits for its first event.
+    if (mode && ![_eventModes containsObject: mode]) {
+        CFRunLoopAddSource(_eventTarget.loop, _eventTarget.source, (CFStringRef)mode);
+        if (_stallObserver)
+            CFRunLoopAddObserver(_eventTarget.loop, _stallObserver, (CFStringRef)mode);
+        [_eventModes addObject: mode];
+        [self logEventCheck: "mode_registered" requestedMode: (CFStringRef) mode];
+    }
+    [self logEventCheck: "next_event" requestedMode: (CFStringRef) mode];
     [self processPendingEvents];
 
     // NSDisplay's queue handling, without X11Display's X event processing.
@@ -536,6 +650,7 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
     args[2].u = version;
     args[3].o = NULL;
 
+    __atomic_add_fetch(&WaylandRequestsMarshalled, 1, __ATOMIC_RELEASE);
     struct wl_proxy *proxy = WL.wl_proxy_marshal_array_flags(
             _registry, WP_REGISTRY_BIND, interface, version, 0, args);
     if (proxy == NULL) {
@@ -584,8 +699,13 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
         _wmBase = [self bindGlobal: name
                          interface: &xdg_wm_base_interface
                            version: MIN(version, 3)
-                              kind: WaylandObjectWmBase
-                            object: self];
+                              kind: 0
+                            object: nil];
+        WL.wl_proxy_set_queue(_wmBase, _eventPump.queue);
+        WL.wl_proxy_add_dispatcher(_wmBase, WaylandPingDispatch, &WL, &_eventPump);
+        // Protect setup roundtrips and EGL/cursor initialization as well as
+        // application work after -init returns.
+        WaylandPumpStart(&_eventPump);
     } else if (strcmp(interface, "zxdg_decoration_manager_v1") == 0 &&
                _decorationManager == NULL)
     {
@@ -866,13 +986,6 @@ static NSString *stringWithCodepoint(uint32_t codepoint) {
                          version: args[2].u];
         else if (opcode == WP_REGISTRY_EV_GLOBAL_REMOVE)
             [self registryGlobalRemoved: args[0].u];
-        break;
-
-    case WaylandObjectWmBase:
-        if (opcode == WP_WM_BASE_EV_PING) {
-            union wl_argument pong[1] = {{.u = args[0].u}};
-            WaylandMarshal(_wmBase, WP_WM_BASE_PONG, NULL, 0, pong);
-        }
         break;
 
     case WaylandObjectOutput:
@@ -1775,7 +1888,7 @@ static NSUInteger modifierDeviceMask(int code) {
     _repeatTimer = CFRunLoopTimerCreate(
             NULL, CFAbsoluteTimeGetCurrent() + _repeatDelay / 1000.0,
             1.0 / _repeatRate, 0, 0, repeatTimerCallback, &context);
-    CFRunLoopAddTimer(CFRunLoopGetMain(), _repeatTimer, kCFRunLoopCommonModes);
+    CFRunLoopAddTimer(_eventTarget.loop, _repeatTimer, kCFRunLoopCommonModes);
 }
 
 - (void) stopKeyRepeat {
@@ -1792,7 +1905,7 @@ static NSUInteger modifierDeviceMask(int code) {
         return;
     [self postKeyEventForKeycode: _repeatKeycode pressed: YES repeat: YES];
     // A timer doesn't end -[NSRunLoop runMode:beforeDate:], so wake the event loop.
-    CFRunLoopStop(CFRunLoopGetMain());
+    CFRunLoopStop(_eventTarget.loop);
 }
 
 - (int) keyboardLayoutId {

@@ -941,22 +941,38 @@ static inline void buildTransformsIfNeeded(NSView *self) {
     return [self acceptsFirstResponder];
 }
 
+// Walks the key view chain from start to the first view that can become key. A
+// chain may loop among views that all refuse (a nib can link two scrollers to
+// each other without the starting view being part of the loop); stopping only
+// when the walk returns to the start would then spin forever, so a second
+// pointer moving at half speed also ends the walk when the chain cycles.
+static NSView *QVValidKeyViewInChain(NSView *start, BOOL forward) {
+    NSView *result = forward ? [start nextKeyView] : [start previousKeyView];
+    NSView *slow = result;
+    BOOL advanceSlow = NO;
+
+    while (result != nil && ![result canBecomeKeyView]) {
+        // prevent an infinite loop
+        if (result == start)
+            return nil;
+
+        result = forward ? [result nextKeyView] : [result previousKeyView];
+        if (advanceSlow)
+            slow = forward ? [slow nextKeyView] : [slow previousKeyView];
+        advanceSlow = !advanceSlow;
+        if (result != nil && result == slow)
+            return nil;
+    }
+
+    return result;
+}
+
 - (NSView *) nextKeyView {
     return _nextKeyView;
 }
 
 - (NSView *) nextValidKeyView {
-    NSView *result = [self nextKeyView];
-
-    while (result != nil && ![result canBecomeKeyView]) {
-        // prevent an infinite loop
-        if (result == self)
-            return nil;
-
-        result = [result nextKeyView];
-    }
-
-    return result;
+    return QVValidKeyViewInChain(self, YES);
 }
 
 - (NSView *) previousKeyView {
@@ -964,16 +980,7 @@ static inline void buildTransformsIfNeeded(NSView *self) {
 }
 
 - (NSView *) previousValidKeyView {
-    NSView *result = [self previousKeyView];
-
-    while (result != nil && ![result canBecomeKeyView]) {
-        // prevent an infinite loop
-        if (result == self)
-            return nil;
-        result = [result previousKeyView];
-    }
-
-    return result;
+    return QVValidKeyViewInChain(self, NO);
 }
 
 - (NSMenu *) menu {

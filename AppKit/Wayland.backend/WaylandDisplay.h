@@ -36,6 +36,7 @@
 #include <stdint.h>
 #include <wayland-util.h>
 #include "WaylandFullscreen.h"
+#include "WaylandEventPump.h"
 
 struct wl_display;
 struct wl_proxy;
@@ -49,6 +50,12 @@ struct xkb_state;
 @protocol WaylandFractionalScaleOwner
 - (void) preferredScaleChanged: (uint32_t) scale120;
 @end
+
+typedef struct {
+    CFRunLoopRef loop;
+    CFRunLoopSourceRef source;
+    WaylandEventPump *pump;
+} WaylandEventTarget;
 
 // Identifies the object a dispatched event belongs to.
 typedef enum {
@@ -123,8 +130,14 @@ struct wl_proxy *WaylandCreateObject(struct wl_proxy *proxy, uint32_t opcode,
     WaylandWindow *_lockWindow; // Nonretained; cleared on unmap.
     CGFloat _pinchScale;
     struct wl_proxy *_keyboard;
-    CFSocketRef _wlSocket;
-    CFRunLoopSourceRef _wlSource;
+    WaylandEventPump _eventPump;
+    WaylandEventTarget _eventTarget;
+    NSMutableSet *_eventModes;
+    CFRunLoopObserverRef _stallObserver;
+    double _lastBoundaryTime;
+    CFRunLoopActivity _lastBoundaryActivity;
+    CFStringRef _lastBoundaryMode;
+    unsigned long _mainEvents, _mainChecks;
     NSMutableArray *_outputs;
     NSArray *_screens;
     // WaylandWindows, not retained, most recently activated first.

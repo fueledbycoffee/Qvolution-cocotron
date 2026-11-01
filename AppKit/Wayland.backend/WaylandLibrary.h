@@ -47,6 +47,13 @@
     X(wl_display_get_fd)                                                       \
     X(wl_display_get_error)                                                    \
     X(wl_display_dispatch_pending)                                             \
+    X(wl_display_create_queue)                                                \
+    X(wl_event_queue_destroy)                                                 \
+    X(wl_display_prepare_read_queue)                                          \
+    X(wl_display_dispatch_queue_pending)                                      \
+    X(wl_proxy_set_queue)                                                     \
+    X(wl_proxy_create_wrapper)                                                \
+    X(wl_proxy_wrapper_destroy)                                               \
     X(wl_display_prepare_read)                                                 \
     X(wl_display_read_events)                                                  \
     X(wl_display_cancel_read)                                                  \
@@ -96,6 +103,7 @@ struct WaylandLibrary {
     WAYLAND_CURSOR_FUNCTIONS(WAYLAND_FUNCTION_POINTER)
     WAYLAND_EGL_FUNCTIONS(WAYLAND_FUNCTION_POINTER)
 #undef WAYLAND_FUNCTION_POINTER
+    int (*native_errno)(void);
     // From the native C library, NULL when unavailable.
     int (*memfd_create)(const char *name, unsigned int flags);
     // NO when libwayland-cursor couldn't be loaded; cursors are then left to the compositor.
