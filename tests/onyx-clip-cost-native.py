@@ -64,6 +64,22 @@ size_t RENDER(unsigned trial,int width,int height,void*out){
  size_t bytes=(size_t)width*height*sizeof(*s.pixels);memcpy(out,s.pixels,bytes);
  free(c._viewportClipPhases);dispose(&c);cleanup();return bytes;
 }
+
+size_t PATHRENDER(int kind,void*out){
+ O2Context_builtin c;O2Surface s;init(&c,&s,664,532);
+ // Fractional path phases only: no integral rectangle can pre-narrow this replay.
+ O2Path path=makePath(15.25,11.125,52,53,kind);
+ O2ClipPhase pp={O2ClipPhaseNonZeroPath,&path,YES,0};
+ NSArray stack={2,{&pp,&pp}},domain={1,{&pp}};O2ClipState state={&stack};
+ if(kind==4)c._layerClipPhases=&domain;
+ forceGeneric=NO;replay(&c,&state);
+#ifdef EXPECT_PATH_BOUNDED
+ assert(c._clipContext && c._vpx==15 && c._vpy==11 && c._vpwidth==53 && c._vpheight==54);
+#endif
+ operation(&c,kind);
+ size_t bytes=(size_t)664*532*sizeof(*s.pixels);memcpy(out,s.pixels,bytes);
+ free(c._viewportClipPhases);dispose(&c);cleanup();return bytes;
+}
 double BENCH(int width,int height,int repeats,int kind,int clipped){
  O2Context_builtin c;O2Surface s;init(&c,&s,width,height);
  O2Path invalid=makePath(17,13,48,48,0),path=makePath(15.25,11.125,52,53,4);
@@ -87,7 +103,20 @@ main = r'''
 #include <assert.h>
 size_t candidate_render(unsigned,int,int,void*);size_t reference_render(unsigned,int,int,void*);
 double candidate_bench(int,int,int,int,int);double reference_bench(int,int,int,int,int);
+size_t candidate_path_render(int,void*);size_t reference_path_render(int,void*);
 int main(int argc,char**argv){setbuf(stdout,NULL);
+ int pathonly=argc>1&&!strcmp(argv[1],"path-only");
+ if(argc==1||pathonly){
+  size_t n=(size_t)664*532*16;void*a=malloc(n),*b=malloc(n);assert(a&&b);
+  for(int i=0;i<4;i++){
+   int kind=(int[]){0,1,2,4}[i];
+   assert(candidate_path_render(kind,a)==n&&reference_path_render(kind,b)==n);
+   assert(!memcmp(a,b,n));
+  }
+  free(a);free(b);puts("PASS 4 path-only full bitmap comparisons; candidate viewport=53x54 (including inherited layer)");
+  if(pathonly)return 0;
+ }
+
  if(argc>1){int repeats=argc>2?atoi(argv[2]):30;int old=strcmp(argv[1],"reference")==0;
   for(int size=0;size<3;size++)for(int clip=0;clip<2;clip++)for(int kind=0;kind<3;kind++){
    int width=(int[]){96,1932,3864}[size],height=(int[]){80,1144,2288}[size];
@@ -122,6 +151,7 @@ for scalar in ['float', 'double']:
                  'original_fixture_main', 'O2PathIsRect', 'O2PointApplyAffineTransform']
         defines = ''.join('#define '+name+' '+label+'_'+name+'\n' for name in names)
         src = defines + src.replace('typedef double O2Float;', 'typedef '+scalar+' O2Float;')
+        src = '#define PATHRENDER '+label+'_path_render\n' + ('#define EXPECT_PATH_BOUNDED\n' if label == 'candidate' else '') + src
         path = a.out / (label+'-'+scalar+'.c')
         path.write_text(src)
         obj = path.with_suffix('.o')

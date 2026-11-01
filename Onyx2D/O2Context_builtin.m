@@ -417,6 +417,33 @@ static void clipToPath(O2Context_builtin *self, O2Path *path, int fillRule,
         [paint release];
         VGPath *vgPath = [[VGPath alloc] initWithKGPath: path];
         VGPathFill(vgPath, O2AffineTransformIdentity, phase);
+        // VGPathFill closes contours. Outside their flattened edge bounds the
+        // sample mask is zero, so later intersections need not visit it.
+        double minX = self->_vpx + self->_vpwidth, maxX = self->_vpx;
+        double minY = self->_vpy + self->_vpheight, maxY = self->_vpy;
+        BOOL finiteBounds = YES;
+        for (int i = 0; i < phase->_edgeCount; i++) {
+            Edge *edge = phase->_edges[i];
+            if (!isfinite(edge->v0.x) || !isfinite(edge->v1.x) ||
+                    !isfinite(edge->v0.y) || !isfinite(edge->v1.y)) {
+                finiteBounds = NO;
+                break;
+            }
+            minX = MIN(minX, MIN(edge->v0.x, edge->v1.x));
+            maxX = MAX(maxX, MAX(edge->v0.x, edge->v1.x));
+            minY = MIN(minY, edge->v0.y);
+            maxY = MAX(maxY, edge->v1.y);
+        }
+        if (finiteBounds) {
+            int endX = self->_vpx + self->_vpwidth;
+            int endY = self->_vpy + self->_vpheight;
+            int x = MIN(endX, MAX((double)self->_vpx, floor(minX)));
+            int y = MIN(endY, MAX((double)self->_vpy, floor(minY)));
+            endX = MAX(x, MIN((double)endX, ceil(maxX)));
+            endY = MAX(y, MIN((double)endY, ceil(maxY)));
+            O2RasterizerSetViewport(self, x, y, endX - x, endY - y);
+            O2RasterizerSetViewport(phase, x, y, endX - x, endY - y);
+        }
         O2DContextClipAndFillEdges(phase, fillRule);
         [vgPath release];
     }
