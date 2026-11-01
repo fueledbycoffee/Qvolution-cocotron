@@ -115,6 +115,7 @@ static void renderFreeTypeBitmap(O2Context_builtin_FT *self, O2Surface *surface,
 
     if (maxX <= minX || maxY <= minY)
         return;
+    O2SurfaceAddDamage(surface, minX, minY, maxX - minX, maxY - minY);
     NSInteger renderWidth = maxX - minX;
     NSInteger renderHeight = maxY - minY;
 

@@ -131,6 +131,7 @@ set(Onyx2D_sources
 	O2Shading.m
 	O2Shading+PDF.m
 	O2Surface.m
+	O2SurfaceDamage.m
 	O2TIFFImageDirectory.m
 	O2TTFDecoder.m
 	O2zlib.m

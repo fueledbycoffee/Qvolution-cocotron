@@ -31,6 +31,7 @@
 #import <Onyx2D/O2Image.h>
 
 #import <Onyx2D/VGmath.h>
+#import <Onyx2D/O2SurfaceDamage.h>
 #import <pthread.h>
 
 #ifdef __cplusplus
@@ -70,6 +71,7 @@ typedef void (*O2SurfaceWriteSpan_argb32f)(O2Surface *self, int x, int y,
 
     BOOL m_ownsData;
     pthread_mutex_t _lock;
+    O2SurfaceDamage *_damage; // NULL unless damage is tracked
 }
 
 - initWithBytes: (void *) bytes
@@ -92,6 +94,16 @@ size_t O2SurfaceGetHeight(O2Surface *surface);
 size_t O2SurfaceGetBytesPerRow(O2Surface *surface);
 
 O2ImageRef O2SurfaceCreateImage(O2Surface *surface);
+
+// Damage tracking, for a surface that is presented (a window's backing store):
+// what drawing wrote since the presenter last took the damage. Off by default;
+// turning it on marks the whole surface damaged.
+void O2SurfaceSetTracksDamage(O2Surface *surface, BOOL tracks);
+void O2SurfaceAddDamage(O2Surface *surface, int64_t x, int64_t y, int64_t width,
+                        int64_t height);
+// Copies the damage accumulated since the last take and empties it. NO, with an
+// empty result, when the surface does not track damage.
+BOOL O2SurfaceTakeDamage(O2Surface *surface, O2SurfaceDamage *damage);
 
 void O2SurfaceLock(O2Surface *surface);
 void O2SurfaceUnlock(O2Surface *surface);
