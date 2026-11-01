@@ -69,6 +69,7 @@ include_directories(
 )
 
 set(CoreGraphics_sources
+	CGImportSupport.m
 	CGAffineTransform.m
 	CGBitmapContext.m
 	CGColor.m
@@ -148,6 +149,66 @@ add_framework(CoreGraphics
 # src/external/swift (installed as /usr/lib/swift/libswiftCoreGraphics.dylib) so those binds resolve.
 set_property(TARGET CoreGraphics APPEND_STRING PROPERTY
 	LINK_FLAGS " -Wl,-reexport_library,${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCoreGraphics.dylib -Wl,-rpath,/usr/lib/swift ")
+
+# Optional source-built supplement for the x86_64 Swift imports found by the
+# application audit. Darwin stdlib/overlay modules must come from the matching
+# Swift compiler build. Never synthesize Swift ABI metadata in C or assembly.
+set(DARLING_COREGRAPHICS_SWIFTC "" CACHE FILEPATH "Darwin-capable Swift compiler")
+set(DARLING_COREGRAPHICS_SWIFT_RESOURCE_DIR "" CACHE PATH "Darwin Swift resource directory")
+set(DARLING_COREGRAPHICS_SWIFT_MODULES_DIR "" CACHE PATH "Matching Darwin overlay modules")
+if(DARLING_COREGRAPHICS_SWIFTC AND BUILD_TARGET_64BIT AND APPLE_ARCH_64BIT STREQUAL "x86_64")
+    if(NOT DARLING_COREGRAPHICS_SWIFT_RESOURCE_DIR OR NOT DARLING_COREGRAPHICS_SWIFT_MODULES_DIR)
+        message(FATAL_ERROR "CoreGraphics Swift imports require matching Darwin Swift modules")
+    endif()
+    set(import_object "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports/CoreGraphicsImports.o")
+    file(GLOB_RECURSE import_headers "${CMAKE_CURRENT_SOURCE_DIR}/include/CoreGraphics/*.h")
+    add_custom_command(OUTPUT "${import_object}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports"
+        COMMAND "${DARLING_COREGRAPHICS_SWIFTC}" -frontend -c
+            "${CMAKE_CURRENT_SOURCE_DIR}/SwiftImportSupport.swift"
+            -target x86_64-apple-macosx26.0
+            -sdk "${CMAKE_SOURCE_DIR}/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+            -resource-dir "${DARLING_COREGRAPHICS_SWIFT_RESOURCE_DIR}"
+            -module-cache-path "${CMAKE_CURRENT_BINARY_DIR}/SwiftImports/module-cache"
+            -module-name CoreGraphics -enable-library-evolution -parse-as-library -swift-version 5 -O
+            -I "${DARLING_COREGRAPHICS_SWIFT_MODULES_DIR}"
+            -I "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            -Xcc "-fmodule-map-file=${CMAKE_SOURCE_DIR}/src/external/swift/overlays/shims/overlay-shims.modulemap"
+            -Xcc "-I${CMAKE_SOURCE_DIR}/src/frameworks/CoreServices/include"
+            -o "${import_object}"
+        DEPENDS SwiftImportSupport.swift ${import_headers}
+        VERBATIM)
+    set_source_files_properties("${import_object}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+    set(DARLING_LIB_64BIT_ONLY TRUE)
+    set(DYLIB_INSTALL_NAME "/usr/lib/swift/libswiftCoreGraphicsImports.dylib")
+    add_darling_library(swiftCoreGraphicsImports SHARED "${import_object}")
+    unset(DARLING_LIB_64BIT_ONLY)
+    unset(DYLIB_INSTALL_NAME)
+    set_target_properties(swiftCoreGraphicsImports PROPERTIES LINKER_LANGUAGE C)
+    # CoreGraphics C calls resolve in the reexporting parent framework. Linking
+    # to that target here would introduce a build dependency cycle.
+    foreach(entry CGAffineTransformIdentity CGContextFillPath CGContextEOFillPath
+        CGContextShowGlyphsAtPositions CGPathMoveToPoint CGPathAddLineToPoint
+        CGPathAddCurveToPoint CGPathAddArc CGPathAddPath CGPathAddLines
+        CGPathCreateCopyByStrokingPath CGRectIsNull CGRectEqualToRect CGRectStandardize)
+        set_property(TARGET swiftCoreGraphicsImports APPEND_STRING PROPERTY LINK_FLAGS " -Wl,-U,_${entry}")
+    endforeach()
+    target_link_directories(swiftCoreGraphicsImports PRIVATE "${CMAKE_SOURCE_DIR}/src/external/swift")
+    target_link_libraries(swiftCoreGraphicsImports PRIVATE system CoreFoundation
+        "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCoreGraphics.dylib"
+        "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftObjectiveC.dylib"
+        "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftDispatch.dylib"
+        "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCore.dylib"
+        "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftCoreFoundation.dylib"
+        "${CMAKE_SOURCE_DIR}/src/external/swift/libswiftDarwin.dylib")
+    add_dependencies(CoreGraphics swiftCoreGraphicsImports)
+    set_property(TARGET CoreGraphics APPEND_STRING PROPERTY LINK_FLAGS
+        " -Wl,-reexport_library,${CMAKE_CURRENT_BINARY_DIR}/libswiftCoreGraphicsImports.dylib")
+    # ld64 must resolve the reexport while linking clients in the build tree.
+    set_property(TARGET CoreGraphics APPEND PROPERTY INTERFACE_LINK_OPTIONS
+        "-Wl,-dylib_file,/usr/lib/swift/libswiftCoreGraphicsImports.dylib:${CMAKE_CURRENT_BINARY_DIR}/libswiftCoreGraphicsImports.dylib")
+    install(TARGETS swiftCoreGraphicsImports DESTINATION libexec/darling/usr/lib/swift)
+endif()
 
 # NSBundle finds the backends through the framework's Resources link.
 InstallSymlink("Versions/Current/Resources" "${CMAKE_INSTALL_PREFIX}/libexec/darling/System/Library/Frameworks/CoreGraphics.framework/Resources")

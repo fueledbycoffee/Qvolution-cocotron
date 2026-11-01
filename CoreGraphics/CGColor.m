@@ -113,3 +113,23 @@ CGColorRef CGColorGetConstantColor(CFStringRef colorName) {
 const CFStringRef kCGColorWhite = CFSTR("kCGColorWhite");
 const CFStringRef kCGColorBlack = CFSTR("kCGColorBlack");
 const CFStringRef kCGColorClear = CFSTR("kCGColorClear");
+
+#include <CoreFoundation/CFRuntime.h>
+#include <pthread.h>
+
+static CFTypeID colorTypeID;
+static pthread_once_t colorTypeOnce = PTHREAD_ONCE_INIT;
+static void registerColorType(void)
+{
+    static const CFRuntimeClass colorClass = { .version = 0, .className = "CGColor" };
+    colorTypeID = _CFRuntimeRegisterClass(&colorClass);
+}
+CFTypeID CGColorGetTypeID(void)
+{
+    pthread_once(&colorTypeOnce, registerColorType);
+    return colorTypeID;
+}
+
+@implementation O2Color (CGColorTypeIdentity)
+- (CFTypeID)_cfTypeID { return CGColorGetTypeID(); }
+@end

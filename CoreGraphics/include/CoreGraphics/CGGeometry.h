@@ -110,4 +110,5 @@ bool CGSizetMakeWithDictionaryRepresentation(CFDictionaryRef dict,
 CFDictionaryRef CGRectCreateDictionaryRepresentation(CGRect rect);
 bool CGRectMakeWithDictionaryRepresentation(CFDictionaryRef dict, CGRect *rect);
 
+COREGRAPHICS_EXPORT CGRect CGRectStandardize(CGRect rect);
 #endif /* CGGEOMETRY_H */

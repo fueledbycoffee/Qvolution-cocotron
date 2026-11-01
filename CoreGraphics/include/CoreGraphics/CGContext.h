@@ -423,4 +423,5 @@ CGContextShowGlyphsAtPositions(CGContextRef context,
 
 CF_IMPLICIT_BRIDGING_DISABLED
 
+COREGRAPHICS_EXPORT void CGContextBeginTransparencyLayerWithRect(CGContextRef context, CGRect rect, CFDictionaryRef info);
 #endif /* CGCONTEXT_H */

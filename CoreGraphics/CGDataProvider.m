@@ -42,3 +42,11 @@ CGDataProviderCreateWithData(void *info, const void *data, size_t size,
 COREGRAPHICS_EXPORT CFDataRef CGDataProviderCopyData(CGDataProviderRef self) {
     return (CFDataRef) O2DataProviderCopyData((O2DataProviderRef)self);
 }
+
+CGDataProviderRef CGDataProviderCreateSequential(void *info,
+    const CGDataProviderSequentialCallbacks *callbacks)
+{
+    // Current Onyx2D providers require seekable input. Do not consume or take
+    // ownership of a caller's stream when provider creation fails.
+    return NULL;
+}

@@ -314,3 +314,16 @@ bool CGRectContainsRect(CGRect a, CGRect b) {
             CGRectGetMinY(b) >= CGRectGetMinY(a) &&
             CGRectGetMaxY(b) <= CGRectGetMaxY(a));
 }
+
+CGRect CGRectStandardize(CGRect rect)
+{
+    if (rect.size.width < 0) {
+        rect.origin.x += rect.size.width;
+        rect.size.width = -rect.size.width;
+    }
+    if (rect.size.height < 0) {
+        rect.origin.y += rect.size.height;
+        rect.size.height = -rect.size.height;
+    }
+    return rect;
+}

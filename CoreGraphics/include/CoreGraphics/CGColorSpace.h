@@ -89,4 +89,13 @@ COREGRAPHICS_EXPORT bool CGColorSpaceIsHLGBased(CGColorSpaceRef space);
 
 CF_IMPLICIT_BRIDGING_DISABLED
 
+COREGRAPHICS_EXPORT const CFStringRef kCGColorSpaceDisplayP3_HLG;
+COREGRAPHICS_EXPORT const CFStringRef kCGColorSpaceDisplayP3_PQ;
+COREGRAPHICS_EXPORT const CFStringRef kCGColorSpaceExtendedLinearITUR_2020;
+COREGRAPHICS_EXPORT CFDataRef CGColorSpaceCopyICCData(CGColorSpaceRef space);
+COREGRAPHICS_EXPORT CFPropertyListRef CGColorSpaceCopyPropertyList(CGColorSpaceRef space);
+COREGRAPHICS_EXPORT CGColorSpaceRef CGColorSpaceCreateWithICCData(CFDataRef data);
+struct O2DataProvider;
+COREGRAPHICS_EXPORT CGColorSpaceRef CGColorSpaceCreateICCBased(size_t nComponents, const CGFloat *range, struct O2DataProvider *profile, CGColorSpaceRef alternate);
+
 #endif /* CGCOLORSPACE_H */
