@@ -1323,13 +1323,16 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     return nil;
 }
 
-// Returns NO when the window could not be presented with EGL and must use wl_shm.
+// Returns NO when the window must fall back to wl_shm. Damage is consumed only
+// after EGL setup succeeds, and restored when presentation fails.
 - (BOOL) presentEGLSurface: (O2Surface *) surface {
     if (_eglFailed) return YES;
     size_t width = O2SurfaceGetWidth(surface), height = O2SurfaceGetHeight(surface);
     CGLContextObj previous = CGLGetCurrentContext();
     NSString *failure = nil;
-    BOOL whole = _damageAll || _damageCount == 0;
+    BOOL whole = _damageAll;
+    O2SurfaceDamage damage = {0};
+    CGRect rects[O2SurfaceDamageMaxRects];
     struct timespec marks[4];
     if (_presentTiming) clock_gettime(CLOCK_MONOTONIC, &marks[0]);
     @try {
@@ -1343,11 +1346,18 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
         }
         if (failure)
             ;
-        else if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque]
-                                         damage:_damage count:whole ? 0 : _damageCount
-                                         verify:_eglVerify corrupt:_eglCorrupt])
-            failure = @"texture upload, GPU output or CPU reference verification failed";
         else {
+            O2SurfaceTakeDamage(surface, &damage);
+            for (int i = 0; i < damage.count; ++i) {
+                O2SurfaceDamageRect r = damage.rects[i];
+                rects[i] = CGRectMake(r.x, r.y, r.width, r.height);
+            }
+            if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque]
+                                        damage:whole ? NULL : rects count:whole ? 0 : damage.count
+                                        verify:_eglVerify corrupt:_eglCorrupt])
+                failure = @"texture upload, GPU output or CPU reference verification failed";
+        }
+        if (!failure) {
             if (_presentTiming) clock_gettime(CLOCK_MONOTONIC, &marks[2]);
             if (_eglVerify) ++_eglChecks;
             if (_display->_compositorVersion >= 3) {
@@ -1396,6 +1406,10 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
             failure = @"cannot restore the caller CGL context";
     }
     if (failure) {
+        for (int i = 0; i < damage.count; ++i) {
+            O2SurfaceDamageRect r = damage.rects[i];
+            O2SurfaceAddDamage(surface, r.x, r.y, r.width, r.height);
+        }
         [self failEGLPresentation:failure];
         return NO;
     }
@@ -1577,7 +1591,7 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
     buffer->busy = YES;
     _needsPresent = NO;
-    _damageAll = NO; _damageCount = 0;
+    _damageAll = NO;
     [_display flush];
     [self recordPresentTime:&started];
 }
