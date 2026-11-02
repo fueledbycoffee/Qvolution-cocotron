@@ -162,6 +162,10 @@ static CGSConnectionID _CGSDefaultConnection(void) { calls++; return manager; }
 static OSErr GetCurrentProcess(ProcessSerialNumber *p) {
  processCalls++; p->highLongOfPSN=0xabcdef01; p->lowLongOfPSN=0x76543210; return processStatus;
 }
+enum { RTLD_LAZY = 1, RTLD_LOCAL = 0 };
+static void *dlopen(const char *path, int flags) { return (void*)(uintptr_t)1; }
+static void *dlsym(void *handle, const char *name) { return (void*)GetCurrentProcess; }
+static int dlclose(void *handle) { return 0; }
 '''
 methods = '@implementation O2GState\n'
 methods += definition(state, '- initWithDeviceTransform:')
