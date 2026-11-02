@@ -48,6 +48,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 #import <CoreGraphics/CGWindowPrivate.h>
 #import "NSGestureRecognizer-Private.h"
 #include <math.h>
+#import "NSWindowFrameTrace.h"
 
 const NSNotificationName NSWindowDidBecomeKeyNotification =
         @"NSWindowDidBecomeKeyNotification";
@@ -1077,6 +1078,7 @@ static BOOL _allowsAutomaticWindowTabbing;
     BOOL didSize = !NSEqualSizes(newFrame.size, _frame.size);
     BOOL didMove = !NSEqualPoints(newFrame.origin, _frame.origin);
 
+    NSWindowTraceFrame("NSWindow.setFrame", _frame, newFrame);
     _frame = newFrame;
     _makeSureIsOnAScreen = YES;
 
@@ -3242,6 +3244,8 @@ static void markKeyStateControls(NSView *view) {
 
     NSRect frame = [self frame];
     frame.size.height += delta;
+    NSWindowTraceFrame([_menuView isHidden] ? "NSWindow.menu-hide" : "NSWindow.menu-show-or-resize",
+                       [self frame], frame);
     // No display because setMenu: is called before awakeFromNib.
     [self setFrame: frame display: NO];
     [_backgroundView resizeSubviewsWithOldSize: backSize];

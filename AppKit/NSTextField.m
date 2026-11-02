@@ -138,7 +138,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */
 }
 
 - (BOOL) isOpaque {
-    return [_cell drawsBackground] || [_cell isBezeled];
+    // Cell backgrounds are inset; bezel edges and rounded corners can be translucent.
+    return NO;
 }
 
 - (void) resetCursorRects {

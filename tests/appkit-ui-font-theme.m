@@ -1,5 +1,6 @@
 /* Original Qvolution typography acceptance. Only own backend/public AppKit calls. */
 #import <AppKit/AppKit.h>
+#include "window-frame-settle.h"
 #import <CoreText/CoreText.h>
 #import <Onyx2D/O2Surface.h>
 #import <Onyx2D/O2Context_builtin_FT.h>
@@ -80,6 +81,7 @@ static void inspect(NSView *view) {
     for(NSView *child in [view subviews])inspect(child);
 }
 static void panel(NSView *view,NSString *name,NSString *directory) {
+    if ([[view window] isVisible] && !fixtureWaitForWindowFrame([view window],"ui-font-theme")) { failures++; return; }
     unsigned before=labels;expectUIFont(view && NSWidth([view bounds])>0 && NSHeight([view bounds])>0,"panel has real laid-out content");
     inspect(view);expectUIFont(labels>before,"panel checks at least one actual static label");
     for(int scale=1;scale<=2;++scale) {

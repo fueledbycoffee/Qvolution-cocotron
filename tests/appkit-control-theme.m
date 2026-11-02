@@ -3,6 +3,7 @@
 // rendered alpha, so the checks hold whichever way the bitmap rows run.
 // Onyx2D's CPU bitmaps hold premultiplied components.
 #import <AppKit/AppKit.h>
+#include "window-frame-settle.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,7 @@ typedef struct { int w, h; unsigned char *p; int minX, minY, maxX, maxY; } Raste
 typedef struct { int r, g, b, a; } Pixel;
 
 static Raster raster(NSView *view) {
+    if ([[view window] isVisible] && !fixtureWaitForWindowFrame([view window],"control-theme")) { fprintf(stderr,"frame did not settle\n"); exit(2); }
     Raster r = {(int) NSWidth([view bounds]), (int) NSHeight([view bounds]), NULL, 1 << 20, 1 << 20, -1, -1};
     NSBitmapImageRep *rep = [[[NSBitmapImageRep alloc]
             initWithBitmapDataPlanes: NULL pixelsWide: r.w pixelsHigh: r.h bitsPerSample: 8
