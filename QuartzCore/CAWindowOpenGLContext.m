@@ -248,7 +248,7 @@ static uint64_t monotonicNanoseconds(void) {
     if (!_presentTexture)
         glGenTextures(1, &_presentTexture);
     glBindTexture(GL_TEXTURE_2D, _presentTexture);
-    BOOL whole = count == 0 || width != _presentWidth || height != _presentHeight;
+    BOOL whole = damage == NULL || width != _presentWidth || height != _presentHeight;
     if (width != _presentWidth || height != _presentHeight) {
         _presentWidth = _presentHeight = 0;
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)width, (GLsizei)height, 0,

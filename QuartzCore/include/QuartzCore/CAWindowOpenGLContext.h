@@ -27,7 +27,7 @@
 - (void) renderSurface: (O2Surface *) surface;
 // Dedicated presentation context; verification reads the real default framebuffer.
 // The surface is kept in a texture between frames: only the damage rectangles
-// (surface pixels, origin at the top row) are uploaded, and count == 0 uploads
+// (surface pixels, origin at the top row) are uploaded, and damage == NULL uploads
 // the whole surface. A new size always uploads the whole surface.
 - (BOOL) presentSurface: (O2Surface *) surface opaque: (BOOL) opaque
                  damage: (const CGRect *) damage count: (unsigned) count
