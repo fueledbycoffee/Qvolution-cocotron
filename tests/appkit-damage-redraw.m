@@ -12,6 +12,7 @@
 #import <Onyx2D/O2Context_builtin.h>
 #import <Onyx2D/O2Surface.h>
 #import <objc/runtime.h>
+#include "damage-fixture-state.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@
 @interface NSObject (DamageFixtureBackend)
 - (id)platformWindow;
 - (NSDictionary *)eglPresentationStatistics;
+- (NSTitlebarFrame)titlebarFrame;
 @end
 
 static unsigned failures, checks;
@@ -40,6 +42,10 @@ static BOOL configured(NSWindow *w) {
     Ivar ivar = class_getInstanceVariable([backend class], "_configured");
     if (!ivar) { fprintf(stderr, "own Wayland backend required\n"); exit(2); }
     BOOL value; memcpy(&value, (char *)backend + ivar_getOffset(ivar), sizeof value); return value;
+}
+static BOOL activated(NSWindow *w) {
+    NSTitlebarFrame frame = [[w platformWindow] titlebarFrame];
+    return frame.state.active;
 }
 static BOOL framePending(NSWindow *w) {
     id backend = [w platformWindow];
@@ -91,7 +97,7 @@ static BOOL framePending(NSWindow *w) {
     NSWindow *window; Backdrop *backdrop; Spinner *spinner; NSButton *button, *check; NSTextField *field;
     NSTextView *text; NSString *mode; unsigned step, ticks; unsigned long long presentsBefore;
     double frameStart; unsigned long long animPresents0; unsigned animTicks; double animDraw[400]; BOOL keyAtStart;
-    unsigned long long quietPresents; unsigned quietTicks;
+    uint64_t quietPresents; unsigned quietTicks;
 }
 - (void)tick:(NSTimer *)timer;
 @end
@@ -119,6 +125,10 @@ static NSData *capture(Driver *d) {
     for (size_t row = 0; row < h; row++) memcpy((char *)[data mutableBytes] + row * w * 4, p + row * stride, w * 4);
     NSString *dir = [[[NSProcessInfo processInfo] environment] objectForKey: @"DAMAGE_EVIDENCE_DIR"];
     static unsigned serial;
+    printf("CAPTURE_STATE serial=%u key=%d activated=%d\n", serial,
+        [d->window isKeyWindow], activated(d->window));
+    expect([d->window isKeyWindow] && activated(d->window),
+        "capture has compositor-confirmed active chrome and key controls");
     if (dir) {
         [data writeToFile: [dir stringByAppendingPathComponent: [NSString stringWithFormat: @"%02u-backing-%zux%zu.bgra", serial, w, h]] atomically: YES];
     }
@@ -212,17 +222,19 @@ static void timing(Driver *d) {
     }
     // verify
     if (step == 0) {
-        // Activation redraws the decorations and key-dependent controls; start
-        // once the window is key (or after 2 s without) and has presented
-        // nothing for 0.5 s, so the comparison sees one settled state.
-        if (![window isKeyWindow] && ++ticks < 100) return;
+        // Key status alone does not describe the compositor-owned chrome.
+        // Never compare an active shm frame with an inactive EGL frame.
+        if (++ticks >= 400) { expect(NO, "settled compositor activation"); goto finish; }
         unsigned long long presents = stat(window, @"clientPresents");
-        if (presents != quietPresents) { quietPresents = presents; quietTicks = 0; return; }
-        if (++quietTicks < 25) return;
+        if (!DamageFixtureSettled([window isKeyWindow], activated(window), presents,
+                                  &quietPresents, &quietTicks)) return;
         ticks = 0; keyAtStart = [window isKeyWindow];
         // No first responder: a blinking caret would draw at times of its own.
         [window makeFirstResponder: nil];
         presentsBefore = stat(window, @"clientPresents") + 1; [window display]; step = 1; return;
+    }
+    if (![window isKeyWindow] || !activated(window)) {
+        expect(NO, "compositor activation stays stable during verification"); goto finish;
     }
     if (stat(window, @"clientPresents") < presentsBefore) { if (++ticks < 400) return; expect(NO, "present after each step"); goto finish; }
     ticks = 0;
