@@ -128,7 +128,7 @@ enum { kO2BlendModeNormal, kO2InterpolationDefault };
 @interface O2Context : Stub {
 @public
  O2AffineTransform _userToDeviceTransform,_textMatrix;
- NSMutableArray *_layerStack,*_stateStack;
+ NSMutableArray *_layerStack,*_stateStack,*_transparencyLayerStates;
  O2GState *_currentState;
  O2MutablePath *_path;
  BOOL _allowsAntialiasing,_allowsFontSmoothing;
