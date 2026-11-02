@@ -3,8 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// NSWindow's key status can precede (and outlive) compositor activation.
-// Cross-renderer captures need both, with no intervening presentation.
+// Verify uses declared key/chrome appearance, independent of compositor focus.
+// Wait for the initial display to settle before damage mutations start.
 static inline bool DamageFixtureSettled(bool key, bool activated, uint64_t presents,
                                         uint64_t *previous, unsigned *quietTicks) {
     if (!key || !activated || presents != *previous) {

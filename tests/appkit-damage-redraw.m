@@ -13,6 +13,7 @@
 #import <Onyx2D/O2Surface.h>
 #import <objc/runtime.h>
 #include "damage-fixture-state.h"
+#include "damage-fixture-appearance.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -125,10 +126,10 @@ static NSData *capture(Driver *d) {
     for (size_t row = 0; row < h; row++) memcpy((char *)[data mutableBytes] + row * w * 4, p + row * stride, w * 4);
     NSString *dir = [[[NSProcessInfo processInfo] environment] objectForKey: @"DAMAGE_EVIDENCE_DIR"];
     static unsigned serial;
-    printf("CAPTURE_STATE serial=%u key=%d activated=%d\n", serial,
-        [d->window isKeyWindow], activated(d->window));
-    expect([d->window isKeyWindow] && activated(d->window),
-        "capture has compositor-confirmed active chrome and key controls");
+    printf("CAPTURE_STATE serial=%u key=%d main=%d appearance_active=%d\n", serial,
+        [d->window isKeyWindow], [d->window isMainWindow], activated(d->window));
+    expect([d->window isKeyWindow] && [d->window isMainWindow] && activated(d->window),
+        "capture has declared active chrome and key/main controls");
     if (dir) {
         [data writeToFile: [dir stringByAppendingPathComponent: [NSString stringWithFormat: @"%02u-backing-%zux%zu.bgra", serial, w, h]] atomically: YES];
     }
@@ -222,9 +223,7 @@ static void timing(Driver *d) {
     }
     // verify
     if (step == 0) {
-        // Key status alone does not describe the compositor-owned chrome.
-        // Never compare an active shm frame with an inactive EGL frame.
-        if (++ticks >= 400) { expect(NO, "settled compositor activation"); goto finish; }
+        if (++ticks >= 400) { expect(NO, "settled fixed appearance"); goto finish; }
         unsigned long long presents = stat(window, @"clientPresents");
         if (!DamageFixtureSettled([window isKeyWindow], activated(window), presents,
                                   &quietPresents, &quietTicks)) return;
@@ -233,8 +232,8 @@ static void timing(Driver *d) {
         [window makeFirstResponder: nil];
         presentsBefore = stat(window, @"clientPresents") + 1; [window display]; step = 1; return;
     }
-    if (![window isKeyWindow] || !activated(window)) {
-        expect(NO, "compositor activation stays stable during verification"); goto finish;
+    if (![window isKeyWindow] || ![window isMainWindow] || !activated(window)) {
+        expect(NO, "declared appearance stays fixed during verification"); goto finish;
     }
     if (stat(window, @"clientPresents") < presentsBefore) { if (++ticks < 400) return; expect(NO, "present after each step"); goto finish; }
     ticks = 0;
@@ -279,8 +278,15 @@ int main(int argc, char **argv) { @autoreleasepool {
     d->mode = [[NSString alloc] initWithUTF8String: argc > 1 ? argv[1] : "verify"];
     if (![@[@"verify", @"timing", @"animate"] containsObject: d->mode]) { fprintf(stderr, "usage: verify|timing|animate\n"); return 2; }
     NSRect content = NSMakeRect(40, 40, 1600, 900);
-    d->window = [[NSWindow alloc] initWithContentRect: content styleMask: NSTitledWindowMask | NSClosableWindowMask | NSResizableWindowMask
+    d->window = [[DamageFixtureWindow alloc] initWithContentRect: content styleMask: NSTitledWindowMask | NSClosableWindowMask | NSResizableWindowMask
                                               backing: NSBackingStoreBuffered defer: NO];
+    if ([d->mode isEqualToString: @"verify"]) {
+        ((DamageFixtureWindow *)d->window)->fixedAppearance = YES;
+        if (!DamageFixtureFixAppearance([d->window platformWindow])) {
+            fprintf(stderr, "own fixture appearance override unavailable\n"); return 2;
+        }
+        [d->window setAppearance: [NSAppearance appearanceNamed: NSAppearanceNameAqua]];
+    }
     [d->window setReleasedWhenClosed: NO]; [d->window setTitle: @"Damage-limited redraw"];
     NSView *root = [d->window contentView];
     d->backdrop = [[Backdrop alloc] initWithFrame: [root bounds]]; [d->backdrop setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
