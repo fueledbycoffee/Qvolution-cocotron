@@ -123,9 +123,7 @@ struct WaylandBuffer {
     // Set when EGL was requested but cannot present this window; it then uses wl_shm.
     NSString *_eglFallbackReason;
     uint64_t _eglFullUploads, _eglPartialUploads, _eglLastUploadBytes;
-    // Backing-surface damage since the last present; none reported means everything.
-    CGRect _damage[16];
-    unsigned _damageCount;
+    // Context recreation and decoration changes require a full texture refresh.
     BOOL _damageAll;
     // Opt-in present timing (DARLING_APPKIT_PRESENT_TIMING=1).
     BOOL _presentTiming;
