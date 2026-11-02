@@ -135,6 +135,8 @@ extern CGError CGSRemoveNotifyProc(CGSNotifyProcPtr proc, CGSNotificationType no
 
 // Darling extras, e.g. for CGL
 void* _CGSNativeDisplay(CGSConnectionID connId);
+// EGL platform enum matching the native display, or zero if unsupported.
+unsigned int _CGSNativeDisplayPlatform(CGSConnectionID connId);
 void* _CGSNativeWindowForID(CGSConnectionID connId, CGSWindowID winId);
 void* _CGSNativeWindowForSurfaceID(CGSConnectionID connId, CGSWindowID winId, CGSSurfaceID surfaceId);
 

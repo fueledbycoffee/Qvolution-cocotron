@@ -7,6 +7,8 @@
 //   appkit-damage-redraw animate   a 48x48 view animated by a 60 Hz timer for 3 s
 // DAMAGE_EVIDENCE_DIR (optional) receives raw backing captures for cross-runtime comparison.
 #import <AppKit/AppKit.h>
+#import <AppKit/NSMainMenuView.h>
+#import "../AppKit/NSTitlebarRenderer.h"
 #import <Onyx2D/O2Context_builtin.h>
 #import <Onyx2D/O2Surface.h>
 #import <objc/runtime.h>
@@ -99,6 +101,19 @@ static NSData *capture(Driver *d) {
     if (![context isKindOfClass: [O2Context_builtin class]]) { fprintf(stderr, "own bitmap context required\n"); exit(2); }
     O2Surface *surface = [context surface];
     size_t w = O2SurfaceGetWidth(surface), h = O2SurfaceGetHeight(surface), stride = O2SurfaceGetBytesPerRow(surface);
+    // Pixel comparisons require identical menu/decorations as well as content.
+    NSSize content = [[d->window contentView] bounds].size;
+    NSSize frame = [d->window frame].size;
+    NSSize logical = NSMakeSize(frame.width + 2*NSTitlebarMargin,
+        frame.height + 2*NSTitlebarMargin + NSTitlebarHeight);
+    CGFloat scale = stat(d->window, @"scale120") / 120.0;
+    printf("GEOMETRY content=%.0fx%.0f frame=%.0fx%.0f backing=%zux%zu scale=%.3f\n",
+        content.width,content.height,frame.width,frame.height,w,h,scale);
+    expect(NSEqualSizes(content,NSMakeSize(1600,900)),"content size stays at the requested size");
+    expect(frame.width==1600 && frame.height==900+[NSMainMenuView menuHeight],
+        "local menu strip stays in the frame");
+    expect(w==ceil(logical.width*scale) && h==ceil(logical.height*scale),
+        "backing size includes the same frame, titlebar and margins");
     NSMutableData *data = [NSMutableData dataWithLength: w * h * 4];
     const unsigned char *p = O2SurfaceGetPixelBytes(surface);
     for (size_t row = 0; row < h; row++) memcpy((char *)[data mutableBytes] + row * w * 4, p + row * stride, w * 4);
@@ -244,6 +259,9 @@ finish:
 
 int main(int argc, char **argv) { @autoreleasepool {
     setbuf(stdout, NULL);
+    // Desktop menu export can asynchronously remove the local menu strip.
+    // Keep identical window geometry for shm/EGL backing-pixel comparisons.
+    setenv("DARLING_NO_GLOBAL_MENU", "1", 1);
     [NSApplication sharedApplication];
     Driver *d = [Driver new];
     d->mode = [[NSString alloc] initWithUTF8String: argc > 1 ? argv[1] : "verify"];

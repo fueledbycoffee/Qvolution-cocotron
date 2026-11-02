@@ -89,6 +89,11 @@
 	NSInvalidAbstractInvocation();
 }
 
+-(unsigned int) nativeDisplayPlatform
+{
+    return 0;
+}
+
 -(void*) nativeDisplay
 {
 	NSInvalidAbstractInvocation();

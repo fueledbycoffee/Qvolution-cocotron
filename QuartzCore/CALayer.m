@@ -159,6 +159,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
 
 - (void) setAnchorPoint: (CGPoint) value {
     _anchorPoint = value;
+    [_context startTimerIfNeeded];
 }
 
 - (CGPoint) position {
@@ -177,6 +178,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
     }
 
     _position = value;
+    [_context startTimerIfNeeded];
 }
 
 - (CGRect) bounds {
@@ -196,6 +198,8 @@ static char swiftUIViewTestPropertiesAssociationKey;
 
     BOOL sizeChanged = !CGSizeEqualToSize(_bounds.size, value.size);
     _bounds = value;
+    // A bounds origin change (a CAScrollLayer scrolling) moves the sublayers.
+    [_context startTimerIfNeeded];
     if (sizeChanged)
         [self setNeedsLayout];
     if (sizeChanged && _needsDisplayOnBoundsChange)
@@ -244,6 +248,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
     }
 
     _opacity = value;
+    [_context startTimerIfNeeded];
 }
 
 - (BOOL) isOpaque {
@@ -262,6 +267,8 @@ static char swiftUIViewTestPropertiesAssociationKey;
     value = [value retain];
     [_contents release];
     _contents = value;
+    _contentsRasterRect = CGRectNull;
+    [_context startTimerIfNeeded];
 }
 
 - (CGFloat) contentsScale {
@@ -269,7 +276,11 @@ static char swiftUIViewTestPropertiesAssociationKey;
 }
 
 - (void) setContentsScale: (CGFloat) value {
-    _contentsScale = value;
+    if (!isfinite(value) || value <= 0) value = 1.0;
+    if (_contentsScale != value) {
+        _contentsScale = value;
+        [self setNeedsDisplay];
+    }
 }
 
 - (CGRect) contentsCenter {
@@ -397,6 +408,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
     _opaque = YES;
     _contents = nil;
     _contentsScale = 1.0;
+    _contentsRasterRect = CGRectNull;
     // The whole contents image stretches, i.e. no fixed border.
     _contentsCenter = CGRectMake(0, 0, 1, 1);
     _contentsFormat = [kCAContentsFormatRGBA8Uint copy];
@@ -460,6 +472,7 @@ static char swiftUIViewTestPropertiesAssociationKey;
 
     // The copy has no context yet, so these setters only do the retain/copy.
     [self setContents: other->_contents];
+    _contentsRasterRect = other->_contentsRasterRect;
     [self setContentsFormat: other->_contentsFormat];
     [self setContentsGravity: other->_contentsGravity];
     [self setCornerCurve: other->_cornerCurve];
@@ -904,8 +917,13 @@ static void replaceColor(CGColorRef *slot, CGColorRef value) {
         return;
     }
 
-    size_t width = (size_t) ceil(MAX(_bounds.size.width, 0));
-    size_t height = (size_t) ceil(MAX(_bounds.size.height, 0));
+    CGFloat pixelWidth = ceil(MAX(_bounds.size.width, 0) * _contentsScale);
+    CGFloat pixelHeight = ceil(MAX(_bounds.size.height, 0) * _contentsScale);
+    if (!isfinite(pixelWidth) || !isfinite(pixelHeight) ||
+        pixelWidth > 16384 || pixelHeight > 16384)
+        [NSException raise:NSInvalidArgumentException format:@"Invalid layer raster size"];
+    size_t width = (size_t) pixelWidth;
+    size_t height = (size_t) pixelHeight;
     if (width == 0 || height == 0) {
         [self setContents: nil];
         return;
@@ -926,6 +944,7 @@ static void replaceColor(CGColorRef *slot, CGColorRef value) {
         CGContextTranslateCTM(context, 0, height);
         CGContextScaleCTM(context, 1, -1);
     }
+    CGContextScaleCTM(context, _contentsScale, _contentsScale);
     CGContextTranslateCTM(context, -_bounds.origin.x, -_bounds.origin.y);
     [self drawInContext: context];
 
@@ -1091,6 +1110,14 @@ static void replaceColor(CGColorRef *slot, CGColorRef value) {
     value = [value copy];
     [_textureId release];
     _textureId = value;
+}
+
+- (CGRect) _contentsRasterRect {
+    return _contentsRasterRect;
+}
+
+- (void) _setContentsRasterRect: (CGRect) rect {
+    _contentsRasterRect = rect;
 }
 
 - (id) _textureContents {

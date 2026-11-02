@@ -24,8 +24,8 @@
 
     CGLError error;
 
-    CGLPixelFormatAttribute attributes[1] = {
-            0,
+    CGLPixelFormatAttribute attributes[] = {
+            kCGLPFAStencilSize, 8, 0,
     };
     GLint numberOfVirtualScreens;
 
@@ -335,7 +335,7 @@ static BOOL layerTreeNeedsAnotherFrame(CALayer *layer) {
     CGLSetDrawableRefreshRate(_glContext,
         [_subwindow respondsToSelector: @selector(refreshMillihertz)]
         ? [_subwindow refreshMillihertz] : 0);
-    if (CGLFlushDrawable(_glContext) == kCGLNoError &&
+    if (CGLFlushDrawableWithoutFinish(_glContext) == kCGLNoError &&
         [_subwindow respondsToSelector: @selector(flush)])
         [_subwindow flush];
 }

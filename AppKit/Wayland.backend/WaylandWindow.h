@@ -120,6 +120,18 @@ struct WaylandBuffer {
     BOOL _maskedFrameValid, _damageVerify;
     uint64_t _damageRects, _damagePixels, _copiedPixels, _wholeDamagePresents;
     uint64_t _verifiedPresents, _staleVerifiedPresents;
+    // Set when EGL was requested but cannot present this window; it then uses wl_shm.
+    NSString *_eglFallbackReason;
+    uint64_t _eglFullUploads, _eglPartialUploads, _eglLastUploadBytes;
+    // Backing-surface damage since the last present; none reported means everything.
+    CGRect _damage[16];
+    unsigned _damageCount;
+    BOOL _damageAll;
+    // Opt-in present timing (DARLING_APPKIT_PRESENT_TIMING=1).
+    BOOL _presentTiming;
+    uint64_t _presentsTimed, _presentNanoseconds, _lastPresentNanoseconds, _maxPresentNanoseconds;
+    // Last EGL present split into context setup, staging copy, upload and draw, swap.
+    uint64_t _lastSetupNanoseconds, _lastCopyNanoseconds, _lastUploadNanoseconds, _lastSwapNanoseconds;
 }
 
 - (instancetype) initWithDelegate: (NSWindow *) delegate;
@@ -151,6 +163,10 @@ struct WaylandBuffer {
 - (struct wl_proxy *) xdgSurface;
 - (void) unmap;
 - (NSDictionary *) eglPresentationStatistics;
+// Adds a rectangle of the backing surface (pixels, origin at the top row) that
+// changed since the last present. Presents with no reported damage are treated
+// as whole-surface changes, so a caller must report every change or none.
+- (void) addDamageRect: (CGRect) rect;
 - (NSPoint) contentOffset;
 - (BOOL) isDecorationPoint: (CGPoint) point;
 // The content origin relative to the xdg window geometry (the visible window),

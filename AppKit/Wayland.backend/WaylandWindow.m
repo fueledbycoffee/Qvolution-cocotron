@@ -46,6 +46,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <limits.h>
+#include <time.h>
+#include <dlfcn.h>
 #import "WaylandScale.h"
 #include <math.h>
 #import "../NSWindowFrameTrace.h"
@@ -87,6 +89,23 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     WaylandMarshal(proxy, opcode, NULL, flags, args);
 }
 
+// The swap flushes the presentation context, and the staging ring is fenced,
+// so the application thread need not wait for the GPU as CGLFlushDrawable's
+// glFinish does. Resolved at run time so this backend still loads against an
+// OpenGL framework without the entry point.
+static CGLError swapWithoutFinish(CGLContextObj context) {
+    static CGLError (*swap)(CGLContextObj);
+    if (!swap) {
+        swap = (CGLError (*)(CGLContextObj)) dlsym(RTLD_DEFAULT, "CGLFlushDrawableWithoutFinish");
+        if (!swap) swap = CGLFlushDrawable;
+    }
+    return swap(context);
+}
+
+static uint64_t elapsedNanoseconds(const struct timespec *from, const struct timespec *to) {
+    return (uint64_t)(to->tv_sec - from->tv_sec) * 1000000000ull + to->tv_nsec - from->tv_nsec;
+}
+
 - (instancetype) initWithDelegate: (NSWindow *) delegate {
     if ((self = [super init]) == nil)
         return nil;
@@ -100,6 +119,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     _damageVerify = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_DAMAGE_VERIFY"] isEqualToString:@"1"];
     if (_eglCorrupt && !_eglVerify)
         [NSException raise:NSInvalidArgumentException format:@"EGL test corruption requires verification"];
+    _presentTiming = [[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_PRESENT_TIMING"] isEqualToString:@"1"];
     NSString *captureDirectory=[[[NSProcessInfo processInfo] environment] objectForKey:@"DARLING_APPKIT_CAPTURE_DIR"];
     _captureRequested=captureDirectory!=nil;
     if(captureDirectory) _clientCapture=[[WaylandClientCapture alloc] initWithDirectory:captureDirectory];
@@ -135,6 +155,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
     [_surfaceOutputs release];
     [_clientCapture release];
     [_title release];
+    [_eglFallbackReason release];
     [super dealloc];
 }
 
@@ -964,6 +985,7 @@ static void sendRequest(struct wl_proxy *proxy, uint32_t opcode, uint32_t flags)
         _context = [[WaylandDrawingContext alloc] initWithSurface: surface logicalSize: logical
                                                           border: _margin];
         _decorationsDirty = YES;
+        _damageAll = YES;
         [surface release];
     }
     return _context;
@@ -1077,6 +1099,7 @@ static NSString *titleFittingWidth(NSString *title, NSDictionary *attributes, CG
     O2SurfaceAddDamage([_context surface], 0, 0, bitmap.width, bitmap.height);
     [self drawTitle];
     _decorationsDirty = NO;
+    _damageAll = YES;
 }
 
 static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
@@ -1185,16 +1208,40 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
 }
 
 - (NSDictionary *) eglPresentationStatistics {
-    return @{@"renderer": _eglRequested ? @"egl" : @"shm", @"swaps": @(_eglSwaps),
+    O2Surface *surface = [_context surface];
+    BOOL egl = _eglRequested && _eglFallbackReason == nil;
+    return @{@"renderer": egl ? @"egl" : @"shm", @"requested": _eglRequested ? @"egl" : @"shm",
+             @"fallbackReason": _eglFallbackReason ? _eglFallbackReason : @"", @"swaps": @(_eglSwaps),
              @"captureRequested": @(_captureRequested), @"captureReady": @(_clientCapture!=nil),
              @"captureError": @(_captureRequested&&!_clientCapture?1:[_clientCapture errorCode]),
              @"clientPresents": @(_clientPresents), @"captured": @([_clientCapture writtenCount]),
              @"checks": @(_eglChecks), @"uploadedBytes": @(_eglBytes), @"failures": @(_eglFailures),
+             @"fullUploads": @(_eglFullUploads), @"partialUploads": @(_eglPartialUploads),
+             @"lastUploadBytes": @(_eglLastUploadBytes),
+             @"presentsTimed": @(_presentsTimed), @"presentNanoseconds": @(_presentNanoseconds),
+             @"lastPresentNanoseconds": @(_lastPresentNanoseconds), @"maxPresentNanoseconds": @(_maxPresentNanoseconds),
+             @"lastSetupNanoseconds": @(_lastSetupNanoseconds), @"lastCopyNanoseconds": @(_lastCopyNanoseconds),
+             @"lastUploadNanoseconds": @(_lastUploadNanoseconds), @"lastSwapNanoseconds": @(_lastSwapNanoseconds),
+             @"surfaceWidth": @(surface ? O2SurfaceGetWidth(surface) : 0),
+             @"surfaceHeight": @(surface ? O2SurfaceGetHeight(surface) : 0),
              @"width": @(_eglWidth), @"height": @(_eglHeight), @"scale120": @(_renderScale120),
              @"damageRects": @(_damageRects), @"damagePixels": @(_damagePixels),
              @"copiedPixels": @(_copiedPixels), @"wholeDamagePresents": @(_wholeDamagePresents),
-             @"damageVerify": @(_damageVerify), @"verifiedPresents": @(_verifiedPresents),
-             @"staleVerifiedPresents": @(_staleVerifiedPresents)};
+             @"damageVerify": @(_damageVerify), @"verifiedPresents": @(_verifiedPresents + _eglChecks),
+             @"staleVerifiedPresents": @(_staleVerifiedPresents + _eglFailures)};
+}
+
+- (void) addDamageRect: (CGRect) rect {
+    if (!isfinite(rect.origin.x) || !isfinite(rect.origin.y) ||
+        !isfinite(rect.size.width) || !isfinite(rect.size.height))
+        [NSException raise:NSInvalidArgumentException format:@"Non-finite window damage"];
+    O2Surface *surface = [_context surface];
+    if (surface && !CGRectIsEmpty(rect)) {
+        CGRect r = CGRectIntegral(CGRectIntersection(rect, CGRectMake(0, 0,
+            O2SurfaceGetWidth(surface), O2SurfaceGetHeight(surface))));
+        if (!CGRectIsNull(r) && !CGRectIsEmpty(r))
+            O2SurfaceAddDamage(surface, r.origin.x, r.origin.y, r.size.width, r.size.height);
+    }
 }
 
 - (void) destroyEGLPresenter {
@@ -1215,14 +1262,26 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
         NSLog(@"AppKit EGL: cannot restore caller context during teardown");
 }
 
+// Verification exists to catch wrong pixels, so there a failure stays fatal.
+// Otherwise EGL is only an accelerator: the window continues on wl_shm.
 - (void) failEGLPresentation: (NSString *) reason {
-    ++_eglFailures; _eglFailed = YES;
+    ++_eglFailures;
     if (_frameCallback) { WL.wl_proxy_destroy(_frameCallback); _frameCallback = NULL; }
-    [NSException raise:NSInternalInconsistencyException format:@"Requested AppKit EGL presentation failed: %@", reason];
+    if (_eglVerify) {
+        _eglFailed = YES;
+        [NSException raise:NSInternalInconsistencyException format:@"Requested AppKit EGL presentation failed: %@", reason];
+    }
+    [self destroyEGLPresenter];
+    _eglFallbackReason = [reason copy];
+    static BOOL logged;
+    if (!logged || _eglSwaps) {
+        NSLog(@"AppKit EGL: %@; presenting with wl_shm", reason);
+        logged = YES;
+    }
 }
 
-- (BOOL) ensureEGLPresenterWidth: (int32_t) width height: (int32_t) height {
-    if (!_display->_eglAvailable) return NO;
+- (NSString *) ensureEGLPresenterWidth: (int32_t) width height: (int32_t) height {
+    if (!_display->_eglAvailable) return @"EGL is unavailable on this Wayland display";
     if (!_eglContext) {
         CGLPixelFormatAttribute attributes[] = {kCGLPFAAccelerated, 0};
         CGLPixelFormatObj format = NULL; GLint count = 0;
@@ -1230,47 +1289,66 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
         if (error == kCGLNoError && format && count)
             error = CGLCreateContext(format, NULL, &_eglContext);
         if (format) CGLReleasePixelFormat(format);
-        if (error != kCGLNoError || !_eglContext) return NO;
+        if (error != kCGLNoError || !_eglContext) return @"no accelerated CGL context";
         _eglWindow = WL.wl_egl_window_create((struct wl_surface *)_surface, width, height);
-        if (!_eglWindow) return NO;
+        if (!_eglWindow) return @"wl_egl_window_create failed";
         _eglDrawable = CGLGetWindowForContext(_eglContext, _eglWindow);
-        if (!_eglDrawable) return NO;
+        if (!_eglDrawable) return @"no EGL window surface";
     }
     WL.wl_egl_window_resize(_eglWindow, width, height, 0, 0);
-    if (CGLContextMakeCurrentAndAttachToWindow(_eglContext, _eglDrawable) != kCGLNoError) return NO;
+    if (CGLContextMakeCurrentAndAttachToWindow(_eglContext, _eglDrawable) != kCGLNoError) return @"cannot make the EGL context current";
     GLint interval = 0;
-    if (CGLSetParameter(_eglContext, kCGLCPSwapInterval, &interval) != kCGLNoError) return NO;
+    if (CGLSetParameter(_eglContext, kCGLCPSwapInterval, &interval) != kCGLNoError) return @"cannot disable the swap interval";
+    if (_eglPresenter) {
+        _eglWidth = width; _eglHeight = height;
+        return nil;
+    }
     const char *name = (const char *)glGetString(GL_RENDERER), *version = (const char *)glGetString(GL_VERSION);
-    if (!name || !version || strtol(version, NULL, 10) < 3) return NO;
+    if (!name || !version || strtol(version, NULL, 10) < 3) return @"OpenGL 3 or later is required";
     NSString *renderer = [[NSString stringWithUTF8String:name] lowercaseString];
     for (NSString *software in @[@"llvmpipe", @"softpipe", @"swrast", @"software", @"swiftshader", @"lavapipe"])
-        if ([renderer rangeOfString:software].location != NSNotFound) return NO;
+        if ([renderer rangeOfString:software].location != NSNotFound)
+            return [NSString stringWithFormat:@"software renderer %s", name];
     GLint red, green, blue, alpha;
     glGetIntegerv(GL_RED_BITS, &red); glGetIntegerv(GL_GREEN_BITS, &green);
     glGetIntegerv(GL_BLUE_BITS, &blue); glGetIntegerv(GL_ALPHA_BITS, &alpha);
-    if (red < 8 || green < 8 || blue < 8 || alpha < 8) return NO;
-    if (!_eglPresenter) {
-        _eglPresenter = [[CAWindowOpenGLContext alloc] initWithCGLContext:_eglContext];
-        NSLog(@"AppKit EGL experimental CPU-raster/GPU-presentation renderer: %s", name);
+    if (red < 8 || green < 8 || blue < 8 || alpha < 8) return @"no RGBA8 EGL drawable";
+    _eglPresenter = [[CAWindowOpenGLContext alloc] initWithCGLContext:_eglContext];
+    static BOOL announced;
+    if (!announced) {
+        NSLog(@"AppKit EGL: presenting windows through %s", name);
+        announced = YES;
     }
     _eglWidth = width; _eglHeight = height;
-    return YES;
+    return nil;
 }
 
-// `damage` lists the backing-store rectangles changed since the previous
-// present; the presenter still uploads the whole surface.
-- (void) presentEGLSurface: (O2Surface *) surface damage: (const O2SurfaceDamage *) damage {
-    (void) damage;
-    if (_eglFailed) return;
+// Returns NO when the window could not be presented with EGL and must use wl_shm.
+- (BOOL) presentEGLSurface: (O2Surface *) surface {
+    if (_eglFailed) return YES;
     size_t width = O2SurfaceGetWidth(surface), height = O2SurfaceGetHeight(surface);
     CGLContextObj previous = CGLGetCurrentContext();
     NSString *failure = nil;
+    BOOL whole = _damageAll || _damageCount == 0;
+    struct timespec marks[4];
+    if (_presentTiming) clock_gettime(CLOCK_MONOTONIC, &marks[0]);
     @try {
-        if (width > INT32_MAX || height > INT32_MAX || ![self ensureEGLPresenterWidth:(int32_t)width height:(int32_t)height])
-            failure = @"hardware RGBA8 EGL drawable unavailable";
-        else if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque] verify:_eglVerify corrupt:_eglCorrupt])
-            failure = @"texture upload, GPU output or CPU reference verification";
+        if (width > INT32_MAX || height > INT32_MAX)
+            failure = @"surface too large for EGL";
+        else
+            failure = [self ensureEGLPresenterWidth:(int32_t)width height:(int32_t)height];
+        if (_presentTiming) {
+            clock_gettime(CLOCK_MONOTONIC, &marks[1]);
+            [_eglPresenter setTimed:YES];
+        }
+        if (failure)
+            ;
+        else if (![_eglPresenter presentSurface:surface opaque:[self presentsOpaque]
+                                         damage:_damage count:whole ? 0 : _damageCount
+                                         verify:_eglVerify corrupt:_eglCorrupt])
+            failure = @"texture upload, GPU output or CPU reference verification failed";
         else {
+            if (_presentTiming) clock_gettime(CLOCK_MONOTONIC, &marks[2]);
             if (_eglVerify) ++_eglChecks;
             if (_display->_compositorVersion >= 3) {
                 union wl_argument scale[] = {{.i = _fractionalScale ? 1 : _bufferScale}};
@@ -1286,21 +1364,42 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
             union wl_argument args[] = {{.o = NULL}};
             _frameCallback = WaylandCreateObject(_surface, WP_SURFACE_FRAME,
                 &wl_callback_interface, args, WaylandObjectFrameCallback, self);
-            if (!_frameCallback || CGLFlushDrawable(_eglContext) != kCGLNoError)
-                failure = @"native EGL swap";
+            if (!_frameCallback || swapWithoutFinish(_eglContext) != kCGLNoError)
+                failure = @"native EGL swap failed";
             else {
+                if (_presentTiming) {
+                    clock_gettime(CLOCK_MONOTONIC, &marks[3]);
+                    _lastSetupNanoseconds = elapsedNanoseconds(&marks[0], &marks[1]);
+                    _lastCopyNanoseconds = [_eglPresenter lastCopyNanoseconds];
+                    _lastUploadNanoseconds = elapsedNanoseconds(&marks[1], &marks[2]) - _lastCopyNanoseconds;
+                    _lastSwapNanoseconds = elapsedNanoseconds(&marks[2], &marks[3]);
+                }
                 ++_clientPresents;
                 [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
-                ++_eglSwaps; _eglBytes += (uint64_t)width * height * 4;
+                ++_eglSwaps;
+                _eglLastUploadBytes = [_eglPresenter lastUploadBytes];
+                _eglBytes += _eglLastUploadBytes;
+                BOOL uploadedWhole = whole || _eglLastUploadBytes == (uint64_t)width * height * 4;
+                if (uploadedWhole) ++_eglFullUploads; else ++_eglPartialUploads;
+                _damageRects += uploadedWhole ? 1 : damage.count;
+                _damagePixels += uploadedWhole ? (uint64_t)width * height : O2SurfaceDamagePixelCount(&damage);
+                _damageAll = NO;
                 _needsPresent = NO;
+                if (_eglVerify && (_eglChecks == 1 || _eglChecks % 100 == 0))
+                    NSLog(@"AppKit EGL: verified frame %llu of window %p (%zux%zu) against the CPU surface",
+                          (unsigned long long)_eglChecks, self, width, height);
                 [_display flush];
             }
         }
     } @finally {
-        if (CGLSetCurrentContext(previous) != kCGLNoError)
-            failure = @"restore caller CGL context";
+        if (CGLSetCurrentContext(previous) != kCGLNoError && !failure)
+            failure = @"cannot restore the caller CGL context";
     }
-    if (failure) [self failEGLPresentation:failure];
+    if (failure) {
+        [self failEGLPresentation:failure];
+        return NO;
+    }
+    return YES;
 }
 
 - (void) setSurfaceRegion: (uint32_t) opcode rects: (const O2Rect *) rects count: (int) count {
@@ -1388,10 +1487,10 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     if (pixels == NULL || width == 0 || height == 0 || sourceStride < width * 4)
         return;
 
-    if (_eglRequested) {
-        O2SurfaceDamage damage;
-        O2SurfaceTakeDamage(surface, &damage);
-        [self presentEGLSurface:surface damage:&damage];
+    struct timespec started;
+    if (_presentTiming) clock_gettime(CLOCK_MONOTONIC, &started);
+    if (_eglRequested && _eglFallbackReason == nil && [self presentEGLSurface:surface]) {
+        [self recordPresentTime:&started];
         return;
     }
 
@@ -1478,7 +1577,18 @@ static BOOL sameCornerMask(const NSTitlebarFrame *a, const NSTitlebarFrame *b) {
     [_clientCapture captureSurface:surface opaque:[self presentsOpaque] scale120:_renderScale120];
     buffer->busy = YES;
     _needsPresent = NO;
+    _damageAll = NO; _damageCount = 0;
     [_display flush];
+    [self recordPresentTime:&started];
+}
+
+- (void) recordPresentTime: (const struct timespec *) started {
+    if (!_presentTiming) return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    uint64_t elapsed = elapsedNanoseconds(started, &now);
+    ++_presentsTimed; _presentNanoseconds += elapsed; _lastPresentNanoseconds = elapsed;
+    if (elapsed > _maxPresentNanoseconds) _maxPresentNanoseconds = elapsed;
 }
 
 #pragma mark - Events
