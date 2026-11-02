@@ -8,6 +8,7 @@
 #include <string.h>
 #include <math.h>
 #include "ruler-capture-geometry.h"
+#include "window-frame-settle.h"
 
 @interface NSObject (RulerFixtureBackend)
 - (id)platformWindow;
@@ -167,6 +168,7 @@ int main(void){@autoreleasepool {
     NSPoint screen=[d->window convertBaseToScreen:[d->scroll convertPoint:NSMakePoint(53,0)toView:nil]];
     [d->popup setFrameOrigin:NSMakePoint(screen.x,screen.y-80)];
     [d->window makeKeyAndOrderFront:nil];
+    if (!fixtureWaitForWindowFrame(d->window,"ruler-partial-redraw")) return 2;
     NSTimer *timer=[NSTimer scheduledTimerWithTimeInterval:.05 target:d selector:@selector(tick:)userInfo:nil repeats:YES];
     [NSApp run];[timer invalidate];
     expect(checks==10,"all ten pixel checkpoints executed");

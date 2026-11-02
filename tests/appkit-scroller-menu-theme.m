@@ -4,6 +4,7 @@
 // first row lands at the top of the bitmap depends on the context, not on the
 // theme. Onyx2D's CPU bitmaps hold premultiplied components.
 #import <AppKit/AppKit.h>
+#include "window-frame-settle.h"
 #import <AppKit/NSMenuView.h>
 #import <AppKit/NSMenuWindow.h>
 #import <AppKit/NSPopUpView.h>
@@ -27,6 +28,7 @@ typedef struct { int w, h; unsigned char *p; } Raster;
 typedef struct { int r, g, b, a; } Pixel;
 
 static Raster raster(NSView *view) {
+    if ([[view window] isVisible] && !fixtureWaitForWindowFrame([view window],"control-theme")) { fprintf(stderr,"frame did not settle\n"); exit(2); }
     Raster r = {(int) NSWidth([view bounds]), (int) NSHeight([view bounds]), NULL};
     NSBitmapImageRep *rep = [[[NSBitmapImageRep alloc]
             initWithBitmapDataPlanes: NULL pixelsWide: r.w pixelsHigh: r.h bitsPerSample: 8

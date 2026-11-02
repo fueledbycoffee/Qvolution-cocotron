@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include "window-frame-settle.h"
 
 static unsigned failures,draws;
 static double started;
@@ -17,17 +18,6 @@ static id identified(NSView *parent,NSString *name) { for (NSView *view in [pare
 @implementation TimedTextView
 - (void)drawRect:(NSRect)rect { draws++;[super drawRect:rect]; }
 @end
-@interface LatencyPump:NSObject
-- (void)stop:(NSTimer *)timer;
-@end
-@implementation LatencyPump
-- (void)stop:(NSTimer *)timer { [NSApp stop:nil];[NSApp postEvent:[NSEvent otherEventWithType:NSApplicationDefined location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0]atStart:NO]; }
-@end
-static void pumpConfigure(void) {
-    LatencyPump *pump=[LatencyPump new];
-    NSTimer *timer=[NSTimer scheduledTimerWithTimeInterval:.25 target:pump selector:@selector(stop:)userInfo:nil repeats:NO];
-    [NSApp run];[timer invalidate];[pump release];
-}
 static NSString *fixedText(NSUInteger length) {
     NSString *line=@"The quick brown fox edits a real rich text document. 0123456789\n";
     NSMutableString *text=[NSMutableString string];
@@ -60,7 +50,7 @@ static void runWorkload(NSUInteger length,BOOL mapped) {
     expectLatency(NSHeight(used)>0,"fixed text lays out to nonempty rect");
     if (mapped) {
         begin("order_window");[window makeKeyAndOrderFront:nil];[window makeFirstResponder:view];end();
-        pumpConfigure();
+        if (!fixtureWaitForWindowFrame(window,"textedit-latency")) { failures++; [window orderOut:nil]; [window release]; [view release]; [scroll release]; return; }
         begin("first_display_after_event_pump");[window display];end();
     }
     NSBitmapImageRep *rep=[[NSBitmapImageRep alloc]initWithBitmapDataPlanes:NULL pixelsWide:640 pixelsHigh:480 bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
